@@ -3,7 +3,7 @@
 use crate::error::{TransportError, PROTOCOL_VIOLATION};
 use crate::frame::AckRanges;
 use crate::stream::Control;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::{Duration, Instant};
 
 pub const PACKET_THRESHOLD: u64 = 3;
@@ -213,6 +213,11 @@ pub struct SentSpace {
     pub loss_time: Option<Instant>,
     pub last_ack_eliciting: Option<Instant>,
     pub eliciting_in_flight: u64,
+    /// Packet numbers deliberately left unused (RFC 9000 §21.4): an ACK covering one comes from
+    /// an optimistic acker. The most recent few are kept.
+    pub skipped: VecDeque<u64>,
+    /// The packet number to skip next (0 means not scheduled yet).
+    pub skip_at: u64,
 }
 
 pub struct AckResult {
@@ -280,6 +285,9 @@ impl Recovery {
         let s = &mut self.spaces[space];
         if s.next_pn == 0 || ranges.largest >= s.next_pn {
             return Err(TransportError::frame(PROTOCOL_VIOLATION, 0x02, "ACK of an unsent packet"));
+        }
+        if s.skipped.iter().any(|&pn| ranges.iter().any(|(lo, hi)| lo <= pn && pn <= hi)) {
+            return Err(TransportError::frame(PROTOCOL_VIOLATION, 0x02, "ACK of a skipped packet number"));
         }
         let new_largest = s.largest_acked.is_none_or(|l| ranges.largest > l);
         if new_largest {

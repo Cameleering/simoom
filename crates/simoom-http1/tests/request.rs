@@ -110,7 +110,11 @@ fn target_rules() {
     assert_eq!(t("/%41%7e").target, b"/%41%7e");
     assert_eq!(t("http://example.com/x?y").form, TargetForm::Absolute);
     assert_eq!(t("http://[::1]:8080/x").form, TargetForm::Absolute);
-    assert_eq!(t("https://user@host:1/p").form, TargetForm::Absolute);
+    // Desync hardening: userinfo hides the authority (RFC 9110 §4.2.4), so it is refused;
+    // an `@` in the path is still fine.
+    assert_eq!(bad("https://user@host:1/p"), Error::InvalidTarget);
+    assert_eq!(bad("http://trusted@evil/"), Error::InvalidTarget);
+    assert_eq!(t("http://host/a@b").form, TargetForm::Absolute);
     for b in ["/%zz", "/%4", "/%", "/a#frag", "/a\"b", "/<x>", "/{x}", "/a\\b", "/a|b", "/a^b", "/a`b", "/[x]", "1http://x/", "http://h/[x]", "noscheme"] {
         assert_eq!(bad(b), Error::InvalidTarget, "{b}");
     }

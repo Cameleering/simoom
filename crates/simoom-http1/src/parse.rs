@@ -111,6 +111,14 @@ fn valid_absolute(t: &[u8], brackets: bool) -> bool {
     {
         return false;
     }
+    // userinfo hides the real authority (`http://trusted@evil/`): RFC 9110 §4.2.4 says to treat
+    // it as an error.
+    if let Some(rest) = t[colon + 1..].strip_prefix(b"//") {
+        let end = rest.iter().position(|&b| b == b'/' || b == b'?').unwrap_or(rest.len());
+        if rest[..end].contains(&b'@') {
+            return false;
+        }
+    }
     if !brackets {
         return true;
     }

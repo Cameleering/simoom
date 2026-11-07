@@ -390,15 +390,113 @@ fn simd_and_scalar_agree_on_fuzz_inputs() {
     let best = level();
     let mut rng = Rng(seed(7));
     let seeds = seeds();
-    let inputs: Vec<Vec<u8>> = (0..iters(5000))
-        .map(|i| if i % 2 == 0 { generate(&mut rng) } else { mutate(&mut rng, &seeds[i % seeds.len()]) })
-        .collect();
-    let run = |l: Level| {
-        assert!(force(l));
-        inputs.iter().map(|x| (parse_with(x, &Limits::default()), drive(&[x], &Limits::default()))).collect::<Vec<_>>()
+    // Inputs are compared in batches so a long run (SIMOOM_FUZZ_ITERS in the millions) keeps
+    // memory flat instead of holding every input at once.
+    let total = iters(5000);
+    let mut i = 0;
+    while i < total {
+        let n = (total - i).min(4096);
+        let inputs: Vec<Vec<u8>> = (i..i + n)
+            .map(|i| if i % 2 == 0 { generate(&mut rng) } else { mutate(&mut rng, &seeds[i % seeds.len()]) })
+            .collect();
+        let run = |l: Level| {
+            assert!(force(l));
+            inputs.iter().map(|x| (parse_with(x, &Limits::default()), drive(&[x], &Limits::default()))).collect::<Vec<_>>()
+        };
+        let a = run(best);
+        let b = run(Level::Scalar);
+        force(best);
+        assert_eq!(a, b);
+        i += n;
+    }
+}
+
+/// Coverage-guided fuzzing (plan §7.3 F2, std-only): SanitizerCoverage edge counters from
+/// `simoom_sys::sancov` decide which mutated inputs join the corpus. Every input goes through the
+/// split-invariance check and the differential comparison with the reference parser.
+///
+/// ```text
+/// RUSTFLAGS="-C passes=sancov-module -C llvm-args=-sanitizer-coverage-level=3 \
+///   -C llvm-args=-sanitizer-coverage-trace-pc-guard" SIMOOM_FUZZ_SECS=600 \
+///   cargo test --release -p simoom-http1 --features sancov --test fuzz coverage_guided -- --nocapture
+/// ```
+///
+/// Linux only (the MSVC back end rejects the instrumented COMDATs). Without the RUSTFLAGS the
+/// map stays empty and the test says so and returns.
+#[cfg(feature = "sancov")]
+#[test]
+fn coverage_guided() {
+    use simoom_sys::sancov;
+    let secs: u64 = std::env::var("SIMOOM_FUZZ_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(5);
+    let lims = [Limits::default(), Limits { max_head: 120, max_headers: 4, max_header_line: 48, max_request_line: 40, max_body: 64, max_chunk_line: 12, max_trailers: 16 }];
+    // AFL-style hit-count buckets, so loop counts matter a little but not every iteration.
+    fn bucket(n: u8) -> u8 {
+        match n {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            3 => 4,
+            4..=7 => 8,
+            8..=15 => 16,
+            16..=31 => 32,
+            32..=127 => 64,
+            _ => 128,
+        }
+    }
+    let run = |input: &[u8], rng: &mut Rng| {
+        for lim in &lims {
+            let whole = normalize(drive(&[input], lim));
+            let cuts = random_cuts(rng, input.len());
+            let split = normalize(drive_split(input, &cuts, lim));
+            check_split(&whole, &split, input, &cuts);
+        }
+        compare(input, &Limits::default());
     };
-    let a = run(best);
-    let b = run(Level::Scalar);
-    force(best);
-    assert_eq!(a, b);
+    let mut rng = Rng(seed(99));
+    let mut virgin = vec![0u8; sancov::MAP_SIZE];
+    let mut snap = Vec::new();
+    let mut corpus: Vec<Vec<u8>> = seeds();
+    corpus.extend((0..50).map(|_| generate(&mut rng)));
+    let mut novel = |input: &[u8], rng: &mut Rng, virgin: &mut Vec<u8>| -> bool {
+        sancov::reset();
+        run(input, rng);
+        sancov::snapshot(&mut snap);
+        let mut new = false;
+        for (v, &s) in virgin.iter_mut().zip(snap.iter()) {
+            let b = bucket(s);
+            if b & !*v != 0 {
+                *v |= b;
+                new = true;
+            }
+        }
+        new
+    };
+    for c in corpus.clone() {
+        novel(&c, &mut rng, &mut virgin);
+    }
+    if sancov::guards() == 0 {
+        eprintln!("coverage_guided: build not instrumented (set the RUSTFLAGS in the doc comment); skipped");
+        return;
+    }
+    let start = std::time::Instant::now();
+    let mut execs = 0u64;
+    while start.elapsed().as_secs() < secs {
+        let parent = corpus[rng.below(corpus.len())].clone();
+        let mut child = mutate(&mut rng, &parent);
+        if rng.chance(4) {
+            // splice with another corpus entry
+            let other = &corpus[rng.below(corpus.len())];
+            let at = rng.below(child.len() + 1);
+            let from = rng.below(other.len() + 1);
+            child.truncate(at);
+            child.extend_from_slice(&other[from..]);
+        }
+        child.truncate(4096);
+        execs += 1;
+        if novel(&child, &mut rng, &mut virgin) {
+            corpus.push(child);
+        }
+    }
+    let edges = virgin.iter().filter(|&&v| v != 0).count();
+    eprintln!("coverage_guided: {execs} execs in {secs} s, corpus {}, edges {edges} of {} guards", corpus.len(), sancov::guards());
 }

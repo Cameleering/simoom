@@ -173,12 +173,37 @@ impl RecvStream {
             pieces.push((cur, end));
         }
         for (s, e) in pieces {
-            let a = (s - off) as usize;
-            let b = (e - off) as usize;
-            self.ooo.insert(s, d[a..b].to_vec());
+            let piece = &d[(s - off) as usize..(e - off) as usize];
+            // Coalesce with the chunk ending at `s` and the one starting at `e`, so the map
+            // holds one entry per gap rather than one per frame.
+            let mut key = s;
+            let mut buf = match self.ooo.range(..s).next_back() {
+                Some((&k, v)) if k + v.len() as u64 == s => {
+                    key = k;
+                    let mut v = self.ooo.remove(&k).unwrap();
+                    v.extend_from_slice(piece);
+                    v
+                }
+                _ => piece.to_vec(),
+            };
+            if let Some(next) = self.ooo.remove(&e) {
+                buf.extend_from_slice(&next);
+            }
+            self.ooo.insert(key, buf);
         }
     }
+
+    /// Out-of-order chunks (gaps) currently buffered.
+    fn gaps(&self) -> usize {
+        self.ooo.len()
+    }
 }
+
+/// Out-of-order chunks one stream may buffer. Adjacent chunks are merged, so this bounds the
+/// number of holes, not the data: honest loss leaves a few holes per stream, while a peer that
+/// sends one byte at every other offset would otherwise cost a heap allocation and a tree node
+/// per byte of flow-control window.
+pub const MAX_RECV_GAPS: usize = 1024;
 
 pub struct Stream {
     pub send: Option<SendStream>,
@@ -389,6 +414,9 @@ impl Streams {
         }
         let before = r.contiguous_end();
         r.insert(off, data);
+        if r.gaps() > MAX_RECV_GAPS {
+            return Err(TransportError::frame(PROTOCOL_VIOLATION, ty, "too many out-of-order stream fragments"));
+        }
         let readable = r.contiguous_end() > before || (r.final_size == Some(r.contiguous_end()) && !r.fin_delivered);
         if readable && !r.notified {
             r.notified = true;
@@ -976,6 +1004,66 @@ mod tests {
         assert_eq!(&out[..n], b"abcdefghijkl");
         assert!(fin);
         assert_eq!(s.events.iter().filter(|e| matches!(e, StreamEvent::Readable(0))).count(), 1);
+    }
+
+    fn wide() -> Streams {
+        let w = 1 << 20;
+        Streams::new(
+            true,
+            StreamConfig {
+                max_streams_bidi: 4,
+                max_streams_uni: 4,
+                stream_window_bidi_local: w,
+                stream_window_bidi_remote: w,
+                stream_window_uni: w,
+                conn_window: w,
+                send_buffer: 1000,
+            },
+        )
+    }
+
+    fn gaps(s: &Streams, id: u64) -> usize {
+        s.map.get(&id).unwrap().recv.as_ref().unwrap().gaps()
+    }
+
+    #[test]
+    fn adjacent_out_of_order_chunks_merge_and_reassemble() {
+        // Chunks of 1..=7 bytes over 0..2000 delivered out of order (odd ones, then even ones,
+        // then all again as duplicates): adjacent buffered chunks merge, so the map holds one
+        // entry per gap, and the data comes out intact.
+        let data: Vec<u8> = (0..2000u32).map(|i| (i * 31 % 251) as u8).collect();
+        let mut chunks = Vec::new();
+        let mut off = 0usize;
+        while off < data.len() {
+            let end = (off + 1 + off % 7).min(data.len());
+            chunks.push((off, end));
+            off = end;
+        }
+        let mut st = wide();
+        let odd = (1..chunks.len()).filter(|i| i % 2 == 1);
+        let even = (1..chunks.len()).filter(|i| i % 2 == 0);
+        for i in odd.chain(even).chain(1..chunks.len()) {
+            let (a, b) = chunks[i];
+            st.on_stream(0, a as u64, &data[a..b], b == data.len()).unwrap();
+            assert!(gaps(&st, 0) <= chunks.len() / 2 + 1);
+        }
+        assert_eq!(gaps(&st, 0), 1, "everything after the first hole merged into one chunk");
+        st.on_stream(0, 0, &data[..chunks[0].1], false).unwrap();
+        let mut out = vec![0u8; 4096];
+        let (n, fin) = st.read(0, &mut out).unwrap();
+        assert_eq!(&out[..n], &data[..]);
+        assert!(fin);
+    }
+
+    #[test]
+    fn too_many_out_of_order_gaps_is_an_error() {
+        let mut st = wide();
+        for i in 0..MAX_RECV_GAPS as u64 {
+            st.on_stream(0, 2 + 2 * i, b"x", false).unwrap();
+        }
+        assert_eq!(gaps(&st, 0), MAX_RECV_GAPS);
+        let e = st.on_stream(0, 2 + 2 * MAX_RECV_GAPS as u64, b"x", false).unwrap_err();
+        assert_eq!(e.code, PROTOCOL_VIOLATION);
     }
 
     #[test]

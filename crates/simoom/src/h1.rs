@@ -307,7 +307,11 @@ impl H1 {
         self.head_only = req.method == b"HEAD";
         self.http10 = req.version == simoom_http1::Version::Http10;
         let max = io.sh.limits.max_requests_per_connection;
-        self.close_after = !req.keep_alive || self.stopping || (max != 0 && self.requests >= max);
+        // CONNECT closes the connection after its response: simoom is no tunnel, and a front
+        // proxy that saw a 2xx switches to tunnelling, so whatever follows the CONNECT head
+        // must never be parsed as further requests (desync).
+        let connect = req.form == simoom_http1::TargetForm::Authority;
+        self.close_after = !req.keep_alive || connect || self.stopping || (max != 0 && self.requests >= max);
         let hl = req.head_len;
         #[cfg(feature = "http2")]
         if io.sh.http2 && req.upgrade.is_some() && self.h2c(io, req) {
@@ -446,6 +450,15 @@ impl H1 {
         let sh = io.sh;
         let version = if self.http10 { Version::Http10 } else { Version::Http11 };
         let mut r = Request::new(req.method, req.target, version, HeaderView::H1(req.headers));
+        if req.form == simoom_http1::TargetForm::Absolute {
+            // RFC 9112 §3.2.2: with an absolute-form target the authority comes from the target
+            // and Host is ignored, so the service never sees a Host that differs from where the
+            // request was addressed; the path is the target's path and query.
+            if let Some((auth, rest)) = split_absolute(req.target) {
+                r.authority = Some(auth);
+                r.target = if rest.is_empty() { b"/" } else { rest };
+            }
+        }
         r.body = body;
         r.peer = io.peer;
         r.secure = io.secure;
@@ -771,4 +784,12 @@ impl Target for H1Target<'_, '_, '_> {
         self.state = TState::Upgraded;
         true
     }
+}
+
+/// `scheme://authority/path?query` to (authority, `/path?query`); `None` without `//`.
+fn split_absolute(t: &[u8]) -> Option<(&[u8], &[u8])> {
+    let colon = t.iter().position(|&b| b == b':')?;
+    let rest = t[colon + 1..].strip_prefix(b"//")?;
+    let end = rest.iter().position(|&b| b == b'/' || b == b'?').unwrap_or(rest.len());
+    Some((&rest[..end], &rest[end..]))
 }

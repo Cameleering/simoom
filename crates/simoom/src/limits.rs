@@ -41,6 +41,10 @@ pub struct Limits {
     pub max_connections: usize,
     /// Connections per loop thread. Default 1 Mi.
     pub max_connections_per_loop: usize,
+    /// Open connections per client IP address (TCP listeners); more are accepted and closed at
+    /// once and counted in [`crate::Stats::rejected`]. 0 (the default) means no cap: behind a
+    /// proxy or a NAT every client shares one address.
+    pub max_connections_per_ip: usize,
     /// HTTP/2 and HTTP/3: concurrent streams whose handler work is running. Default 100.
     pub max_concurrent_streams: u32,
     /// HTTP/2 header list (CONTINUATION included) and HTTP/3 field section, in bytes.
@@ -86,6 +90,7 @@ impl Default for Limits {
             max_requests_per_connection: 0,
             max_connections: 1 << 20,
             max_connections_per_loop: 1 << 20,
+            max_connections_per_ip: 0,
             max_concurrent_streams: 100,
             max_header_list: 16 * 1024,
             header_table_size: 4096,

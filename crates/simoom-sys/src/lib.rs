@@ -24,3 +24,6 @@ pub mod driver;
 pub mod net;
 pub mod time;
 pub mod udp;
+/// SanitizerCoverage callbacks for the coverage-guided fuzzer (test-only, feature `sancov`).
+#[cfg(feature = "sancov")]
+pub mod sancov;

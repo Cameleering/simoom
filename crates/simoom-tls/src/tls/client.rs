@@ -177,6 +177,9 @@ impl ClientHs {
     }
 
     fn server_hello(&mut self, msg: &[u8], body: &[u8]) -> Result<()> {
+        /// RFC 8446 section 4.1.3 downgrade sentinels ("DOWNGRD" then 1 or 0).
+        const DOWNGRADE_TLS12: [u8; 8] = [0x44, 0x4f, 0x57, 0x4e, 0x47, 0x52, 0x44, 0x01];
+        const DOWNGRADE_TLS11: [u8; 8] = [0x44, 0x4f, 0x57, 0x4e, 0x47, 0x52, 0x44, 0x00];
         let mut r = Reader::new(body, "ServerHello");
         let version = r.u16()?;
         let random = r.take(32)?;
@@ -186,6 +189,11 @@ impl ClientHs {
         let exts = parse_extensions(r.vec16()?)?;
         r.finish()?;
         let selected_version = find_ext(&exts, ext::SUPPORTED_VERSIONS);
+        if selected_version != Some(&[3, 4][..]) && (random[24..] == DOWNGRADE_TLS12 || random[24..] == DOWNGRADE_TLS11) {
+            // RFC 8446 section 4.1.3: a TLS 1.3 client that sees the downgrade sentinel in a
+            // ServerHello for an older version must abort with illegal_parameter.
+            return Err(Error::proto(alert::ILLEGAL_PARAMETER, "downgrade sentinel in ServerHello.random"));
+        }
         if version != 0x0303 || selected_version != Some(&[3, 4][..]) {
             return Err(Error::proto(alert::PROTOCOL_VERSION, "server did not select TLS 1.3"));
         }

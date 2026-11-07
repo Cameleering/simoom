@@ -187,7 +187,11 @@ impl Endpoint {
                 }
             }
         }
-        let hs = slot.conn.is_handshaking();
+        // A connection counts as handshaking (for the Retry threshold) until it is
+        // established, including when it fails and closes during the handshake: otherwise
+        // a flood of bad ClientHellos from spoofed addresses would leave closing
+        // connections that never trigger Retry.
+        let hs = slot.handshaking && !slot.conn.is_established();
         if slot.handshaking && !hs {
             self.handshaking -= 1;
         }

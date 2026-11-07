@@ -27,6 +27,12 @@ const MAX_PENDING_APP: usize = 1 << 20;
 /// Records sent under one key before an automatic KeyUpdate (well below the AES-GCM limit of
 /// 2^24.5 full-size records, RFC 8446 section 5.5).
 const KEY_UPDATE_AFTER: u64 = 1 << 23;
+/// Consecutive received records that deliver nothing to the application (empty application
+/// data, user_canceled warnings, KeyUpdates) before the peer is treated as hostile. Each one
+/// costs a decryption, and a KeyUpdate with update_requested also a reply, so a flood of them
+/// is a cheap way to burn CPU and grow output (the many-empty-records and alert-flood DoS
+/// class). OpenSSL uses the same bound for empty records.
+const MAX_IDLE_RECORDS: u32 = 32;
 
 /// What [`Connection::process_new_packets`] left for the caller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +93,8 @@ pub struct Connection {
     sent_first: bool,
     /// Rejected 0-RTT bytes skipped so far (server); usize::MAX once skipping has ended.
     early_skipped: usize,
+    /// Consecutive received records that delivered nothing ([`MAX_IDLE_RECORDS`]).
+    idle_records: u32,
 }
 
 impl std::fmt::Debug for Connection {
@@ -130,6 +138,7 @@ impl Connection {
             ccs_seen: 0,
             sent_first: false,
             early_skipped: 0,
+            idle_records: 0,
         };
         if let Err(e) = c.drain_events() {
             c.error = Some(e);
@@ -265,6 +274,11 @@ impl Connection {
                     if self.read_level != Level::OneRtt || !self.engine.shared().done && !self.engine.is_client() {
                         return Err(Error::unexpected("application data during the handshake"));
                     }
+                    if range.is_empty() {
+                        self.idle_record()?;
+                        continue;
+                    }
+                    self.idle_records = 0;
                     if self.plain_pos == self.plain.len() {
                         self.plain.clear();
                         self.plain_pos = 0;
@@ -285,7 +299,7 @@ impl Connection {
                     let d = self.rx[range.start + 1];
                     match d {
                         alert::CLOSE_NOTIFY => self.peer_closed = true,
-                        alert::USER_CANCELED => {}
+                        alert::USER_CANCELED => self.idle_record()?,
                         _ => return Err(Error::PeerAlert(d)),
                     }
                 }
@@ -295,6 +309,15 @@ impl Connection {
         if self.rx_pos == self.rx.len() {
             self.rx.clear();
             self.rx_pos = 0;
+        }
+        Ok(())
+    }
+
+    /// Counts a received record that delivered nothing; too many in a row is fatal.
+    fn idle_record(&mut self) -> Result<()> {
+        self.idle_records += 1;
+        if self.idle_records > MAX_IDLE_RECORDS {
+            return Err(Error::unexpected("too many consecutive empty records, warnings or KeyUpdates"));
         }
         Ok(())
     }
@@ -316,9 +339,11 @@ impl Connection {
         let max = self.engine.shared().max_message;
         while let Some((level, msg)) = self.hs.next(max)? {
             if self.engine.shared().done && msg[0] == hs::KEY_UPDATE {
+                self.idle_record()?;
                 self.key_update_received(&msg)?;
                 continue;
             }
+            self.idle_records = 0;
             self.engine.handle(level, &msg)?;
             self.drain_events()?;
             let want = self.engine.shared().expect_level;
@@ -372,11 +397,18 @@ impl Connection {
                 Event::Secrets { level, client, server } => {
                     self.flush_hs()?;
                     self.secrets[idx(level)] = Some((client, server));
+                    // After its Finished the server writes under its application traffic key
+                    // (RFC 8446 sections 4.4.4 and 7.1): the client reads with that key from
+                    // then on, so an alert for a rejected client certificate or Finished must
+                    // use it, or the client sees bad_record_mac instead of the alert.
+                    if level == Level::OneRtt && !self.engine.is_client() {
+                        self.switch_write(Level::OneRtt)?;
+                    }
                 }
             }
         }
         self.flush_hs()?;
-        if self.engine.shared().done && self.write_level != Level::OneRtt {
+        if self.engine.shared().done {
             self.switch_write(Level::OneRtt)?;
             if !self.pending_app.is_empty() {
                 let data = std::mem::take(&mut self.pending_app);
@@ -719,5 +751,138 @@ mod tests {
             s.read_tls(&fake_early);
             assert_eq!(s.process_new_packets().unwrap_err().alert(), Some(alert::BAD_RECORD_MAC));
         }
+    }
+
+    fn handshaken() -> (ClientConnection, ServerConnection) {
+        let ss = certgen::issue(&CertParams::server(&["localhost"]), PrivateKey::generate_ec(EcCurve::P256), None);
+        let scfg = Arc::new(ServerConfig::new(CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap()));
+        let mut roots = RootStore::empty();
+        roots.add_der(&ss.cert_der).unwrap();
+        let mut c = ClientConnection::new(Arc::new(ClientConfig::new(roots)), "localhost").unwrap();
+        let mut s = ServerConnection::new(scfg);
+        for _ in 0..10 {
+            move_bytes(&mut c, &mut s, &[]).unwrap();
+            move_bytes(&mut s, &mut c, &[]).unwrap();
+        }
+        assert!(!c.is_handshaking() && !s.is_handshaking());
+        (c, s)
+    }
+
+    /// Seals one record with the client's current write key, as a misbehaving peer would.
+    fn forge(c: &mut ClientConnection, typ: u8, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        c.0.write.as_mut().unwrap().seal_record(typ, payload, &mut out).unwrap();
+        out
+    }
+
+    fn feed(s: &mut ServerConnection, data: &[u8]) -> Result<IoState> {
+        let mut off = 0;
+        loop {
+            off += s.read_tls(&data[off..]);
+            let r = s.process_new_packets();
+            if r.is_err() || off == data.len() {
+                return r;
+            }
+        }
+    }
+
+    #[test]
+    fn empty_record_flood_is_bounded() {
+        let (mut c, mut s) = handshaken();
+        // up to the bound is tolerated, and real data resets the count
+        let mut burst = Vec::new();
+        for _ in 0..MAX_IDLE_RECORDS {
+            burst.extend(forge(&mut c, content::APPLICATION_DATA, &[]));
+        }
+        burst.extend(forge(&mut c, content::APPLICATION_DATA, b"x"));
+        for _ in 0..MAX_IDLE_RECORDS {
+            burst.extend(forge(&mut c, content::APPLICATION_DATA, &[]));
+        }
+        feed(&mut s, &burst).unwrap();
+        assert_eq!(s.plaintext(), b"x");
+        // one more in a row is fatal
+        let more = forge(&mut c, content::APPLICATION_DATA, &[]);
+        assert_eq!(feed(&mut s, &more).unwrap_err().alert(), Some(alert::UNEXPECTED_MESSAGE));
+    }
+
+    #[test]
+    fn warning_alert_flood_is_bounded() {
+        let (mut c, mut s) = handshaken();
+        let mut flood = Vec::new();
+        for _ in 0..1000 {
+            flood.extend(forge(&mut c, content::ALERT, &[1, alert::USER_CANCELED]));
+        }
+        assert_eq!(feed(&mut s, &flood).unwrap_err().alert(), Some(alert::UNEXPECTED_MESSAGE));
+        // any other alert, warning level or not, is fatal in TLS 1.3 (RFC 8446 section 6)
+        let (mut c, mut s) = handshaken();
+        let a = forge(&mut c, content::ALERT, &[1, alert::UNSUPPORTED_CERTIFICATE]);
+        assert_eq!(feed(&mut s, &a).unwrap_err(), Error::PeerAlert(alert::UNSUPPORTED_CERTIFICATE));
+    }
+
+    #[test]
+    fn key_update_flood_is_bounded() {
+        let (mut c, mut s) = handshaken();
+        // each KeyUpdate with update_requested would make the server answer with its own
+        let mut flood = Vec::new();
+        for _ in 0..200 {
+            flood.extend(forge(&mut c, content::HANDSHAKE, &[hs::KEY_UPDATE, 0, 0, 1, 1]));
+            let next = next_traffic_secret(c.suite().hash(), &c.0.write_secret);
+            c.0.write_secret = next.clone();
+            c.0.write = Some(RecordCipher::new(c.suite(), &next));
+        }
+        assert_eq!(feed(&mut s, &flood).unwrap_err().alert(), Some(alert::UNEXPECTED_MESSAGE));
+        // the replies stayed bounded by the limit
+        assert!(s.tls_output().len() < (MAX_IDLE_RECORDS as usize + 2) * 64, "{} bytes queued", s.tls_output().len());
+    }
+
+    #[test]
+    fn renegotiation_is_unexpected_message() {
+        let (mut c, mut s) = handshaken();
+        // a ClientHello (or any handshake message but KeyUpdate) after the handshake
+        let ch = forge(&mut c, content::HANDSHAKE, &[hs::CLIENT_HELLO, 0, 0, 4, 3, 3, 0, 0]);
+        assert_eq!(feed(&mut s, &ch).unwrap_err().alert(), Some(alert::UNEXPECTED_MESSAGE));
+        // the client reads the alert under the server's application key
+        move_bytes(&mut s, &mut c, &[]).unwrap_err();
+        assert_eq!(c.error(), Some(&Error::PeerAlert(alert::UNEXPECTED_MESSAGE)));
+    }
+
+    #[test]
+    fn oversized_records_are_record_overflow() {
+        // protected: a ciphertext over 2^14 + 256 is refused from its header alone
+        let (_, mut s) = handshaken();
+        let len = MAX_CIPHERTEXT + 1;
+        let hdr = [content::APPLICATION_DATA, 3, 3, (len >> 8) as u8, len as u8];
+        assert_eq!(feed(&mut s, &hdr).unwrap_err().alert(), Some(alert::RECORD_OVERFLOW));
+        // unprotected: a plaintext handshake record over 2^14
+        let scfg = {
+            let ss = certgen::issue(&CertParams::server(&["localhost"]), PrivateKey::generate_ec(EcCurve::P256), None);
+            Arc::new(ServerConfig::new(CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap()))
+        };
+        let mut s = ServerConnection::new(scfg);
+        let len = MAX_PLAINTEXT + 1;
+        let mut rec = vec![content::HANDSHAKE, 3, 1, (len >> 8) as u8, len as u8];
+        rec.resize(5 + len, 0);
+        assert_eq!(feed(&mut s, &rec).unwrap_err().alert(), Some(alert::RECORD_OVERFLOW));
+    }
+
+    #[test]
+    fn rejected_early_data_beyond_the_budget_is_fatal() {
+        let ss = certgen::issue(&CertParams::server(&["localhost"]), PrivateKey::generate_ec(EcCurve::P256), None);
+        let scfg = Arc::new(ServerConfig::new(CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap()));
+        let mut roots = RootStore::empty();
+        roots.add_der(&ss.cert_der).unwrap();
+        TEST_OFFER_EARLY_DATA.with(|f| f.set(true));
+        let mut c = ClientConnection::new(Arc::new(ClientConfig::new(roots)), "localhost").unwrap();
+        TEST_OFFER_EARLY_DATA.with(|f| f.set(false));
+        let mut s = ServerConnection::new(scfg);
+        let mut flight = c.tls_output().to_vec();
+        c.consume_tls_output(flight.len());
+        // 0-RTT the server did not accept: skipped up to 64 KiB (RFC 8446 section 4.2.10), then
+        // treated as the forgery it is
+        let rec: Vec<u8> = [23u8, 3, 3, 0x10, 0].iter().copied().chain(std::iter::repeat_n(0x5a, 0x1000)).collect();
+        for _ in 0..17 {
+            flight.extend_from_slice(&rec);
+        }
+        assert_eq!(feed(&mut s, &flight).unwrap_err().alert(), Some(alert::BAD_RECORD_MAC));
     }
 }

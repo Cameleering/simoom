@@ -241,10 +241,39 @@ fn continuation_flood() {
         raw.raw(kind::CONTINUATION, 0, 1, &[]);
     }
     calm(&mut srv, &raw.take());
-    // one HEADERS with a fragment above the cap
+    // one HEADERS with a fragment above the block cap (twice the list limit)
     let (mut srv, mut raw) = server(Config { max_header_list_size: 1000, ..quiet() });
-    raw.raw(kind::HEADERS, 0, 1, &[0u8; 1001]);
+    raw.raw(kind::HEADERS, 0, 1, &[0u8; 2001]);
     calm(&mut srv, &raw.take());
+}
+
+#[test]
+fn header_block_over_the_list_limit_gets_431_not_goaway() {
+    // A plain literal larger than SETTINGS_MAX_HEADER_LIST_SIZE (advisory, RFC 9113 §10.5.1):
+    // the stream gets 431 (plan §7.1) and the connection, with its other streams, survives.
+    let (mut srv, mut raw) = server(Config { max_header_list_size: 1024, ..quiet() });
+    let big = "v".repeat(1500);
+    let mut fields = GET.to_vec();
+    fields.push(("x-big", big.as_str()));
+    raw.headers(1, &fields, true);
+    let (evs, frames) = feed(&mut srv, &raw.take(), 1);
+    assert_eq!(headers_events(&evs), 0);
+    assert_eq!(goaway(&frames), None);
+    let h: Vec<_> = frames.iter().filter(|f| f.h.kind == kind::HEADERS && f.h.stream == 1).collect();
+    assert_eq!(h.len(), 1);
+    let mut d = simoom_hpack::Decoder::new(4096, 1 << 20);
+    let mut status = Vec::new();
+    d.decode(&h[0].p, &mut |n: &[u8], v: &[u8]| {
+        if n == b":status" {
+            status = v.to_vec()
+        }
+    })
+    .unwrap();
+    assert_eq!(status, b"431");
+    raw.get(3);
+    let (evs, frames) = feed(&mut srv, &raw.take(), 1);
+    assert_eq!(goaway(&frames), None);
+    assert_eq!(headers_events(&evs), 1);
 }
 
 #[test]

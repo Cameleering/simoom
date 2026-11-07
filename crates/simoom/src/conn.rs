@@ -174,6 +174,8 @@ pub(crate) struct Conn {
     wq_last: usize,
     wq_since: u64,
     closing: bool,
+    /// Held for the connection's life when connections per IP are capped.
+    _ip_slot: Option<crate::server::IpSlot>,
 }
 
 /// Initial layer for plain TCP: HTTP/1.1 (which detects the HTTP/2 preface).
@@ -196,7 +198,7 @@ fn initial(sh: &Shared, now: u64) -> Box<dyn Layer> {
 }
 
 impl Conn {
-    pub(crate) fn new(sh: Arc<Shared>, info: &ConnInfo, secure: bool) -> Conn {
+    pub(crate) fn new(sh: Arc<Shared>, info: &ConnInfo, secure: bool, ip_slot: Option<crate::server::IpSlot>) -> Conn {
         let _ = &secure;
         Conn {
             #[cfg(feature = "tls")]
@@ -212,6 +214,7 @@ impl Conn {
             wq_last: 0,
             wq_since: 0,
             closing: false,
+            _ip_slot: ip_slot,
             sh,
         }
     }

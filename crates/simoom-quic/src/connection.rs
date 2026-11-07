@@ -99,6 +99,12 @@ enum State {
     Drained,
 }
 
+/// Average spacing of skipped 1-RTT packet numbers (optimistic-ACK detection).
+const PN_SKIP_PERIOD: u64 = 256;
+
+/// Bookkeeping charged per buffered out-of-order CRYPTO chunk (map entry and Vec header).
+const CRYPTO_CHUNK_OVERHEAD: usize = 64;
+
 /// Out-of-order CRYPTO reassembly for one level.
 #[derive(Default)]
 struct CryptoIn {
@@ -229,6 +235,8 @@ pub struct Connection {
     received_new_token: Option<Vec<u8>>,
     handshake_done_pending: bool,
     ping_pending: bool,
+    /// Test hook: raw frame bytes written verbatim into the next 1-RTT packet.
+    raw_frames: Vec<u8>,
     close: Option<(u64, Option<u64>, Vec<u8>)>,
     close_sent_count: u32,
     close_recv_count: u32,
@@ -317,6 +325,7 @@ impl Connection {
             received_new_token: None,
             handshake_done_pending: false,
             ping_pending: false,
+            raw_frames: Vec::new(),
             close: None,
             close_sent_count: 0,
             close_recv_count: 0,
@@ -557,6 +566,28 @@ impl Connection {
     }
     /// Sends a PING (keep-alive).
     pub fn ping(&mut self) {
+        self.ping_pending = true;
+    }
+
+    /// Test hook for adversarial tests: the largest 1-RTT packet number sent so far. Not part
+    /// of the stable API.
+    #[doc(hidden)]
+    pub fn largest_sent_packet_number(&self) -> Option<u64> {
+        let sp = &self.recovery.spaces[2];
+        let last = sp.next_pn.checked_sub(1)?;
+        if sp.skipped.back() == Some(&last) {
+            last.checked_sub(1)
+        } else {
+            Some(last)
+        }
+    }
+
+    /// Test hook for adversarial tests: `frames` (already encoded) are written verbatim into
+    /// the next 1-RTT packet, so a misbehaving peer can be played through the real packet
+    /// protection. Not part of the stable API.
+    #[doc(hidden)]
+    pub fn send_raw_frames(&mut self, frames: &[u8]) {
+        self.raw_frames.extend_from_slice(frames);
         self.ping_pending = true;
     }
 
@@ -1054,11 +1085,14 @@ impl Connection {
             return Ok(());
         }
         if offset > ci.read {
-            if end - ci.read > cap as u64 || ci.ooo_bytes + data.len() > cap {
+            // Each buffered chunk is charged its bookkeeping too, so a flood of tiny
+            // out-of-order frames cannot hold far more memory than the buffer size.
+            let charge = data.len() + CRYPTO_CHUNK_OVERHEAD;
+            if end - ci.read > cap as u64 || ci.ooo_bytes + charge > cap {
                 return Err(TransportError::frame(CRYPTO_BUFFER_EXCEEDED, frame::CRYPTO, "CRYPTO buffer exceeded"));
             }
             if !ci.ooo.contains_key(&offset) {
-                ci.ooo_bytes += data.len();
+                ci.ooo_bytes += charge;
                 ci.ooo.insert(offset, data.to_vec());
             }
             return Ok(());
@@ -1074,7 +1108,7 @@ impl Connection {
                 break;
             }
             let chunk = ci.ooo.pop_first().unwrap().1;
-            ci.ooo_bytes -= chunk.len();
+            ci.ooo_bytes -= chunk.len() + CRYPTO_CHUNK_OVERHEAD;
             let e = o + chunk.len() as u64;
             if e <= ci.read {
                 continue;
@@ -1247,7 +1281,7 @@ impl Connection {
         }
         if seq < self.retire_prior_to {
             // Already retired by an earlier retire_prior_to.
-            self.pending_retire.push_back(seq);
+            self.queue_retire(seq)?;
             return Ok(());
         }
         self.remote_cids.push(RemoteCid { seq, cid, token: Some(token) });
@@ -1258,7 +1292,7 @@ impl Connection {
             while i < self.remote_cids.len() {
                 if self.remote_cids[i].seq < rpt {
                     let c = self.remote_cids.remove(i);
-                    self.pending_retire.push_back(c.seq);
+                    self.queue_retire(c.seq)?;
                 } else {
                     i += 1;
                 }
@@ -1273,6 +1307,26 @@ impl Connection {
         if self.remote_cids.len() as u64 > self.cfg.transport.active_connection_id_limit {
             return Err(TransportError::frame(CONNECTION_ID_LIMIT_ERROR, ty, "too many connection IDs"));
         }
+        Ok(())
+    }
+
+    /// Queues a RETIRE_CONNECTION_ID. Duplicates are dropped, and a peer that makes us queue
+    /// more retirements than a few times its CID limit is closed with
+    /// CONNECTION_ID_LIMIT_ERROR (RFC 9000 §5.1.2), so NEW_CONNECTION_ID frames that raise
+    /// retire_prior_to (or replay old sequence numbers) cannot grow the queue without bound.
+    fn queue_retire(&mut self, seq: u64) -> Result<(), TransportError> {
+        if self.pending_retire.contains(&seq) {
+            return Ok(());
+        }
+        let cap = (self.cfg.transport.active_connection_id_limit.max(2) * 8) as usize;
+        if self.pending_retire.len() >= cap {
+            return Err(TransportError::frame(
+                CONNECTION_ID_LIMIT_ERROR,
+                frame::NEW_CONNECTION_ID,
+                "too many connection IDs waiting to be retired",
+            ));
+        }
+        self.pending_retire.push_back(seq);
         Ok(())
     }
 
@@ -1667,7 +1721,7 @@ impl Connection {
                 || self.new_token_pending
                 || !self.streams.control.is_empty()
                 || self.streams.has_pending_data()
-                || (self.probe_allowed && self.mtu_probe.is_some() && !self.mtu_probe_inflight);
+                || (self.probe_allowed && self.mtu_probe.is_some() && !self.mtu_probe_inflight && self.recovery.rtt.has_sample);
         }
         false
     }
@@ -1740,9 +1794,13 @@ impl Connection {
             }
             let Some(mut b) = self.begin_packet(buf, space) else { continue };
             let limit = dstart + limit_total - tag;
+            // An ACK-only packet goes out only when an ACK is due; otherwise "data" that
+            // writes nothing would send ACK-only packets in a loop at one instant.
+            let ack_due = ack || self.spaces[space].unacked_eliciting > 0;
             self.write_frames(now, buf, &mut b, limit, closing, cc_limited);
-            if b.frames.is_empty() && buf.len() == b.pn_at + b.pn_len && !closing {
-                // Nothing fit: roll back.
+            let ack_only = b.frames.iter().all(|f| matches!(f, SentFrame::Ack(_)));
+            if !closing && ((b.frames.is_empty() && buf.len() == b.pn_at + b.pn_len) || (ack_only && !ack_due)) {
+                // Nothing (useful) fit: roll back.
                 buf.truncate(b.start);
                 continue;
             }
@@ -1985,6 +2043,12 @@ impl Connection {
             if self.streams.has_pending_data() {
                 self.recovery.app_limited = false;
             }
+            if !self.raw_frames.is_empty() && buf.len() + self.raw_frames.len() <= limit {
+                buf.extend_from_slice(&self.raw_frames);
+                self.raw_frames.clear();
+                b.frames.push(SentFrame::Ping);
+                b.eliciting = true;
+            }
             if self.ping_pending && buf.len() < limit {
                 frame::put_simple(buf, frame::PING, &[]);
                 self.ping_pending = false;
@@ -2037,6 +2101,23 @@ impl Connection {
         let size = buf.len() - b.start;
         let sp = &mut self.recovery.spaces[b.space];
         sp.next_pn = b.pn + 1;
+        if b.space == 2 {
+            // Skip a 1-RTT packet number now and then, at random, to catch optimistic ACKs
+            // (RFC 9000 §21.4); on average one in PN_SKIP_PERIOD packets.
+            if sp.next_pn >= sp.skip_at {
+                if sp.skip_at != 0 {
+                    sp.skipped.push_back(sp.next_pn);
+                    if sp.skipped.len() > 4 {
+                        sp.skipped.pop_front();
+                    }
+                    sp.next_pn += 1;
+                }
+                let mut r = [0u8; 2];
+                self.cfg.provider.fill_random(&mut r);
+                let jitter = u64::from(u16::from_le_bytes(r)) % PN_SKIP_PERIOD;
+                sp.skip_at = sp.next_pn + PN_SKIP_PERIOD / 2 + jitter;
+            }
+        }
         if b.eliciting && !self.eliciting_since_recv {
             // The idle timer restarts on the first ack-eliciting packet after receiving.
             self.eliciting_since_recv = true;
@@ -2084,5 +2165,44 @@ impl SentPacket {
             .iter()
             .find_map(|f| if let SentFrame::MtuProbe(s) = f { Some(*s as usize) } else { None })
             .unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::Config;
+    use crate::crypto::null::NullProvider;
+    use crate::sim::{Link, Pair};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// Regression (fuzz seed 7000098): a server whose handshake completed without an RTT
+    /// sample (a client that never ACKs) had a PMTU probe "pending" that could not be built,
+    /// so every `poll_transmit` at the same instant produced another ACK-only packet: an
+    /// unbounded loop of datagrams and a busy event loop.
+    #[test]
+    fn unbuildable_mtu_probe_does_not_spin_ack_only_packets() {
+        let cfg = |seed| Arc::new(Config::new(Arc::new(NullProvider::new(seed))));
+        let mut p = Pair::new(cfg(1), cfg(2), Link::default(), 1);
+        let c = p.connect();
+        let ok = p.run_until(Duration::from_secs(30), |p| {
+            p.client.conn(c).is_some_and(|x| x.is_established()) && p.server_conn().and_then(|s| p.server.conn(s)).is_some_and(|x| x.is_established())
+        });
+        assert!(ok);
+        p.run_for(Duration::from_millis(200));
+        let s = p.server_conn().unwrap();
+        let now = p.now;
+        let conn = p.server.conn_mut(s).unwrap();
+        conn.recovery.rtt.has_sample = false;
+        conn.mtu_probe = Some((1400, 0));
+        conn.mtu_probe_inflight = false;
+        // Something to acknowledge, so the first packet may be an ACK.
+        conn.spaces[2].unacked_eliciting = 1;
+        let mut buf = Vec::new();
+        let mut sent = 0;
+        while conn.poll_transmit(now, &mut buf, 1).is_some() {
+            sent += 1;
+            assert!(sent < 20, "poll_transmit keeps producing packets at one instant");
+        }
     }
 }

@@ -58,6 +58,42 @@ pub(crate) struct Shared {
     log: Arc<dyn Fn(&str) + Send + Sync>,
     #[cfg(feature = "tls")]
     pub(crate) tls: Option<Arc<simoom_tls::ServerConfig>>,
+    /// Open connections per client IP, kept only when [`Limits::max_connections_per_ip`] is set.
+    per_ip: std::sync::Mutex<std::collections::HashMap<std::net::IpAddr, u32>>,
+}
+
+/// A connection's place in the per-IP count; released when the connection is dropped.
+pub(crate) struct IpSlot {
+    sh: Arc<Shared>,
+    ip: std::net::IpAddr,
+}
+
+impl Drop for IpSlot {
+    fn drop(&mut self) {
+        let mut m = self.sh.per_ip.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = m.get_mut(&self.ip) {
+            *n -= 1;
+            if *n == 0 {
+                m.remove(&self.ip);
+            }
+        }
+    }
+}
+
+impl Shared {
+    /// Takes a per-IP slot for a new connection; `Err` when the IP is at its cap.
+    pub(crate) fn take_ip_slot(self: &Arc<Self>, peer: Option<std::net::SocketAddr>) -> Result<Option<IpSlot>, ()> {
+        let cap = self.limits.max_connections_per_ip;
+        let Some(peer) = peer.filter(|_| cap != 0) else { return Ok(None) };
+        let ip = peer.ip();
+        let mut m = self.per_ip.lock().unwrap_or_else(|e| e.into_inner());
+        let n = m.entry(ip).or_insert(0);
+        if *n as usize >= cap {
+            return Err(());
+        }
+        *n += 1;
+        Ok(Some(IpSlot { sh: self.clone(), ip }))
+    }
 }
 
 impl Shared {
@@ -418,6 +454,7 @@ impl Builder {
             stall_logged: AtomicBool::new(false),
             budget_ns: limits.inline_budget.map_or(0, |d| (d.as_nanos() as u64).max(1)),
             log: self.log,
+            per_ip: std::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(feature = "tls")]
             tls,
             limits,
@@ -445,7 +482,11 @@ impl Builder {
         }
         for (src, secure) in self.tcp {
             let sh = shared.clone();
-            let acceptor = move |info: &ConnInfo| Some(Box::new(crate::conn::Conn::new(sh.clone(), info, secure)) as Box<dyn Connection>);
+            let acceptor = move |info: &ConnInfo| {
+                // Over the per-IP cap: refused (the runtime counts it in `rejected`).
+                let slot = sh.take_ip_slot(info.peer).ok()?;
+                Some(Box::new(crate::conn::Conn::new(sh.clone(), info, secure, slot)) as Box<dyn Connection>)
+            };
             rt = match src {
                 Listen::Addr(a) => rt.listen(&a?[..], acceptor),
                 Listen::Std(l) => rt.listen_on(l, acceptor),

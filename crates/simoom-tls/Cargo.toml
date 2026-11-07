@@ -59,3 +59,7 @@ required-features = ["client", "rsa", "p384", "ed25519", "chacha20"]
 [[test]]
 name = "timing"
 required-features = ["client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "hardening"
+required-features = ["client"]

@@ -827,6 +827,14 @@ impl Connection {
         self.cfg.max_header_list_size as usize
     }
 
+    /// Encoded header block bytes buffered before the connection is closed: twice the list
+    /// limit. A block between the two is still decoded (the decoder enforces the list limit,
+    /// keeps the HPACK state in sync and the request gets 431, plan §7.1); only a block that
+    /// cannot be a sane request is a connection error.
+    fn block_cap(&self) -> usize {
+        self.header_cap().saturating_mul(2)
+    }
+
     fn on_headers(&mut self, h: FrameHeader, p: &[u8], sink: &mut dyn FnMut(Event<'_>)) -> R {
         let id = h.stream;
         if id == 0 {
@@ -848,7 +856,7 @@ impl Connection {
         if frag.is_empty() && self.hit(Budget::Empty) {
             return calm("too many empty frames");
         }
-        if frag.len() > self.header_cap() {
+        if frag.len() > self.block_cap() {
             return calm("header block too large");
         }
         self.hb = Some(Block { stream: id, end_stream: end, self_dep, frames: 1 });
@@ -868,7 +876,7 @@ impl Connection {
         if p.is_empty() && !h.has(flag::END_HEADERS) && self.hit(Budget::Empty) {
             return calm("too many empty frames");
         }
-        if self.hb_buf.len() + p.len() > self.header_cap() {
+        if self.hb_buf.len() + p.len() > self.block_cap() {
             return calm("header block too large");
         }
         self.hb_buf.extend_from_slice(p);
@@ -884,7 +892,7 @@ impl Connection {
 
     /// A complete header block on stream `id`.
     fn on_block(&mut self, id: u32, end: bool, self_dep: bool, block: &[u8], sink: &mut dyn FnMut(Event<'_>)) -> R {
-        if block.len() > self.header_cap() {
+        if block.len() > self.block_cap() {
             return calm("header block too large");
         }
         let server = self.role == Role::Server;

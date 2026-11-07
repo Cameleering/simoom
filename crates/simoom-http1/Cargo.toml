@@ -18,3 +18,5 @@ simoom-sys = { path = "../simoom-sys" }
 default = ["websocket"]
 # RFC 6455 handshake and frame codec (adds SHA-1).
 websocket = []
+# The coverage-guided fuzzer (`tests/cov_fuzz.rs`); test-only.
+sancov = ["simoom-sys/sancov"]

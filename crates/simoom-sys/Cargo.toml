@@ -18,3 +18,6 @@ workspace = true
 # the protocol crates that use only the SIMD scan and crypto intrinsics don't switch it on;
 # simoom-rt turns it on by default. Test it with `cargo test -p simoom-sys --features io-uring`.
 io-uring = []
+# SanitizerCoverage edge-counter callbacks for the std-only coverage-guided fuzzer (plan §7.3 F2).
+# Test-only; never enable it in a shipped build.
+sancov = []

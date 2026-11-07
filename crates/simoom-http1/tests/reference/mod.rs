@@ -139,6 +139,13 @@ fn target_form(method: &[u8], t: &[u8]) -> Option<TargetForm> {
     if scheme.is_empty() || !alpha(scheme[0]) || !scheme.iter().all(|&c| alpha(c) || digit(c) || c == b'+' || c == b'-' || c == b'.') {
         return None;
     }
+    // RFC 9110 §4.2.4: userinfo in an http(s) authority is treated as an error.
+    if let Some(rest) = t[colon + 1..].strip_prefix(b"//") {
+        let end = rest.iter().position(|&c| c == b'/' || c == b'?').unwrap_or(rest.len());
+        if rest[..end].contains(&b'@') {
+            return None;
+        }
+    }
     if brackets {
         let rest = t[colon + 1..].strip_prefix(b"//")?;
         let end = rest.iter().position(|&c| c == b'/' || c == b'?').unwrap_or(rest.len());
