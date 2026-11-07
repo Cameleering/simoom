@@ -60,6 +60,12 @@ where
 /// Callbacks never run concurrently and never re-enter: a call made through the [`Ctx`] (send,
 /// close, timer) takes effect after the callback returns or at the end of the loop turn.
 pub trait Connection: 'static {
+    /// The connection was registered with the loop; called once, before any other callback.
+    /// Arm timers here (a request deadline must run even if the peer never sends a byte).
+    fn on_open(&mut self, cx: &mut Ctx<'_>) {
+        let _ = cx;
+    }
+
     /// Bytes arrived. `data` holds everything received and not yet consumed, in order. Return
     /// how many bytes from the front were consumed; the rest is offered again, with whatever
     /// arrives next, on the next call. Consume every complete message you can in one call.

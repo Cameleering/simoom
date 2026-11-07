@@ -363,6 +363,7 @@ impl Core {
         });
         debug_assert_eq!(k, key);
         self.driver.recv(id, true);
+        self.with_conn(key, |h, cx| h.on_open(cx));
         Ok(key)
     }
 

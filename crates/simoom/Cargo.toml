@@ -13,4 +13,26 @@ workspace = true
 
 [dependencies]
 simoom-rt = { path = "../simoom-rt" }
-simoom-http1 = { path = "../simoom-http1" }
+# Always linked for the Date header, header validation and base64; its request parser is linked
+# only with the `http1` feature, its WebSocket codec only with `websocket`.
+simoom-http1 = { path = "../simoom-http1", default-features = false }
+simoom-h2 = { path = "../simoom-h2", optional = true }
+simoom-tls = { path = "../simoom-tls", optional = true }
+simoom-quic = { path = "../simoom-quic", optional = true }
+simoom-h3 = { path = "../simoom-h3", optional = true }
+
+[features]
+default = ["http1", "http2", "websocket"]
+# HTTP/1.1 over TCP: keep-alive, pipelining, chunked bodies, 100-continue.
+http1 = []
+# HTTP/2: h2c with prior knowledge and `Upgrade: h2c`, and h2 over TLS through ALPN.
+http2 = ["dep:simoom-h2"]
+# TLS 1.3 on TCP listeners; ALPN chooses h2 or http/1.1.
+tls = ["dep:simoom-tls"]
+# HTTP/3 over QUIC on UDP listeners (needs TLS 1.3).
+http3 = ["tls", "dep:simoom-quic", "dep:simoom-h3"]
+# WebSocket upgrades (RFC 6455) on HTTP/1.1.
+websocket = ["http1", "simoom-http1/websocket"]
+# Alias of `websocket`.
+ws = ["websocket"]
+full = ["http1", "http2", "http3", "tls", "websocket"]
