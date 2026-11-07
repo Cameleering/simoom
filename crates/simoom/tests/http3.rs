@@ -46,6 +46,7 @@ struct H3Client {
     resps: HashMap<u64, Resp>,
     tx: Vec<u8>,
     resp_buf: Vec<u8>,
+    goaway: bool,
 }
 
 impl H3Client {
@@ -56,7 +57,7 @@ impl H3Client {
         let mut ep = Endpoint::new(Arc::new(cfg), false);
         let sock = UdpSocket::bind("127.0.0.1:0").unwrap();
         let h = ep.connect(Instant::now(), server, "localhost", &[]).unwrap();
-        let mut c = H3Client { sock, ep, h, h3: Http3::new(false, simoom_h3::Config::default()), server, resps: HashMap::new(), tx: Vec::new(), resp_buf: Vec::new() };
+        let mut c = H3Client { sock, ep, h, h3: Http3::new(false, simoom_h3::Config::default()), server, resps: HashMap::new(), tx: Vec::new(), resp_buf: Vec::new(), goaway: false };
         let end = Instant::now() + Duration::from_secs(10);
         while !(c.ep.conn(c.h).is_some_and(|q| q.is_established()) && c.h3.peer_settings().is_some()) {
             assert!(Instant::now() < end, "HTTP/3 handshake timed out");
@@ -122,6 +123,7 @@ impl H3Client {
                 }
                 H3Event::Finished { stream } => self.resps.entry(stream).or_default().done = true,
                 H3Event::Reset { stream, .. } => self.resps.entry(stream).or_default().done = true,
+                H3Event::GoAway { .. } => self.goaway = true,
                 _ => {}
             }
         }
@@ -182,6 +184,14 @@ fn start() -> ServerHandle {
                     Outcome::Done
                 }
                 b"/big" => reply.body(vec![b'q'; 300_000]),
+                b"/slow" => {
+                    let responder = reply.defer();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(400));
+                        responder.send(Response::new(200).body(vec![b's'; 200_000]));
+                    });
+                    Outcome::Deferred
+                }
                 _ => {
                     let s = format!("{:?} {} {} {}", req.version(), String::from_utf8_lossy(req.method()), req.path_str(), req.body().len());
                     reply.header("content-type", "text/plain").body(s)
@@ -224,4 +234,41 @@ fn tcp_responses_announce_http3() {
     let port = h.quic_addrs()[0].port();
     let r = common::get(&h, "/");
     assert_eq!(r.header("alt-svc"), Some(&*format!("h3=\":{port}\"; ma=86400")));
+}
+
+#[test]
+fn http3_graceful_stop_finishes_in_flight_streams() {
+    let h = start();
+    let quic = h.quic_addrs()[0];
+    let mut c = H3Client::connect(quic);
+    let id = c.request("GET", "/slow", b"");
+    let end = Instant::now() + Duration::from_secs(10);
+    while h.stats().requests == 0 {
+        assert!(Instant::now() < end, "the request never reached the server");
+        c.step();
+    }
+    // Stop while the response is still being produced: GOAWAY, then the stream finishes.
+    let t0 = Instant::now();
+    h.stop(Duration::from_secs(10));
+    let joiner = std::thread::spawn(move || {
+        h.join();
+        t0.elapsed()
+    });
+    let r = c.wait(id);
+    assert_eq!(r.status, b"200");
+    assert_eq!(r.body.len(), 200_000, "the in-flight response was cut short");
+    assert!(c.goaway, "no GOAWAY before the close");
+    // Then the server closes the connection, and the loops exit long before the deadline.
+    let end = Instant::now() + Duration::from_secs(8);
+    while !c.ep.conn(c.h).is_none_or(|q| q.is_closed()) {
+        assert!(Instant::now() < end, "the server never closed the idle connection");
+        c.step();
+    }
+    while !joiner.is_finished() {
+        assert!(Instant::now() < end, "the server did not exit after its streams finished");
+        c.step();
+    }
+    let took = joiner.join().unwrap();
+    assert!(took >= Duration::from_millis(300), "stopped after {took:?}, before the deferred reply");
+    assert!(took < Duration::from_secs(8), "stop took {took:?}");
 }

@@ -17,7 +17,7 @@ pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 /// otherwise make table lookups and swaps leak through the branch predictor).
 #[inline(always)]
 pub fn ct_mask(flag: u64) -> u64 {
-    core::hint::black_box(flag).wrapping_neg()
+    simoom_sys::arch::opaque(flag).wrapping_neg()
 }
 
 /// All-ones if `a == b`, else zero, as an opaque mask.

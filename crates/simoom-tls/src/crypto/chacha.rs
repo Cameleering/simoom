@@ -4,6 +4,7 @@
 //! Bulk keystream is computed four blocks at a time in a lane-parallel layout that the compiler
 //! turns into SSE2/NEON code.
 
+#[cfg(feature = "chacha20")]
 use crate::util::ct_eq;
 
 const SIGMA: [u32; 4] = [0x61707865, 0x3320646e, 0x79622d32, 0x6b206574];
@@ -54,18 +55,22 @@ pub fn chacha20_block(key: &[u8; 32], counter: u32, nonce: &[u8; 12]) -> [u8; 64
     out
 }
 
+#[cfg(feature = "chacha20")]
 type V = [u32; 4];
 
+#[cfg(feature = "chacha20")]
 #[inline(always)]
 fn vadd(a: V, b: V) -> V {
     [a[0].wrapping_add(b[0]), a[1].wrapping_add(b[1]), a[2].wrapping_add(b[2]), a[3].wrapping_add(b[3])]
 }
 
+#[cfg(feature = "chacha20")]
 #[inline(always)]
 fn vxorrot(a: V, b: V, r: u32) -> V {
     [(a[0] ^ b[0]).rotate_left(r), (a[1] ^ b[1]).rotate_left(r), (a[2] ^ b[2]).rotate_left(r), (a[3] ^ b[3]).rotate_left(r)]
 }
 
+#[cfg(feature = "chacha20")]
 #[inline(always)]
 fn vqr(s: &mut [V; 16], a: usize, b: usize, c: usize, d: usize) {
     s[a] = vadd(s[a], s[b]);
@@ -78,6 +83,7 @@ fn vqr(s: &mut [V; 16], a: usize, b: usize, c: usize, d: usize) {
     s[b] = vxorrot(s[b], s[c], 7);
 }
 
+#[cfg(feature = "chacha20")]
 /// Four consecutive keystream blocks starting at `st[12]`.
 fn blocks4(st: &[u32; 16], out: &mut [u8; 256]) {
     let mut x: [V; 16] = core::array::from_fn(|i| [st[i]; 4]);
@@ -103,13 +109,40 @@ fn blocks4(st: &[u32; 16], out: &mut [u8; 256]) {
     }
 }
 
+#[cfg(feature = "chacha20")]
 /// XORs the ChaCha20 keystream, starting at block `counter`, into `data` (SIMD when the CPU
 /// has it).
 pub fn chacha20_xor(key: &[u8; 32], counter: u32, nonce: &[u8; 12], data: &mut [u8]) {
     let done = simoom_sys::arch::chacha20_xor(key, counter, nonce, data);
-    chacha20_xor_portable(key, counter.wrapping_add((done / 64) as u32), nonce, &mut data[done..]);
+    let (counter, rest) = (counter.wrapping_add((done / 64) as u32), &mut data[done..]);
+    if rest.is_empty() {
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        // The SIMD code takes whole 256-byte groups: run the tail through it in a padded copy.
+        if rest.len() <= 256 {
+            let mut buf = [0u8; 256];
+            buf[..rest.len()].copy_from_slice(rest);
+            if simoom_sys::arch::chacha20_xor(key, counter, nonce, &mut buf) == 256 {
+                rest.copy_from_slice(&buf[..rest.len()]);
+                return;
+            }
+        }
+        // No SSSE3 (CPUs from before 2006): one block at a time, which keeps the portable
+        // four-way code out of x86-64 builds.
+        for (i, chunk) in rest.chunks_mut(64).enumerate() {
+            let ks = chacha20_block(key, counter.wrapping_add(i as u32), nonce);
+            for (d, k) in chunk.iter_mut().zip(ks) {
+                *d ^= k;
+            }
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    chacha20_xor_portable(key, counter, nonce, rest);
 }
 
+#[cfg(feature = "chacha20")]
 /// The portable four-block implementation.
 pub fn chacha20_xor_portable(key: &[u8; 32], counter: u32, nonce: &[u8; 12], data: &mut [u8]) {
     let mut st = init_state(key, counter, nonce);
@@ -131,7 +164,9 @@ pub fn chacha20_xor_portable(key: &[u8; 32], counter: u32, nonce: &[u8; 12], dat
     }
 }
 
-/// Poly1305 (radix 2^44, three limbs).
+#[cfg(feature = "chacha20")]
+/// Poly1305 (radix 2^44, three limbs; long inputs go through the AVX2 kernel of
+/// `simoom_sys::arch` when the CPU has it).
 pub struct Poly1305 {
     r: [u64; 3],
     s: [u64; 2],
@@ -139,11 +174,37 @@ pub struct Poly1305 {
     pad: [u64; 2],
     buf: [u8; 16],
     len: usize,
+    /// r, r^2, r^3, r^4 as 26-bit limbs, computed on the first long input.
+    rpow: Option<[[u64; 5]; 4]>,
 }
 
+#[cfg(feature = "chacha20")]
+/// Inputs at least this long use the SIMD kernel (below it the setup costs more than it saves).
+const SIMD_MIN: usize = 256;
+
+#[cfg(feature = "chacha20")]
+/// Radix 2^44 (44, 44, 42 bits; slightly larger limbs allowed) to radix 2^26.
+fn to26(h: &[u64; 3]) -> [u64; 5] {
+    let lo = h[0] as u128 + ((h[1] as u128) << 44) + (((h[2] & ((1 << 40) - 1)) as u128) << 88);
+    let top = h[2] >> 40; // bits from 2^128
+    let m = 0x3ff_ffff;
+    [lo as u64 & m, (lo >> 26) as u64 & m, (lo >> 52) as u64 & m, (lo >> 78) as u64 & m, ((lo >> 104) as u64) + (top << 24)]
+}
+
+#[cfg(feature = "chacha20")]
+/// Radix 2^26 (limbs a little above 2^26 allowed) to radix 2^44.
+fn to44(h: &[u64; 5]) -> [u64; 3] {
+    let lo = h[0] as u128 + ((h[1] as u128) << 26) + ((h[2] as u128) << 52) + ((h[3] as u128) << 78) + (((h[4] & ((1 << 24) - 1)) as u128) << 104);
+    let top = h[4] >> 24; // bits from 2^128
+    [lo as u64 & M44, (lo >> 44) as u64 & M44, ((lo >> 88) as u64) + (top << 40)]
+}
+
+#[cfg(feature = "chacha20")]
 const M44: u64 = 0xfff_ffff_ffff;
+#[cfg(feature = "chacha20")]
 const M42: u64 = 0x3ff_ffff_ffff;
 
+#[cfg(feature = "chacha20")]
 impl Poly1305 {
     pub fn new(key: &[u8; 32]) -> Poly1305 {
         let t0 = u64::from_le_bytes(key[0..8].try_into().unwrap());
@@ -158,6 +219,7 @@ impl Poly1305 {
             pad: [u64::from_le_bytes(key[16..24].try_into().unwrap()), u64::from_le_bytes(key[24..32].try_into().unwrap())],
             buf: [0; 16],
             len: 0,
+            rpow: None,
         }
     }
 
@@ -198,8 +260,23 @@ impl Poly1305 {
         [h0, h1, h2]
     }
 
-    #[inline(always)]
-    fn blocks(&mut self, data: &[u8], hibit: u64) {
+    #[inline(never)]
+    fn blocks(&mut self, mut data: &[u8], hibit: u64) {
+        if data.len() >= SIMD_MIN && hibit == 1 {
+            let rpow = *self.rpow.get_or_insert_with(|| {
+                let (r, s) = (self.r, self.s);
+                let r2 = Self::carry(Self::mul(r, r, s));
+                let r3 = Self::carry(Self::mul(r2, r, s));
+                let r4 = Self::carry(Self::mul(r3, r, s));
+                [to26(&r), to26(&r2), to26(&r3), to26(&r4)]
+            });
+            let mut h26 = to26(&self.h);
+            let done = simoom_sys::arch::poly1305_blocks(&mut h26, &rpow, data);
+            if done > 0 {
+                self.h = to44(&h26);
+                data = &data[done..];
+            }
+        }
         let (r, s) = (self.r, self.s);
         let mut h = self.h;
         let mut pairs = data.chunks_exact(32);
@@ -303,6 +380,7 @@ impl Poly1305 {
     }
 }
 
+#[cfg(feature = "chacha20")]
 /// One-shot Poly1305.
 pub fn poly1305(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
     let mut p = Poly1305::new(key);
@@ -310,12 +388,14 @@ pub fn poly1305(key: &[u8; 32], msg: &[u8]) -> [u8; 16] {
     p.finish()
 }
 
+#[cfg(feature = "chacha20")]
 /// The ChaCha20-Poly1305 AEAD.
 #[derive(Clone)]
 pub struct ChaCha20Poly1305 {
     key: [u8; 32],
 }
 
+#[cfg(feature = "chacha20")]
 impl ChaCha20Poly1305 {
     pub fn new(key: &[u8; 32]) -> ChaCha20Poly1305 {
         ChaCha20Poly1305 { key: *key }
@@ -351,6 +431,7 @@ impl ChaCha20Poly1305 {
     }
 }
 
+#[cfg(feature = "chacha20")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,6 +457,67 @@ mod tests {
             hex(&data),
             "6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0bf91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d807ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab77937365af90bbf74a35be6b40b8eedf2785e42874d"
         );
+    }
+
+    #[test]
+    fn poly1305_simd_matches_scalar() {
+        // the same tags through the AVX2 kernel (long updates) and the scalar code (16-byte
+        // updates), for many lengths, keys with large r and an accumulator near 2^130
+        let mut keys = vec![[0xffu8; 32], [0u8; 32]];
+        for i in 0..6u8 {
+            keys.push(core::array::from_fn(|j| (j as u8).wrapping_mul(37).wrapping_add(i.wrapping_mul(91))));
+        }
+        let msg: Vec<u8> = (0..3000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8).collect();
+        let ones = vec![0xffu8; 3000];
+        for key in &keys {
+            for data in [&msg, &ones] {
+                for len in [0usize, 15, 64, 255, 256, 257, 319, 320, 1024, 1500, 2047, 3000] {
+                    let fast = poly1305(key, &data[..len]);
+                    let mut p = Poly1305::new(key);
+                    for c in data[..len].chunks(16) {
+                        p.update(c);
+                    }
+                    assert_eq!(fast, p.finish(), "len {len}");
+                    // split updates: a long one after a short one
+                    let mut q = Poly1305::new(key);
+                    q.update(&data[..len.min(5)]);
+                    q.update(&data[len.min(5)..len]);
+                    assert_eq!(fast, q.finish(), "split len {len}");
+                }
+            }
+        }
+        // RFC 8439 section 2.5.2
+        let key = crate::util::unhex("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b");
+        let tag = poly1305(&key.try_into().unwrap(), &b"Cryptographic Forum Research Group".repeat(10)[..340]);
+        let mut p = Poly1305::new(&crate::util::unhex("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b").try_into().unwrap());
+        for c in b"Cryptographic Forum Research Group".repeat(10)[..340].chunks(16) {
+            p.update(c);
+        }
+        assert_eq!(tag, p.finish());
+    }
+
+    #[test]
+    fn fallbacks_without_simd_match() {
+        // with the SIMD paths turned off: the one-block loop (x86-64) or the portable four-way
+        // code, and the scalar Poly1305
+        let key = [0x42u8; 32];
+        let nonce = [9u8; 12];
+        let src: Vec<u8> = (0..2000u32).map(|i| (i * 7) as u8).collect();
+        let mut expect = Vec::new();
+        for len in [1usize, 63, 64, 300, 1000, 2000] {
+            let mut a = src[..len].to_vec();
+            chacha20_xor_portable(&key, 7, &nonce, &mut a);
+            expect.push((a, poly1305(&key, &src[..len])));
+        }
+        simoom_sys::arch::disable_hardware(true);
+        let mut got = Vec::new();
+        for len in [1usize, 63, 64, 300, 1000, 2000] {
+            let mut a = src[..len].to_vec();
+            chacha20_xor(&key, 7, &nonce, &mut a);
+            got.push((a, poly1305(&key, &src[..len])));
+        }
+        simoom_sys::arch::disable_hardware(false);
+        assert!(got == expect);
     }
 
     #[test]
@@ -461,5 +603,29 @@ mod tests {
         assert!(!a.open(&nonce, &aad, &mut bad, &tag));
         assert!(a.open(&nonce, &aad, &mut buf, &tag));
         assert_eq!(buf, pt.to_vec());
+    }
+}
+
+#[cfg(feature = "chacha20")]
+#[cfg(test)]
+mod micro {
+    #[test]
+    #[ignore]
+    fn chacha_poly_split() {
+        let key = [7u8; 32];
+        let mut buf = vec![0u8; 16384];
+        let n = 20_000;
+        let t = std::time::Instant::now();
+        for i in 0..n {
+            super::chacha20_xor(&key, i as u32, &[0; 12], &mut buf);
+        }
+        let s = t.elapsed().as_secs_f64();
+        println!("chacha20 {:.2} GB/s", n as f64 * 16384.0 / s / 1e9);
+        let t = std::time::Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(super::poly1305(&key, &buf));
+        }
+        let s = t.elapsed().as_secs_f64();
+        println!("poly1305 {:.2} GB/s", n as f64 * 16384.0 / s / 1e9);
     }
 }

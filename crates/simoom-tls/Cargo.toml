@@ -15,15 +15,47 @@ workspace = true
 simoom-sys = { path = "../simoom-sys" }
 
 [features]
-default = ["client"]
+default = ["client", "rsa", "p384", "ed25519", "chacha20"]
 # The TLS client (ClientConnection, ClientConfig, QuicConnection::new_client). A server-only
 # build can leave it out; the tests, the benchmark and the fuzzer need it.
 client = []
+# RSA keys and certificates (PSS in the handshake, PKCS#1 v1.5 and PSS in certificates).
+rsa = []
+# ECDSA P-384 keys and certificates.
+p384 = []
+# Ed25519 keys and certificates. Also makes X25519 key generation about twice as fast (it then
+# uses the Ed25519 fixed-base table instead of the Montgomery ladder).
+ed25519 = []
+# The TLS_CHACHA20_POLY1305_SHA256 cipher suite (and its QUIC header protection).
+# Without these four, a build has X25519, P-256 (ECDH and ECDSA) and AES-GCM: the smallest
+# edge build is `--no-default-features`.
+chacha20 = []
 
 [[example]]
 name = "bench_tls"
-required-features = ["client"]
+required-features = ["client", "rsa", "ed25519", "chacha20"]
 
 [[example]]
 name = "fuzz_tls"
 required-features = ["client"]
+
+# The integration tests use every key type and cipher suite.
+[[test]]
+name = "handshake"
+required-features = ["client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "interop"
+required-features = ["client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "quic"
+required-features = ["client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "fuzz"
+required-features = ["client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "timing"
+required-features = ["client", "rsa", "p384", "ed25519", "chacha20"]

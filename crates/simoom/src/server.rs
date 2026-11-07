@@ -87,10 +87,12 @@ impl Shared {
         }
         let n = self.stalls.fetch_add(1, Ordering::Relaxed) + 1;
         if !self.stall_logged.swap(true, Ordering::Relaxed) {
+            // Microseconds as integers: `Duration`'s Debug costs 2 KB of code.
             self.log(&format!(
-                "simoom: an inline handler took {took:?} on {} (budget {:?}); slow handlers belong on the offload pool",
+                "simoom: an inline handler took {} us on {} (budget {} us); slow handlers belong on the offload pool",
+                took.as_micros() as u64,
                 String::from_utf8_lossy(req.path()),
-                self.limits.inline_budget.unwrap_or_default()
+                self.limits.inline_budget.unwrap_or_default().as_micros() as u64
             ));
         }
         let k = self.limits.stalls_before_offload;
@@ -215,6 +217,8 @@ pub struct Builder {
     quic_tls: Option<simoom_tls::ServerConfig>,
     #[cfg(feature = "http3")]
     quic_config: Option<QuicConfigure>,
+    #[cfg(feature = "http3")]
+    quic_gro: bool,
 }
 
 impl Default for Builder {
@@ -237,6 +241,8 @@ impl Default for Builder {
             quic_tls: None,
             #[cfg(feature = "http3")]
             quic_config: None,
+            #[cfg(feature = "http3")]
+            quic_gro: true,
         }
     }
 }
@@ -312,6 +318,15 @@ impl Builder {
     #[cfg(feature = "http3")]
     pub fn quic_config(mut self, f: impl FnOnce(&mut simoom_quic::Config) + 'static) -> Self {
         self.quic_config = Some(Box::new(f));
+        self
+    }
+
+    /// UDP generic receive offload on HTTP/3 listeners (Linux only; on by default): the kernel
+    /// hands over a batch of datagrams from one peer as one 64 KiB buffer, one receive call
+    /// for up to 64 packets.
+    #[cfg(feature = "http3")]
+    pub fn quic_gro(mut self, on: bool) -> Self {
+        self.quic_gro = on;
         self
     }
 
@@ -457,7 +472,9 @@ impl Builder {
                 let a = a?;
                 let sh = shared.clone();
                 let q = q.clone();
-                let opts = simoom_rt::UdpOptions::default();
+                // GRO on Linux: a batch of datagrams from one peer arrives as one 64 KiB buffer
+                // (one receive and one wake-up for up to 64 packets of a bulk upload).
+                let opts = simoom_rt::UdpOptions { gro: self.quic_gro && cfg!(target_os = "linux"), ..simoom_rt::UdpOptions::default() };
                 rt = rt.udp(&a[..], opts, move |info: &simoom_rt::UdpInfo| crate::h3::endpoint(sh.clone(), q.clone(), info));
             }
         }

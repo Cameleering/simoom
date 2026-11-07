@@ -36,7 +36,7 @@ mod readiness;
 
 #[cfg(target_os = "linux")]
 mod epoll;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "io-uring"))]
 pub mod uring;
 
 #[cfg(windows)]
@@ -236,7 +236,8 @@ pub struct DriverStats {
     pub accept_calls: u64,
     /// Other system calls: registration, `epoll_ctl`, eventfd reads, `io_uring_register`, ...
     pub other_calls: u64,
-    /// io_uring submission queue entries pushed.
+    /// io_uring submission queue entries pushed (buffer hand-overs with `PROVIDE_BUFFERS` not
+    /// counted).
     pub sqes: u64,
     /// Completions or readiness events taken from the OS.
     pub os_events: u64,
@@ -326,7 +327,7 @@ impl<T> Slab<T> {
             _ => None,
         }
     }
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    #[cfg_attr(not(all(target_os = "linux", feature = "io-uring")), allow(dead_code))]
     pub(crate) fn id_at(&self, idx: u32) -> Option<Id> {
         match self.slots.get(idx as usize) {
             Some((g, Some(_))) => Some(Id::new(idx, *g)),
@@ -346,9 +347,52 @@ impl<T> Slab<T> {
     pub(crate) fn len(&self) -> usize {
         self.len
     }
-    #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
+    #[cfg_attr(not(any(all(target_os = "linux", feature = "io-uring"), windows)), allow(dead_code))]
     pub(crate) fn ids(&self) -> Vec<Id> {
         self.slots.iter().enumerate().filter(|(_, s)| s.1.is_some()).map(|(i, s)| Id::new(i as u32, s.0)).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Large UDP receive buffers (GRO)
+// ---------------------------------------------------------------------------------------------
+
+/// Receive buffers per batched receive call on a GRO socket. Each holds up to 64 datagrams of
+/// one peer, so a batch takes up to 512 datagrams (and 512 KiB of buffers).
+pub(crate) const LARGE_BATCH: usize = 8;
+
+/// The driver's own stock of large buffers for UDP sockets registered with [`Driver::udp_large`]:
+/// allocated on first use, given back through [`Driver::provide`], at most two batches kept.
+#[derive(Default)]
+pub(crate) struct LargeBufs {
+    pub(crate) size: usize,
+    free: Vec<Vec<u8>>,
+}
+
+impl LargeBufs {
+    /// A cleared buffer of at least `size` bytes.
+    #[inline(never)]
+    pub(crate) fn take(&mut self) -> Vec<u8> {
+        self.free.pop().unwrap_or_else(|| Vec::with_capacity(self.size))
+    }
+
+    /// Takes `buf` back if it is a large buffer (`None`), else hands it back. The check is
+    /// inlined; keeping the buffer (GRO sockets only) is not.
+    #[inline]
+    pub(crate) fn keep(&mut self, buf: Vec<u8>) -> Option<Vec<u8>> {
+        if self.size == 0 || buf.capacity() < self.size {
+            return Some(buf);
+        }
+        self.store(buf);
+        None
+    }
+
+    #[inline(never)]
+    fn store(&mut self, mut buf: Vec<u8>) {
+        if self.free.len() < 2 * LARGE_BATCH {
+            buf.clear();
+            self.free.push(buf);
+        }
     }
 }
 
@@ -359,7 +403,7 @@ impl<T> Slab<T> {
 enum Imp {
     #[cfg(target_os = "linux")]
     Epoll(readiness::Driver<epoll::Poller>),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "io-uring"))]
     Uring(uring::Driver),
     #[cfg(windows)]
     Iocp(iocp::Driver),
@@ -372,7 +416,7 @@ macro_rules! dispatch {
         match &mut $self.imp {
             #[cfg(target_os = "linux")]
             Imp::Epoll($d) => $e,
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "io-uring"))]
             Imp::Uring($d) => $e,
             #[cfg(windows)]
             Imp::Iocp($d) => $e,
@@ -387,7 +431,7 @@ macro_rules! dispatch_ref {
         match &$self.imp {
             #[cfg(target_os = "linux")]
             Imp::Epoll($d) => $e,
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "io-uring"))]
             Imp::Uring($d) => $e,
             #[cfg(windows)]
             Imp::Iocp($d) => $e,
@@ -423,14 +467,22 @@ impl Driver {
         #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
         let mut fallback = None;
         let (imp, kind) = match want {
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "io-uring"))]
             Backend::IoUring => match uring::Driver::new(cfg) {
-                Ok(d) => (Imp::Uring(d), Backend::IoUring),
+                Ok(d) => {
+                    fallback = d.degraded();
+                    (Imp::Uring(d), Backend::IoUring)
+                }
                 Err(e) => {
                     fallback = Some(format!("io_uring unavailable ({e}); using epoll"));
                     (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll)
                 }
             },
+            #[cfg(all(target_os = "linux", not(feature = "io-uring")))]
+            Backend::IoUring => {
+                fallback = Some("io_uring unavailable (built without the `io-uring` feature); using epoll".into());
+                (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll)
+            }
             #[cfg(target_os = "linux")]
             Backend::Epoll => (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll),
             #[cfg(windows)]
@@ -447,7 +499,8 @@ impl Driver {
         self.kind
     }
 
-    /// Why the requested back end was replaced, if it was.
+    /// Why the requested back end was replaced, if it was, or which of its optional features
+    /// the kernel lacks (io_uring set-up flags or registered files, each dropped on its own).
     pub fn fallback_reason(&self) -> Option<&str> {
         self.fallback.as_deref()
     }
@@ -473,6 +526,15 @@ impl Driver {
     /// [`Driver::recv`] turns receiving on.
     pub fn udp(&mut self, socket: Socket, key: u64) -> io::Result<Id> {
         dispatch!(self, d => d.udp(socket, key))
+    }
+
+    /// Registers a bound UDP socket that receives into `buf_size`-byte buffers of the driver's own
+    /// (instead of the stock given with [`Driver::provide`]), for a socket with GRO on: a buffer
+    /// then takes a whole batch of datagrams (up to 64 KiB, cut by
+    /// [`RecvMeta::segment_size`]). Give the buffers of its [`Event::Datagram`]s back with
+    /// [`Driver::provide`]; the driver keeps a few for reuse.
+    pub fn udp_large(&mut self, socket: Socket, key: u64, buf_size: usize) -> io::Result<Id> {
+        dispatch!(self, d => d.udp_large(socket, key, buf_size))
     }
 
     /// Turns receiving on or off for a stream or UDP socket. Turning it off is backpressure: the
@@ -506,7 +568,8 @@ impl Driver {
     }
 
     /// Gives the driver a receive buffer (an empty `Vec` with spare capacity). The driver keeps
-    /// it until data arrives and then hands it back in an event.
+    /// it until data arrives and then hands it back in an event. A buffer of the size given to
+    /// [`Driver::udp_large`] goes back to the large stock.
     pub fn provide(&mut self, buf: Vec<u8>) {
         dispatch!(self, d => d.provide(buf))
     }

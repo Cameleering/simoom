@@ -12,7 +12,7 @@ fn backends() -> Vec<Backend> {
     let mut v = Vec::new();
     if cfg!(target_os = "linux") {
         v.push(Backend::Epoll);
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "io-uring"))]
         match uring::available() {
             Ok(()) => v.push(Backend::IoUring),
             Err(e) => eprintln!("io_uring tests skipped: {e}"),
@@ -197,6 +197,65 @@ fn udp_echo_on_every_backend() {
 }
 
 #[test]
+fn udp_gro_batches_land_in_large_buffers() {
+    const SEG: usize = 1200;
+    const N: usize = 40;
+    for b in backends() {
+        let mut d = driver(b);
+        let s = Socket::udp_bind("127.0.0.1:0".parse().unwrap(), &UdpOptions { gro: true, recv_buffer: Some(4 << 20), ..Default::default() }).unwrap();
+        let addr = s.local_addr().unwrap();
+        let id = d.udp_large(s, 9, 65536).unwrap();
+        d.recv(id, true);
+        // Datagram i is SEG bytes of value i. One segmented send (GSO / USO) where the kernel
+        // has it, so GRO can hand the batch over as one buffer; else one send per datagram.
+        let data: Vec<u8> = (0..N * SEG).map(|i| (i / SEG) as u8).collect();
+        let sender = Socket::udp_bind("127.0.0.1:0".parse().unwrap(), &UdpOptions::default()).unwrap();
+        let gso = Transmit { peer: addr, data: &data, segment_size: SEG, ecn: 0, src_ip: None };
+        let segmented = matches!(sender.send_msgs(&[gso]), Ok(1));
+        if !segmented {
+            for c in data.chunks(SEG) {
+                sender.send_msgs(&[Transmit { peer: addr, data: c, segment_size: 0, ecn: 0, src_ip: None }]).unwrap();
+            }
+        }
+        // No stock buffers: a GRO socket receives into the driver's own large buffers.
+        let wanted = d.buffers_wanted();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut evs = Vec::new();
+        let (mut seen, mut largest) = (vec![false; N], 0);
+        while !seen.iter().all(|&s| s) {
+            assert!(Instant::now() < deadline, "{b:?}: datagrams missing: {seen:?}");
+            d.turn(Some(Duration::from_millis(20)), &mut evs).unwrap();
+            for e in evs.drain(..) {
+                match e {
+                    Event::Datagram { key: 9, buf, meta } => {
+                        assert!(buf.capacity() >= 65536, "{b:?}: received into a {}-byte buffer", buf.capacity());
+                        assert!(!meta.truncated);
+                        assert_eq!(meta.len, buf.len());
+                        largest = largest.max(buf.len());
+                        for seg in buf.chunks(meta.segment_size.max(1)) {
+                            assert_eq!(seg.len(), SEG, "{b:?}: segment size {}", meta.segment_size);
+                            assert!(seg.iter().all(|&x| x == seg[0]));
+                            seen[seg[0] as usize] = true;
+                        }
+                        d.provide(buf); // back to the large stock, not the stream stock
+                    }
+                    Event::Error { error, .. } => panic!("{b:?}: {error}"),
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(d.buffers_wanted(), wanted, "{b:?}: large buffers went into the stream stock");
+        #[cfg(target_os = "linux")]
+        if segmented {
+            assert!(largest > SEG, "{b:?}: GRO did not coalesce the segmented send (largest buffer {largest} bytes)");
+        }
+        let _ = largest;
+        d.close(id);
+        run(&mut d, |_, ev| matches!(ev, Event::Closed { key: 9 }));
+    }
+}
+
+#[test]
 fn waker_interrupts_a_blocked_turn() {
     for b in backends() {
         let mut d = driver(b);
@@ -350,7 +409,7 @@ fn io_uring_failure_falls_back_to_epoll() {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "io-uring"))]
 #[test]
 fn io_uring_without_fixed_files_and_with_a_tiny_buffer_ring() {
     if uring::available().is_err() {
@@ -451,4 +510,87 @@ fn iocp_eager_receive_echo_pause_and_close() {
     let mut rest = Vec::new();
     c.read_to_end(&mut rest).unwrap_or_default();
     assert!(rest.is_empty() || rest == b"bye");
+}
+
+#[cfg(all(target_os = "linux", feature = "io-uring"))]
+#[test]
+fn io_uring_drops_only_the_setup_flags_the_kernel_refuses() {
+    if uring::available().is_err() {
+        return;
+    }
+    for (refuse, missing, kept) in [
+        (1u32 << 13, "DEFER_TASKRUN", "SUBMIT_ALL"),
+        (1 << 7, "SUBMIT_ALL", "DEFER_TASKRUN"),
+        (1 << 12, "SINGLE_ISSUER", "SUBMIT_ALL"),
+    ] {
+        uring::REFUSE_SETUP.with(|r| r.set(refuse));
+        let mut d = driver(Backend::IoUring);
+        let why = d.fallback_reason().unwrap().to_string();
+        assert!(why.contains(missing) && !why.contains(kept), "refusing {missing}: {why}");
+        // The degraded ring still serves.
+        let addr = listener(&mut d);
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.write_all(b"ping").unwrap();
+        let mut got = Vec::new();
+        run(&mut d, |d, ev| {
+            match ev {
+                Event::Accepted { socket, .. } => {
+                    let id = d.stream(socket, 7).unwrap();
+                    d.recv(id, true);
+                }
+                Event::Data { key: 7, buf } => {
+                    got.extend_from_slice(&buf);
+                    d.provide(buf);
+                }
+                _ => {}
+            }
+            got == b"ping"
+        });
+    }
+    uring::REFUSE_SETUP.with(|r| r.set(0));
+    let d = driver(Backend::IoUring);
+    let why = d.fallback_reason().unwrap_or_default();
+    assert!(["SUBMIT_ALL", "DEFER_TASKRUN", "SINGLE_ISSUER", "registered files"].iter().all(|f| !why.contains(f)), "{why}");
+}
+
+#[cfg(all(target_os = "linux", feature = "io-uring"))]
+#[test]
+fn io_uring_falls_back_to_kernel_allocated_rings_then_to_provide_buffers() {
+    if uring::available().is_err() {
+        return;
+    }
+    for legacy in [false, true] {
+    uring::FORCE_PBUF_MMAP.with(|f| f.set(true));
+    uring::FORCE_PBUF_LEGACY.with(|f| f.set(legacy));
+    let mut d = driver(Backend::IoUring);
+    uring::FORCE_PBUF_MMAP.with(|f| f.set(false));
+    uring::FORCE_PBUF_LEGACY.with(|f| f.set(false));
+    let why = d.fallback_reason().unwrap().to_string();
+    // A kernel that refuses every buffer ring (Ubuntu's 6.8) ends up with PROVIDE_BUFFERS in both.
+    assert!(why.contains("PROVIDE_BUFFERS") || (!legacy && why.contains("kernel-allocated")), "{why}");
+    // Receives go through the kernel's ring: a 256 KiB echo needs many refills.
+    let addr = listener(&mut d);
+    const N: usize = 256 * 1024;
+    let client = std::thread::spawn(move || {
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.write_all(&vec![3u8; N]).unwrap();
+    });
+    let mut got = 0;
+    run(&mut d, |d, ev| {
+        match ev {
+            Event::Accepted { socket, .. } => {
+                let id = d.stream(socket, 7).unwrap();
+                d.recv(id, true);
+            }
+            Event::Data { key: 7, buf } => {
+                assert!(buf.iter().all(|&b| b == 3));
+                got += buf.len();
+                d.provide(buf);
+            }
+            _ => {}
+        }
+        got == N
+    });
+    client.join().unwrap();
+    }
 }

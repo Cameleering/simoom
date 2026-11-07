@@ -1,6 +1,9 @@
 //! One event loop: its driver, buffer pool, timer wheel, connections and task queue, and the
 //! contexts handed to handlers.
 
+// Without the `udp` feature the UDP slots stay empty and their code is left out.
+#![cfg_attr(not(feature = "udp"), allow(dead_code, unused_imports, unused_mut))]
+
 use crate::handler::{Acceptor, CloseReason, ConnInfo, Connection, Endpoint, Message, UdpInfo, UdpService};
 use crate::offload::{OffloadPool, Rejected};
 use crate::pool::BufPool;
@@ -229,13 +232,20 @@ pub(crate) struct UdpSlot {
     pub(crate) service: Arc<dyn UdpService>,
     pub(crate) binding: usize,
     pub(crate) socket: Option<Socket>,
+    /// GRO is on: receive into 64 KiB buffers of the driver's own.
+    gro: bool,
     id: Option<Id>,
     local: Option<SocketAddr>,
 }
 
+/// Receive buffer size for a UDP socket with GRO: a whole coalesced batch (at most 64 KiB).
+#[cfg_attr(not(feature = "udp"), allow(dead_code))]
+pub(crate) const GRO_BUFFER: usize = 64 * 1024;
+
 impl UdpSlot {
-    pub(crate) fn new(service: Arc<dyn UdpService>, binding: usize, socket: Socket) -> UdpSlot {
-        UdpSlot { service, binding, socket: Some(socket), id: None, local: None }
+    #[cfg_attr(not(feature = "udp"), allow(dead_code))]
+    pub(crate) fn new(service: Arc<dyn UdpService>, binding: usize, socket: Socket, gro: bool) -> UdpSlot {
+        UdpSlot { service, binding, socket: Some(socket), gro, id: None, local: None }
     }
 }
 
@@ -746,12 +756,14 @@ impl Core {
                 self.listeners[i].id = Some(self.driver.listen(s, LISTENER_BIT | i as u64)?);
             }
         }
+        #[cfg(feature = "udp")]
         for i in 0..self.udps.len() {
             if let Some(s) = self.udps[i].socket.take() {
                 let local = s.local_addr().ok();
-                let id = self.driver.udp(s, UDP_BIT | i as u64)?;
+                let key = UDP_BIT | i as u64;
+                let id = if self.udps[i].gro { self.driver.udp_large(s, key, GRO_BUFFER)? } else { self.driver.udp(s, key)? };
                 self.driver.recv(id, true);
-                let info = UdpInfo { binding: self.udps[i].binding, loop_index: self.index, local_addr: local.unwrap_or_else(|| "0.0.0.0:0".parse().unwrap()) };
+                let info = UdpInfo { binding: self.udps[i].binding, loop_index: self.index, local_addr: local.unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0))) };
                 let ep = self.udps[i].service.endpoint(&info);
                 let slot = &mut self.udps[i];
                 slot.id = Some(id);
@@ -810,11 +822,18 @@ impl Core {
             }
             Event::Sent { key, buf } => self.on_sent(key, buf),
             Event::Closed { key } => self.on_closed(key),
+            #[cfg(not(feature = "udp"))]
+            Event::Datagram { buf, .. } => self.pool.put(buf),
+            #[cfg(feature = "udp")]
             Event::Datagram { key, buf, meta } => {
                 let idx = (key & !UDP_BIT) as usize;
                 let data = buf;
                 self.with_udp(idx, |h, cx| h.on_datagram(cx, &data, &meta));
-                self.pool.put(data);
+                if self.udps.get(idx).is_some_and(|u| u.gro) {
+                    self.driver.provide(data); // back to the driver's large stock
+                } else {
+                    self.pool.put(data);
+                }
             }
             Event::Wake => {}
         }
@@ -988,6 +1007,16 @@ impl Core {
         self.shared.loop_active[self.index].store(self.conns.len, Ordering::Relaxed);
     }
 
+    /// During a stop: every connection is gone, the listeners are closed and no UDP endpoint is
+    /// busy (or the deadline passed).
+    fn stop_done(&self, aborted: bool) -> bool {
+        self.conns.len == 0 && !self.listeners.iter().any(|l| l.id.is_some()) && (aborted || !(0..self.endpoints.len()).any(|i| self.endpoint_busy(i)))
+    }
+
+    fn endpoint_busy(&self, i: usize) -> bool {
+        self.endpoints[i].as_ref().is_some_and(|e| e.is_busy())
+    }
+
     fn begin_stop(&mut self) {
         for i in 0..self.listeners.len() {
             if let Some(id) = self.listeners[i].id {
@@ -1018,6 +1047,11 @@ impl Core {
             self.now_ns = simoom_sys::time::now_ns();
             self.fire_timers();
             self.after_callbacks();
+            // A timer may have finished the last piece of work of a stop (a QUIC endpoint
+            // that went idle): check before blocking.
+            if stop_at.is_some() && self.stop_done(aborted) {
+                break;
+            }
             for _ in 0..self.driver.buffers_wanted() {
                 let b = self.pool.get(recv_size);
                 self.driver.provide(b);
@@ -1060,16 +1094,20 @@ impl Core {
                     for key in self.conns.keys() {
                         self.close_now(key, CloseReason::Stopped);
                     }
-                }
-                let listeners_open = self.listeners.iter().any(|l| l.id.is_some());
-                if self.conns.len == 0 && !listeners_open {
-                    for i in 0..self.udps.len() {
-                        if let Some(id) = self.udps[i].id.take() {
-                            self.driver.close(id);
+                    for i in 0..self.endpoints.len() {
+                        if self.endpoint_busy(i) {
+                            self.with_udp(i, |h, cx| h.on_abort(cx));
                         }
                     }
+                }
+                if self.stop_done(aborted) {
                     break;
                 }
+            }
+        }
+        for i in 0..self.udps.len() {
+            if let Some(id) = self.udps[i].id.take() {
+                self.driver.close(id);
             }
         }
         // Let the UDP closes and any last sends complete, then shut the queue.

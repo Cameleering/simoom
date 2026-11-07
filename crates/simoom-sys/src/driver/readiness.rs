@@ -2,7 +2,7 @@
 //! registration once per socket, non-blocking `recv` into a stock buffer only after readiness,
 //! and one vectored `sendmsg` per connection per turn for everything queued.
 
-use super::{DriverConfig, DriverStats, Event, Id, OutBuf, Slab, Waker};
+use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Waker, LARGE_BATCH};
 use crate::net::{RawSock, Socket};
 use crate::udp::{RecvMeta, Transmit, BATCH};
 use std::collections::VecDeque;
@@ -52,6 +52,8 @@ struct Entry {
     in_flush: bool,
     failed: bool,
     hup: bool,
+    /// A UDP socket receiving into large buffers (GRO).
+    large: bool,
     off: usize,
     out: VecDeque<OutBuf>,
 }
@@ -61,6 +63,7 @@ pub(crate) struct Driver<P: Poller> {
     waker: Waker,
     slab: Slab<Entry>,
     stash: Vec<Vec<u8>>,
+    large: LargeBufs,
     target: usize,
     read_list: Vec<Id>,
     flush_list: Vec<Id>,
@@ -80,6 +83,7 @@ impl<P: Poller> Driver<P> {
             waker,
             slab: Slab::new(),
             stash: Vec::new(),
+            large: LargeBufs::default(),
             target: 16,
             read_list: Vec::new(),
             flush_list: Vec::new(),
@@ -109,6 +113,7 @@ impl<P: Poller> Driver<P> {
             in_flush: false,
             failed: false,
             hup: false,
+            large: false,
             off: 0,
             out: VecDeque::new(),
         });
@@ -134,6 +139,15 @@ impl<P: Poller> Driver<P> {
 
     pub(crate) fn udp(&mut self, sock: Socket, key: u64) -> io::Result<Id> {
         self.add(sock, key, Kind::Udp)
+    }
+
+    pub(crate) fn udp_large(&mut self, sock: Socket, key: u64, size: usize) -> io::Result<Id> {
+        let id = self.add(sock, key, Kind::Udp)?;
+        self.large.size = self.large.size.max(size);
+        if let Some(e) = self.slab.get_mut(id) {
+            e.large = true;
+        }
+        Ok(id)
     }
 
     pub(crate) fn recv(&mut self, id: Id, on: bool) {
@@ -187,7 +201,9 @@ impl<P: Poller> Driver<P> {
     }
 
     pub(crate) fn provide(&mut self, buf: Vec<u8>) {
-        self.stash.push(buf);
+        if let Some(buf) = self.large.keep(buf) {
+            self.stash.push(buf);
+        }
     }
 
     pub(crate) fn buffers_wanted(&self) -> usize {
@@ -296,19 +312,26 @@ impl<P: Poller> Driver<P> {
                 e.in_read = false;
                 continue;
             }
-            if self.stash.is_empty() {
+            if self.stash.is_empty() && !e.large {
                 keep.push(id); // starved: wait for buffers
                 continue;
             }
             let mut done = false;
             for _ in 0..self.budget {
                 if e.kind == Kind::Udp {
-                    let n = self.stash.len().min(BATCH);
-                    if n == 0 {
-                        break;
-                    }
-                    let at = self.stash.len() - n;
-                    self.scratch.extend(self.stash.drain(at..));
+                    let n = if e.large {
+                        let large = &mut self.large;
+                        self.scratch.extend((0..LARGE_BATCH).map(|_| large.take()));
+                        LARGE_BATCH
+                    } else {
+                        let n = self.stash.len().min(BATCH);
+                        if n == 0 {
+                            break;
+                        }
+                        let at = self.stash.len() - n;
+                        self.scratch.extend(self.stash.drain(at..));
+                        n
+                    };
                     let mut meta = [RecvMeta::default(); BATCH];
                     self.stats.recv_calls += 1;
                     let r = e.sock.recv_msgs(&mut self.scratch, &mut meta);
@@ -317,9 +340,11 @@ impl<P: Poller> Driver<P> {
                             for (i, buf) in self.scratch.drain(..got).enumerate() {
                                 out.push(Event::Datagram { key: e.key, buf, meta: meta[i] });
                             }
-                            for mut b in self.scratch.drain(..) {
-                                b.clear();
-                                self.stash.push(b);
+                            for b in self.scratch.drain(..) {
+                                if let Some(mut b) = self.large.keep(b) {
+                                    b.clear();
+                                    self.stash.push(b);
+                                }
                             }
                             if got < n {
                                 done = true;
@@ -327,9 +352,11 @@ impl<P: Poller> Driver<P> {
                             }
                         }
                         Err(err) => {
-                            for mut b in self.scratch.drain(..) {
-                                b.clear();
-                                self.stash.push(b);
+                            for b in self.scratch.drain(..) {
+                                if let Some(mut b) = self.large.keep(b) {
+                                    b.clear();
+                                    self.stash.push(b);
+                                }
                             }
                             if err.kind() != io::ErrorKind::WouldBlock && err.kind() != io::ErrorKind::Interrupted {
                                 out.push(Event::Error { key: e.key, error: err });

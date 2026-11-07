@@ -2,6 +2,7 @@
 
 use super::keyschedule::traffic_key_iv;
 use super::{alert, AeadAlg, CipherSuite, Error, Result};
+#[cfg(feature = "chacha20")]
 use crate::crypto::chacha::ChaCha20Poly1305;
 use crate::crypto::gcm::AesGcm;
 
@@ -15,6 +16,7 @@ pub(crate) const TAG: usize = 16;
 #[allow(clippy::large_enum_variant)] // one per connection or key; boxing would add an indirection on the hot path
 pub(crate) enum Aead {
     Gcm(AesGcm),
+    #[cfg(feature = "chacha20")]
     ChaCha(ChaCha20Poly1305),
 }
 
@@ -22,6 +24,7 @@ impl Aead {
     pub fn new(alg: AeadAlg, key: &[u8]) -> Aead {
         match alg {
             AeadAlg::Aes128Gcm | AeadAlg::Aes256Gcm => Aead::Gcm(AesGcm::new(key)),
+            #[cfg(feature = "chacha20")]
             AeadAlg::Chacha20Poly1305 => Aead::ChaCha(ChaCha20Poly1305::new(key.try_into().expect("32-byte key"))),
         }
     }
@@ -29,6 +32,7 @@ impl Aead {
     pub fn seal(&self, nonce: &[u8; 12], aad: &[u8], data: &mut [u8]) -> [u8; 16] {
         match self {
             Aead::Gcm(a) => a.seal(nonce, aad, data),
+            #[cfg(feature = "chacha20")]
             Aead::ChaCha(a) => a.seal(nonce, aad, data),
         }
     }
@@ -36,6 +40,7 @@ impl Aead {
     pub fn open(&self, nonce: &[u8; 12], aad: &[u8], data: &mut [u8], tag: &[u8]) -> bool {
         match self {
             Aead::Gcm(a) => a.open(nonce, aad, data, tag),
+            #[cfg(feature = "chacha20")]
             Aead::ChaCha(a) => a.open(nonce, aad, data, tag),
         }
     }

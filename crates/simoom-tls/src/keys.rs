@@ -2,8 +2,10 @@
 //! SEC1 (`EC PRIVATE KEY`) and PKCS#1 (`RSA PRIVATE KEY`).
 
 use crate::asn1::{self, Der, DerError, DerResult, TAG_OID, TAG_SEQUENCE};
+#[cfg(feature = "p384")]
 use crate::crypto::ec::p384;
 use crate::crypto::p256;
+#[cfg(feature = "rsa")]
 use crate::crypto::rsa::{RsaPrivateKey, RsaPublicKey};
 use crate::crypto::sha2::HashAlg;
 use crate::pem;
@@ -12,6 +14,7 @@ use crate::pem;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EcCurve {
     P256,
+    #[cfg(feature = "p384")]
     P384,
 }
 
@@ -20,6 +23,7 @@ impl EcCurve {
     pub fn byte_len(self) -> usize {
         match self {
             EcCurve::P256 => 32,
+            #[cfg(feature = "p384")]
             EcCurve::P384 => 48,
         }
     }
@@ -27,18 +31,21 @@ impl EcCurve {
     pub fn hash(self) -> HashAlg {
         match self {
             EcCurve::P256 => HashAlg::Sha256,
+            #[cfg(feature = "p384")]
             EcCurve::P384 => HashAlg::Sha384,
         }
     }
     pub fn generate_private(self) -> Vec<u8> {
         match self {
             EcCurve::P256 => p256::generate_private().to_vec(),
+            #[cfg(feature = "p384")]
             EcCurve::P384 => p384::generate_private(),
         }
     }
     pub fn public_key(self, private: &[u8]) -> Option<Vec<u8>> {
         match self {
             EcCurve::P256 => p256::public_key(private).map(|p| p.to_vec()),
+            #[cfg(feature = "p384")]
             EcCurve::P384 => p384::public_key(private),
         }
     }
@@ -46,18 +53,21 @@ impl EcCurve {
     pub fn sign(self, private: &[u8], digest: &[u8], hash: HashAlg) -> Option<(Vec<u8>, Vec<u8>)> {
         match self {
             EcCurve::P256 => p256::sign(private, digest, hash).map(|(r, s)| (r.to_vec(), s.to_vec())),
+            #[cfg(feature = "p384")]
             EcCurve::P384 => p384::sign(private, digest, hash),
         }
     }
     pub fn verify(self, public: &[u8], digest: &[u8], r: &[u8], s: &[u8]) -> bool {
         match self {
             EcCurve::P256 => p256::verify(public, digest, r, s),
+            #[cfg(feature = "p384")]
             EcCurve::P384 => p384::verify(public, digest, r, s),
         }
     }
     pub fn validate_point(self, public: &[u8]) -> bool {
         match self {
             EcCurve::P256 => p256::validate_point(public),
+            #[cfg(feature = "p384")]
             EcCurve::P384 => p384::validate_point(public),
         }
     }
@@ -70,13 +80,14 @@ pub const OID_P256: &str = "1.2.840.10045.3.1.7";
 pub const OID_P384: &str = "1.3.132.0.34";
 pub const OID_ED25519: &str = "1.3.101.112";
 
-fn derr<T>(m: &str) -> DerResult<T> {
-    Err(DerError(m.to_string()))
+fn derr<T>(m: &'static str) -> DerResult<T> {
+    Err(DerError(m.into()))
 }
 
 pub fn curve_from_oid(oid: &str) -> Option<EcCurve> {
     match oid {
         OID_P256 => Some(EcCurve::P256),
+        #[cfg(feature = "p384")]
         OID_P384 => Some(EcCurve::P384),
         _ => None,
     }
@@ -85,6 +96,7 @@ pub fn curve_from_oid(oid: &str) -> Option<EcCurve> {
 pub fn curve_oid(c: EcCurve) -> &'static str {
     match c {
         EcCurve::P256 => OID_P256,
+        #[cfg(feature = "p384")]
         EcCurve::P384 => OID_P384,
     }
 }
@@ -93,7 +105,9 @@ pub fn curve_oid(c: EcCurve) -> &'static str {
 #[derive(Clone, Debug)]
 pub enum PublicKey {
     Ec { curve: EcCurve, point: Vec<u8> },
+    #[cfg(feature = "rsa")]
     Rsa(RsaPublicKey),
+    #[cfg(feature = "ed25519")]
     Ed25519([u8; 32]),
 }
 
@@ -106,6 +120,7 @@ impl PublicKey {
         let oid = alg.oid()?;
         let key = s.bit_string()?;
         match oid.as_str() {
+            #[cfg(feature = "rsa")]
             OID_RSA_ENCRYPTION | OID_RSASSA_PSS => {
                 let mut k = Der::new(key).sequence()?;
                 let n = k.uint()?;
@@ -123,18 +138,21 @@ impl PublicKey {
                 }
                 Ok(PublicKey::Ec { curve, point: key.to_vec() })
             }
+            #[cfg(feature = "ed25519")]
             OID_ED25519 => {
                 let k: [u8; 32] = key.try_into().map_err(|_| DerError("bad Ed25519 public key length".into()))?;
                 Ok(PublicKey::Ed25519(k))
             }
-            other => Err(DerError(format!("unsupported public key algorithm {other}"))),
+            _ => derr("unsupported public key algorithm"),
         }
     }
 
     pub fn describe(&self) -> String {
         match self {
             PublicKey::Ec { curve, .. } => format!("ECDSA {:?}", curve),
+            #[cfg(feature = "rsa")]
             PublicKey::Rsa(r) => format!("RSA {}", r.modulus_bits()),
+            #[cfg(feature = "ed25519")]
             PublicKey::Ed25519(_) => "Ed25519".to_string(),
         }
     }
@@ -145,11 +163,13 @@ impl PublicKey {
             PublicKey::Ec { curve, point } => {
                 asn1::seq(&[asn1::seq(&[asn1::oid(OID_EC_PUBLIC_KEY), asn1::oid(curve_oid(*curve))]), asn1::bit_string(point)])
             }
+            #[cfg(feature = "rsa")]
             PublicKey::Rsa(r) => {
                 let (n, e) = r.components();
                 let key = asn1::seq(&[asn1::uint(&n), asn1::uint(&e)]);
                 asn1::seq(&[asn1::seq(&[asn1::oid(OID_RSA_ENCRYPTION), asn1::tlv(asn1::TAG_NULL, &[])]), asn1::bit_string(&key)])
             }
+            #[cfg(feature = "ed25519")]
             PublicKey::Ed25519(k) => asn1::seq(&[asn1::seq(&[asn1::oid(OID_ED25519)]), asn1::bit_string(k)]),
         }
     }
@@ -165,7 +185,9 @@ impl PublicKey {
 #[allow(clippy::large_enum_variant)] // one per connection or key; boxing would add an indirection on the hot path
 pub enum PrivateKey {
     Ec { curve: EcCurve, d: Vec<u8>, public: Vec<u8> },
+    #[cfg(feature = "rsa")]
     Rsa(RsaPrivateKey),
+    #[cfg(feature = "ed25519")]
     Ed25519 { seed: [u8; 32], public: [u8; 32] },
 }
 
@@ -178,6 +200,7 @@ impl PrivateKey {
             let r = match b.label.as_str() {
                 "PRIVATE KEY" => PrivateKey::from_pkcs8(&b.der),
                 "EC PRIVATE KEY" => PrivateKey::from_sec1(&b.der, None),
+                #[cfg(feature = "rsa")]
                 "RSA PRIVATE KEY" => PrivateKey::from_pkcs1(&b.der),
                 "ENCRYPTED PRIVATE KEY" => return Err("encrypted private keys are not supported".into()),
                 _ => continue,
@@ -189,10 +212,10 @@ impl PrivateKey {
 
     /// Parses DER in any supported format (tries PKCS#8, then SEC1, then PKCS#1).
     pub fn from_der(der: &[u8]) -> Result<PrivateKey, String> {
-        PrivateKey::from_pkcs8(der)
-            .or_else(|_| PrivateKey::from_sec1(der, None))
-            .or_else(|_| PrivateKey::from_pkcs1(der))
-            .map_err(|e| format!("unrecognised private key: {e}"))
+        let r = PrivateKey::from_pkcs8(der).or_else(|_| PrivateKey::from_sec1(der, None));
+        #[cfg(feature = "rsa")]
+        let r = r.or_else(|_| PrivateKey::from_pkcs1(der));
+        r.map_err(|e| format!("unrecognised private key: {e}"))
     }
 
     pub fn from_pkcs8(der: &[u8]) -> DerResult<PrivateKey> {
@@ -205,26 +228,30 @@ impl PrivateKey {
         let oid = alg.oid()?;
         let key = s.octet_string()?;
         match oid.as_str() {
+            #[cfg(feature = "rsa")]
             OID_RSA_ENCRYPTION => PrivateKey::from_pkcs1(key),
             OID_EC_PUBLIC_KEY => {
                 let p = alg.expect(TAG_OID)?;
                 let curve = curve_from_oid(&asn1::decode_oid(p.value)?).ok_or(DerError("unsupported curve".into()))?;
                 PrivateKey::from_sec1(key, Some(curve))
             }
+            #[cfg(feature = "ed25519")]
             OID_ED25519 => {
                 let seed = Der::new(key).octet_string()?;
                 let seed: [u8; 32] = seed.try_into().map_err(|_| DerError("bad Ed25519 private key length".into()))?;
                 Ok(PrivateKey::ed25519_from_seed(seed))
             }
-            other => Err(DerError(format!("unsupported private key algorithm {other}"))),
+            _ => derr("unsupported private key algorithm"),
         }
     }
 
+    #[cfg(feature = "ed25519")]
     /// An Ed25519 key from its 32-byte seed.
     pub fn ed25519_from_seed(seed: [u8; 32]) -> PrivateKey {
         PrivateKey::Ed25519 { seed, public: crate::crypto::ed25519::public_key(&seed) }
     }
 
+    #[cfg(feature = "ed25519")]
     /// A fresh random Ed25519 key.
     pub fn generate_ed25519() -> PrivateKey {
         PrivateKey::ed25519_from_seed(crate::crypto::rng::array::<32>())
@@ -263,6 +290,7 @@ impl PrivateKey {
         Ok(PrivateKey::Ec { curve, d: dv, public })
     }
 
+    #[cfg(feature = "rsa")]
     pub fn from_pkcs1(der: &[u8]) -> DerResult<PrivateKey> {
         let mut s = Der::new(der).sequence()?;
         if s.small_uint()? != 0 {
@@ -282,7 +310,9 @@ impl PrivateKey {
     pub fn public_key(&self) -> PublicKey {
         match self {
             PrivateKey::Ec { curve, public, .. } => PublicKey::Ec { curve: *curve, point: public.clone() },
+            #[cfg(feature = "rsa")]
             PrivateKey::Rsa(r) => PublicKey::Rsa(r.public.clone()),
+            #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519 { public, .. } => PublicKey::Ed25519(*public),
         }
     }
@@ -290,6 +320,7 @@ impl PrivateKey {
     /// Encodes the key as PKCS#8 DER (RSA keys need their original PKCS#1 encoding).
     pub fn to_pkcs8(&self) -> Vec<u8> {
         match self {
+            #[cfg(feature = "rsa")]
             PrivateKey::Rsa(r) => {
                 let pkcs1 = r.pkcs1_der().unwrap_or_default();
                 asn1::seq(&[
@@ -313,11 +344,13 @@ impl PrivateKey {
                     asn1::octet_string(&sec1),
                 ]))
             }
+            #[cfg(feature = "ed25519")]
             PrivateKey::Ed25519 { seed, .. } => Some(asn1::seq(&[
                 asn1::uint(&[0]),
                 asn1::seq(&[asn1::oid(OID_ED25519)]),
                 asn1::octet_string(&asn1::octet_string(seed)),
             ])),
+            #[cfg(feature = "rsa")]
             PrivateKey::Rsa(_) => None,
         }
     }
@@ -373,6 +406,7 @@ impl SignatureAlgorithm {
             "1.2.840.10045.4.3.2" => SignatureAlgorithm::Ecdsa(HashAlg::Sha256),
             "1.2.840.10045.4.3.3" => SignatureAlgorithm::Ecdsa(HashAlg::Sha384),
             "1.2.840.10045.4.3.4" => SignatureAlgorithm::Ecdsa(HashAlg::Sha512),
+            #[cfg(feature = "ed25519")]
             OID_ED25519 => SignatureAlgorithm::Ed25519,
             OID_RSASSA_PSS => {
                 // The defaults (SHA-1, salt 20) are not supported: parameters must be explicit.
@@ -419,7 +453,9 @@ impl SignatureAlgorithm {
     /// Verifies `sig` over `message` with `key`.
     pub fn verify(&self, key: &PublicKey, message: &[u8], sig: &[u8]) -> bool {
         match (self, key) {
+            #[cfg(feature = "rsa")]
             (SignatureAlgorithm::RsaPkcs1(h), PublicKey::Rsa(k)) => k.verify_pkcs1(*h, &h.hash(message), sig),
+            #[cfg(feature = "rsa")]
             (SignatureAlgorithm::RsaPss { hash, salt_len }, PublicKey::Rsa(k)) => {
                 k.verify_pss(*hash, &hash.hash(message), sig, Some(*salt_len))
             }
@@ -427,13 +463,14 @@ impl SignatureAlgorithm {
                 Some((r, s)) => curve.verify(point, &h.hash(message), &r, &s),
                 None => false,
             },
+            #[cfg(feature = "ed25519")]
             (SignatureAlgorithm::Ed25519, PublicKey::Ed25519(k)) => crate::crypto::ed25519::verify(k, message, sig),
             _ => false,
         }
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "rsa", feature = "p384", feature = "ed25519"))]
 mod tests {
     use super::*;
 
@@ -471,6 +508,7 @@ mod tests {
     #[test]
     fn rsa_against_openssl_vectors() {
         let key = match PrivateKey::from_pem(RSA_PKCS8.as_bytes()).unwrap() {
+            #[cfg(feature = "rsa")]
             PrivateKey::Rsa(r) => r,
             _ => unreachable!(),
         };
@@ -494,6 +532,7 @@ mod tests {
     #[test]
     fn rsa_crt_and_blinding_match_plain_exponentiation() {
         let key = match PrivateKey::from_pem(RSA_PKCS1.as_bytes()).unwrap() {
+            #[cfg(feature = "rsa")]
             PrivateKey::Rsa(r) => r,
             _ => unreachable!(),
         };

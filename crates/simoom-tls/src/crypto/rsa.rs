@@ -443,3 +443,39 @@ ab38f19c0e7c70e9c6c2fb7e43cd7d5e2c91b88dbdc7aa2a4b9cb7df5dc33d81";
         assert!(RsaPublicKey::new(&even, &[1, 0, 1]).is_none());
     }
 }
+
+#[cfg(test)]
+mod micro {
+    use super::super::bigint::{mont_mul, MontCtx};
+    #[test]
+    #[ignore]
+    fn rsa_breakdown() {
+        let key = match crate::keys::PrivateKey::from_pem(include_bytes!("../../testdata/rsa2048.pkcs1.pem")).unwrap() {
+            crate::keys::PrivateKey::Rsa(k) => k,
+            _ => unreachable!(),
+        };
+        let crt = key.crt.as_ref().unwrap();
+        let ctx: &MontCtx = &crt.p;
+        let a = ctx.to_mont(&vec![3u64; 16]);
+        let mut r = a.clone();
+        let mut t = vec![0u64; 18];
+        let n = 200_000;
+        let s = std::time::Instant::now();
+        for _ in 0..n {
+            let x = r.clone();
+            mont_mul(&mut r, &x, &a, &ctx.m, ctx.m0inv, &mut t);
+        }
+        println!("mont_mul 16 limbs: {:.0} ns", s.elapsed().as_nanos() as f64 / n as f64);
+        let s = std::time::Instant::now();
+        for _ in 0..200 {
+            std::hint::black_box(ctx.pow(&a, &crt.dp, true));
+        }
+        println!("pow 1024: {:.1} us", s.elapsed().as_nanos() as f64 / 200.0 / 1e3);
+        let dg = [1u8; 32];
+        let s = std::time::Instant::now();
+        for _ in 0..200 {
+            std::hint::black_box(key.sign_pss(crate::crypto::sha2::HashAlg::Sha256, &dg));
+        }
+        println!("sign: {:.1} us", s.elapsed().as_nanos() as f64 / 200.0 / 1e3);
+    }
+}

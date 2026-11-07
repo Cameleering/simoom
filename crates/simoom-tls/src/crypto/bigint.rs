@@ -86,57 +86,30 @@ pub fn mod_sub(r: &mut [u64], a: &[u64], b: &[u64], m: &[u64]) {
     }
 }
 
-/// Montgomery product with the limb count known at compile time (bounds checks removed).
-#[inline(always)]
-fn mont_mul_n<const N: usize>(r: &mut [u64], a: &[u64], b: &[u64], m: &[u64], m0inv: u64) {
-    let (a, b, m): (&[u64; N], &[u64; N], &[u64; N]) = (a.try_into().unwrap(), b.try_into().unwrap(), m.try_into().unwrap());
-    let r: &mut [u64; N] = r.try_into().unwrap();
-    let mut t = [0u64; N];
-    let (mut t_n, mut t_n1);
-    t_n = 0u64;
-    for &bi in b.iter() {
-        let mut c = 0;
-        for j in 0..N {
-            let (v, cc) = mac(t[j], a[j], bi, c);
-            t[j] = v;
-            c = cc;
-        }
-        let (v, cc) = adc(t_n, c, 0);
-        t_n = v;
-        t_n1 = cc;
-        let q = t[0].wrapping_mul(m0inv);
-        let (_, mut c) = mac(t[0], q, m[0], 0);
-        for j in 1..N {
-            let (v, cc) = mac(t[j], q, m[j], c);
-            t[j - 1] = v;
-            c = cc;
-        }
-        let (v, cc) = adc(t_n, c, 0);
-        t[N - 1] = v;
-        t_n = t_n1 + cc;
-    }
-    let mut borrow = 0;
-    for i in 0..N {
-        let (v, bo) = sbb(t[i], m[i], borrow);
-        r[i] = v;
-        borrow = bo;
-    }
-    let use_d = (t_n != 0) as u64 | (borrow ^ 1);
-    let mask = crate::util::ct_mask(use_d);
-    for i in 0..N {
-        r[i] = (r[i] & mask) | (t[i] & !mask);
-    }
-}
-
 /// Montgomery product r = a * b * R^{-1} mod m (CIOS). `t` is scratch of length n+2.
 pub fn mont_mul(r: &mut [u64], a: &[u64], b: &[u64], m: &[u64], m0inv: u64, t: &mut [u64]) {
     let n = m.len();
-    match n {
-        16 => return mont_mul_n::<16>(r, a, b, m, m0inv),
-        24 => return mont_mul_n::<24>(r, a, b, m, m0inv),
-        32 => return mont_mul_n::<32>(r, a, b, m, m0inv),
-        _ => {}
+    if simoom_sys::arch::bigint_mont_mul(t, a, b, m, m0inv) {
+        // the MULX kernel leaves t < 2m in t[..n] and t[n]: subtract m once if t >= m
+        let hi = t[n];
+        let mut borrow = 0;
+        for i in 0..n {
+            let (v, bo) = sbb(t[i], m[i], borrow);
+            r[i] = v;
+            borrow = bo;
+        }
+        let mask = crate::util::ct_mask((hi != 0) as u64 | (borrow ^ 1));
+        for i in 0..n {
+            r[i] = (r[i] & mask) | (t[i] & !mask);
+        }
+        return;
     }
+    generic_mont_mul(r, a, b, m, m0inv, t)
+}
+
+/// The portable CIOS loop for any limb count.
+fn generic_mont_mul(r: &mut [u64], a: &[u64], b: &[u64], m: &[u64], m0inv: u64, t: &mut [u64]) {
+    let n = m.len();
     for x in t.iter_mut() {
         *x = 0;
     }
@@ -383,6 +356,49 @@ pub fn reduce_be(bytes: &[u8], m: &[u64]) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mont_mul_kernel_matches_portable() {
+        // the MULX kernel (when the CPU has it) against the generic CIOS loop, for limb counts
+        // the kernel takes (multiples of 4) and moduli with high and low top limbs
+        let mut seed = 0x6a09_e667_f3bc_c908u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for n in [4usize, 8, 12, 16, 32] {
+            for top in [u64::MAX, 1u64 << 63, 0x1234_5678] {
+                let mut m: Vec<u64> = (0..n).map(|_| next()).collect();
+                m[0] |= 1;
+                m[n - 1] = top | 1;
+                let m0inv = mont_m0inv(m[0]);
+                let below = |x: u64| if x >= top { top >> 1 } else { x };
+                for _ in 0..50 {
+                    let mut a: Vec<u64> = (0..n).map(|_| next()).collect();
+                    let mut b: Vec<u64> = (0..n).map(|_| next()).collect();
+                    a[n - 1] = below(a[n - 1]);
+                    b[n - 1] = below(b[n - 1]);
+                    let mut r = vec![0u64; n];
+                    let mut t = vec![0u64; n + 2];
+                    mont_mul(&mut r, &a, &b, &m, m0inv, &mut t);
+                    // portable reference: the generic loop with a size the kernel refuses
+                    let mut r2 = vec![0u64; n];
+                    let mut t2 = vec![0u64; n + 2];
+                    generic_mont_mul(&mut r2, &a, &b, &m, m0inv, &mut t2);
+                    assert_eq!(r, r2, "n = {n}");
+                }
+                // m - 1 squared
+                let mut mm1 = m.clone();
+                mm1[0] -= 1;
+                let (mut r, mut r2) = (vec![0u64; n], vec![0u64; n]);
+                mont_mul(&mut r, &mm1, &mm1, &m, m0inv, &mut vec![0u64; n + 2]);
+                generic_mont_mul(&mut r2, &mm1, &mm1, &m, m0inv, &mut vec![0u64; n + 2]);
+                assert_eq!(r, r2);
+            }
+        }
+    }
 
     #[test]
     fn small_modexp() {

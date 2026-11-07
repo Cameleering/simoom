@@ -53,6 +53,9 @@ dependencies = [
 [[package]]
 name = "simoom-qpack"
 version = "0.1.0"
+dependencies = [
+ "simoom-hpack",
+]
 
 [[package]]
 name = "simoom-quic"

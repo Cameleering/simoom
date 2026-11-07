@@ -1,96 +1,14 @@
-//! Huffman coding shared by HPACK and QPACK (RFC 7541 section 5.2 and Appendix B).
+//! Huffman coding (RFC 7541 section 5.2 and Appendix B), shared with HPACK: this is
+//! simoom-hpack's code table, encoder and table-driven decoder, so a build with both HTTP/2
+//! and HTTP/3 carries one copy.
 
-use std::sync::OnceLock;
+pub use simoom_hpack::huffman::{encode, encoded_len};
 
-use crate::huffman_table::HUFFMAN_TABLE;
-
-/// Number of bytes `data` occupies once Huffman encoded.
-pub fn encoded_len(data: &[u8]) -> usize {
-    let bits: usize = data.iter().map(|&b| HUFFMAN_TABLE[b as usize].1 as usize).sum();
-    bits.div_ceil(8)
-}
-
-/// Huffman-encodes `data`, appending to `out` (padded with the EOS prefix).
-pub fn encode(data: &[u8], out: &mut Vec<u8>) {
-    let mut acc: u64 = 0;
-    let mut nbits: u32 = 0;
-    for &b in data {
-        let (code, len) = HUFFMAN_TABLE[b as usize];
-        acc = (acc << len) | code as u64;
-        nbits += len as u32;
-        while nbits >= 8 {
-            nbits -= 8;
-            out.push((acc >> nbits) as u8);
-        }
-        acc &= (1u64 << nbits) - 1;
-    }
-    if nbits > 0 {
-        let pad = 8 - nbits;
-        out.push(((acc << pad) | ((1u64 << pad) - 1)) as u8);
-    }
-}
-
-/// Decoding tree: node `i` has children `tree[i][0|1]`; values >= 0x8000 are leaves
-/// (`0x8000 | symbol`), 0 means "no child".
-fn tree() -> &'static [[u16; 2]] {
-    static TREE: OnceLock<Vec<[u16; 2]>> = OnceLock::new();
-    TREE.get_or_init(|| {
-        let mut t: Vec<[u16; 2]> = vec![[0, 0]];
-        for (sym, &(code, len)) in HUFFMAN_TABLE.iter().enumerate() {
-            let mut node = 0usize;
-            for i in (0..len).rev() {
-                let bit = ((code >> i) & 1) as usize;
-                if i == 0 {
-                    t[node][bit] = 0x8000 | sym as u16;
-                } else if t[node][bit] == 0 {
-                    t.push([0, 0]);
-                    let idx = (t.len() - 1) as u16;
-                    t[node][bit] = idx;
-                    node = idx as usize;
-                } else {
-                    node = t[node][bit] as usize;
-                }
-            }
-        }
-        t
-    })
-}
-
-/// Decodes a Huffman-encoded string, appending to `out`. Rejects the EOS symbol, padding longer
+/// Decodes a Huffman-encoded string, appending to `out`. Rejects EOS, padding longer
 /// than 7 bits and padding that is not all ones.
 #[allow(clippy::result_unit_err)]
 pub fn decode(data: &[u8], out: &mut Vec<u8>) -> Result<(), ()> {
-    let t = tree();
-    out.reserve(data.len() * 8 / 5);
-    let mut node = 0usize;
-    let mut pending_bits = 0u32;
-    let mut pending_all_ones = true;
-    for &byte in data {
-        for i in (0..8).rev() {
-            let bit = ((byte >> i) & 1) as usize;
-            pending_bits += 1;
-            pending_all_ones &= bit == 1;
-            let next = t[node][bit];
-            if next & 0x8000 != 0 {
-                let sym = next & 0x7fff;
-                if sym == 256 {
-                    return Err(());
-                }
-                out.push(sym as u8);
-                node = 0;
-                pending_bits = 0;
-                pending_all_ones = true;
-            } else if next == 0 {
-                return Err(());
-            } else {
-                node = next as usize;
-            }
-        }
-    }
-    if pending_bits > 7 || !pending_all_ones {
-        return Err(());
-    }
-    Ok(())
+    simoom_hpack::huffman::decode(data, out).map_err(|_| ())
 }
 
 #[cfg(test)]

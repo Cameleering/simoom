@@ -1,7 +1,13 @@
 //! Arithmetic in GF(2^255 - 19) with five 51-bit limbs, shared by X25519 and Ed25519.
-//! Branch-free throughout; inversion is a fixed addition chain.
+//! Branch-free throughout; inversion is safegcd (`modinv`).
+
+// Without Ed25519, X25519 uses only part of this module.
+#![cfg_attr(not(feature = "ed25519"), allow(dead_code))]
 
 pub(crate) const MASK: u64 = (1 << 51) - 1;
+
+/// p = 2^255 - 19, for the inversion.
+pub(crate) const P_INV: super::modinv::Modulus = super::modinv::Modulus::new([0xffff_ffff_ffff_ffed, u64::MAX, u64::MAX, 0x7fff_ffff_ffff_ffff]);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Fe(pub [u64; 5]);
@@ -57,6 +63,7 @@ impl Fe {
     }
 
     /// Canonical encoding (fully reduced).
+    #[inline(never)]
     pub fn to_bytes(self) -> [u8; 32] {
         let mut h = Fe::carry(self.0).0;
         let mut q = (h[0] + 19) >> 51;
@@ -78,20 +85,38 @@ impl Fe {
         out
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn add(self, o: Fe) -> Fe {
         let a = self.0;
         let b = o.0;
         Fe::carry([a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3], a[4] + b[4]])
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn sub(self, o: Fe) -> Fe {
         // + 4p keeps every limb positive (inputs are carried: limbs < 2^52)
         const P4: [u64; 5] = [0x1f_ffff_ffff_ffb4, 0x1f_ffff_ffff_fffc, 0x1f_ffff_ffff_fffc, 0x1f_ffff_ffff_fffc, 0x1f_ffff_ffff_fffc];
         let a = self.0;
         let b = o.0;
         Fe::carry([a[0] + P4[0] - b[0], a[1] + P4[1] - b[1], a[2] + P4[2] - b[2], a[3] + P4[3] - b[3], a[4] + P4[4] - b[4]])
+    }
+
+    /// Addition without carrying. Inputs with limbs below 2^53 give limbs below 2^54, which
+    /// [`Fe::mul`] and [`Fe::square`] accept (they take limbs up to 2^56).
+    #[inline(always)]
+    pub fn add_nc(self, o: Fe) -> Fe {
+        let (a, b) = (self.0, o.0);
+        Fe([a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3], a[4] + b[4]])
+    }
+
+    /// Subtraction without carrying, adding 4p so every limb stays positive: `o` must have
+    /// limbs below 2^53 - 76 (any sum of two carried values does); the result has limbs below
+    /// `self`'s bound + 2^53.
+    #[inline(always)]
+    pub fn sub_nc(self, o: Fe) -> Fe {
+        const P4: [u64; 5] = [0x1f_ffff_ffff_ffb4, 0x1f_ffff_ffff_fffc, 0x1f_ffff_ffff_fffc, 0x1f_ffff_ffff_fffc, 0x1f_ffff_ffff_fffc];
+        let (a, b) = (self.0, o.0);
+        Fe([a[0] + P4[0] - b[0], a[1] + P4[1] - b[1], a[2] + P4[2] - b[2], a[3] + P4[3] - b[3], a[4] + P4[4] - b[4]])
     }
 
     pub fn neg(self) -> Fe {
@@ -176,8 +201,8 @@ impl Fe {
         Fe::reduce_wide([a[0] as u128 * k, a[1] as u128 * k, a[2] as u128 * k, a[3] as u128 * k, a[4] as u128 * k])
     }
 
-    /// (self^(2^250 - 1), self^11).
-    fn pow_chain(self) -> (Fe, Fe) {
+    /// self^(2^250 - 1).
+    fn pow_chain(self) -> Fe {
         let z2 = self.square();
         let z9 = z2.pow2k(2).mul(self);
         let z11 = z9.mul(z2);
@@ -188,20 +213,24 @@ impl Fe {
         let z2_50_0 = z2_40_0.pow2k(10).mul(z2_10_0);
         let z2_100_0 = z2_50_0.pow2k(50).mul(z2_50_0);
         let z2_200_0 = z2_100_0.pow2k(100).mul(z2_100_0);
-        let z2_250_0 = z2_200_0.pow2k(50).mul(z2_50_0);
-        (z2_250_0, z11)
+        z2_200_0.pow2k(50).mul(z2_50_0)
     }
 
-    /// self^(p-2).
+    /// self^-1 (0 for 0), constant time (safegcd).
     pub fn invert(self) -> Fe {
-        let (t, z11) = self.pow_chain();
-        t.pow2k(5).mul(z11)
+        let b = self.to_bytes();
+        let limbs: [u64; 4] = core::array::from_fn(|i| u64::from_le_bytes(b[8 * i..8 * i + 8].try_into().unwrap()));
+        let inv = super::modinv::invert(&limbs, &P_INV);
+        let mut out = [0u8; 32];
+        for (i, l) in inv.iter().enumerate() {
+            out[8 * i..8 * i + 8].copy_from_slice(&l.to_le_bytes());
+        }
+        Fe::from_bytes(&out)
     }
 
     /// self^((p-5)/8).
     pub fn pow22523(self) -> Fe {
-        let (t, _) = self.pow_chain();
-        t.pow2k(2).mul(self)
+        self.pow_chain().pow2k(2).mul(self)
     }
 
     pub fn is_negative(self) -> u8 {

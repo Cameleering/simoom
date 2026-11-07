@@ -1,6 +1,6 @@
 //! TLS 1.3 listeners: HTTP/1.1 and h2 chosen by ALPN, with the simoom-tls client.
 
-#![cfg(feature = "tls")]
+#![cfg(feature = "tls-client")]
 
 mod common;
 

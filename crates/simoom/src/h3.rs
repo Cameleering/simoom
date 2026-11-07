@@ -46,6 +46,7 @@ pub(crate) fn endpoint(sh: Arc<Shared>, cfg: Arc<simoom_quic::Config>, info: &Ud
         tmp: vec![0; 16 * 1024],
         handle: None,
         pool: None,
+        stopping: false,
     })
 }
 
@@ -86,7 +87,15 @@ struct H3Conn {
     streams: FastMap<u64, Box<St>>,
     peer: SocketAddr,
     ready: Vec<u64>,
+    /// Streams whose response is complete on our side, newest last: a graceful stop waits
+    /// until QUIC has their data acknowledged. Only the latest few hundred are kept.
+    flushing: Vec<u64>,
+    /// CONNECTION_CLOSE sent (graceful stop).
+    closing: bool,
 }
+
+/// Completed streams remembered per connection for a graceful stop.
+const FLUSHING_KEPT: usize = 256;
 
 struct H3Ep {
     sh: Arc<Shared>,
@@ -105,6 +114,8 @@ struct H3Ep {
     tmp: Vec<u8>,
     handle: Option<EndpointHandle>,
     pool: Option<OffloadPool>,
+    /// A graceful stop began: GOAWAY was sent, connections close once idle.
+    stopping: bool,
 }
 
 impl H3Ep {
@@ -120,8 +131,27 @@ impl H3Ep {
             self.conn_events(cx, now, now_ns, h);
         }
         self.touched = touched;
+        if self.stopping {
+            self.wind_down(now);
+        }
         self.transmit(cx, now);
         self.arm(cx, now);
+    }
+
+    /// During a graceful stop: closes every connection whose requests are all answered and
+    /// whose response data QUIC has delivered (acknowledged).
+    fn wind_down(&mut self, now: Instant) {
+        for (&hi, c) in self.conns.iter_mut() {
+            if c.closing {
+                continue;
+            }
+            let Some(qc) = self.ep.conn_mut(ConnHandle(hi)) else { continue };
+            let unacked = c.flushing.iter().any(|&id| qc.stream_unacked(id).is_some_and(|n| n > 0));
+            if !qc.is_established() || (c.streams.is_empty() && !unacked) {
+                c.closing = true;
+                qc.close(now, simoom_h3::code::NO_ERROR, b"server stopping");
+            }
+        }
     }
 
     fn conn_events(&mut self, cx: &mut UdpCtx<'_>, now: Instant, now_ns: u64, h: ConnHandle) {
@@ -132,7 +162,10 @@ impl H3Ep {
             self.ids.insert(id, h.0);
             bump(&self.sh.counters(self.li).h3_connections);
             let peer = qc.remote_address();
-            self.conns.insert(h.0, Box::new(H3Conn { id, h3: Http3::new(true, self.h3cfg.clone()), streams: FastMap::default(), peer, ready: Vec::new() }));
+            self.conns.insert(
+                h.0,
+                Box::new(H3Conn { id, h3: Http3::new(true, self.h3cfg.clone()), streams: FastMap::default(), peer, ready: Vec::new(), flushing: Vec::new(), closing: false }),
+            );
         }
         while let Some(ev) = self.ep.poll_event(h) {
             if let (Some(c), Some(qc)) = (self.conns.get_mut(&h.0), self.ep.conn_mut(h)) {
@@ -298,7 +331,12 @@ fn read_body(c: &mut H3Conn, qc: &mut simoom_quic::Connection, now: Instant, str
 fn settle(c: &mut H3Conn, id: u64, st: Box<St>) {
     if !matches!(st.resp.phase, Phase::Done) {
         c.streams.insert(id, st);
+        return;
     }
+    if c.flushing.len() >= FLUSHING_KEPT {
+        c.flushing.drain(..FLUSHING_KEPT / 2);
+    }
+    c.flushing.push(id);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -546,14 +584,36 @@ impl Endpoint for H3Ep {
         self.process(cx, now, now_ns);
     }
 
+    /// GOAWAY on every connection; each closes once its streams finish and their data is
+    /// acknowledged ([`H3Ep::wind_down`]), while the runtime keeps the loop alive through
+    /// [`Endpoint::is_busy`]; [`Endpoint::on_abort`] closes the rest at the deadline.
     fn on_stop(&mut self, cx: &mut UdpCtx<'_>) {
         let now = Instant::now();
-        let handles: Vec<usize> = self.conns.keys().copied().collect();
-        for hi in handles {
-            let h = ConnHandle(hi);
-            if let (Some(c), Some(qc)) = (self.conns.get_mut(&hi), self.ep.conn_mut(h)) {
-                c.h3.goaway(qc);
-                qc.close(now, simoom_h3::code::NO_ERROR, b"server stopping");
+        self.stopping = true;
+        for (&hi, c) in self.conns.iter_mut() {
+            if let Some(qc) = self.ep.conn_mut(ConnHandle(hi)) {
+                if qc.is_established() {
+                    c.h3.goaway(qc);
+                }
+            }
+        }
+        self.wind_down(now);
+        self.transmit(cx, now);
+        self.arm(cx, now);
+    }
+
+    fn is_busy(&self) -> bool {
+        self.stopping && self.conns.values().any(|c| !c.closing)
+    }
+
+    fn on_abort(&mut self, cx: &mut UdpCtx<'_>) {
+        let now = Instant::now();
+        for (&hi, c) in self.conns.iter_mut() {
+            if !c.closing {
+                c.closing = true;
+                if let Some(qc) = self.ep.conn_mut(ConnHandle(hi)) {
+                    qc.close(now, simoom_h3::code::NO_ERROR, b"server stopping");
+                }
             }
         }
         self.transmit(cx, now);

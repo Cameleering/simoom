@@ -323,8 +323,13 @@ pub fn public_key(seed: &[u8; 32]) -> [u8; 32] {
 
 /// Signs `msg`.
 pub fn sign(seed: &[u8; 32], msg: &[u8]) -> [u8; 64] {
+    sign_with_public(seed, &public_key(seed), msg)
+}
+
+/// Signs `msg` with a key whose public key is already known (saves a fixed-base
+/// multiplication and an inversion); `public` must be `public_key(seed)`.
+pub fn sign_with_public(seed: &[u8; 32], public: &[u8; 32], msg: &[u8]) -> [u8; 64] {
     let (a, prefix) = expand(seed);
-    let public = mul_base(&a).encode();
     let mut h = Sha512::new();
     h.update(&prefix);
     h.update(msg);
@@ -332,7 +337,7 @@ pub fn sign(seed: &[u8; 32], msg: &[u8]) -> [u8; 64] {
     let rp = mul_base(&r).encode();
     let mut h = Sha512::new();
     h.update(&rp);
-    h.update(&public);
+    h.update(public);
     h.update(msg);
     let k = reduce_mod_l(&h.finish());
     let s = mul_add_mod_l(&k, &a, &r);

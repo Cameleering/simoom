@@ -32,6 +32,7 @@ impl<const N: usize> Field<N> {
         f.one = f.to_mont(&one);
         f
     }
+    #[inline(never)]
     fn mul(&self, a: &[u64; N], b: &[u64; N]) -> [u64; N] {
         let mut r = [0u64; N];
         let mut t = [0u64; 10];
@@ -131,14 +132,13 @@ struct Point<const N: usize> {
 }
 
 impl<const N: usize> Curve<N> {
-    fn new(p: &str, n: &str, b: &str, gx: &str, gy: &str) -> Self {
-        let pb = crate::util::unhex(p);
-        let fp = Field::new(from_be(&pb));
-        let nn = from_be(&crate::util::unhex(n));
-        let fq = Field::new(nn);
-        let bm = fp.to_mont(&from_be(&crate::util::unhex(b)));
-        let g = Point { x: fp.to_mont(&from_be(&crate::util::unhex(gx))), y: fp.to_mont(&from_be(&crate::util::unhex(gy))), z: fp.one };
-        Curve { fp, fq, b: bm, g, n: nn }
+    /// p, n, b and the base point as little-endian limbs.
+    fn new(p: [u64; N], n: [u64; N], b: [u64; N], gx: [u64; N], gy: [u64; N]) -> Self {
+        let fp = Field::new(p);
+        let fq = Field::new(n);
+        let bm = fp.to_mont(&b);
+        let g = Point { x: fp.to_mont(&gx), y: fp.to_mont(&gy), z: fp.one };
+        Curve { fp, fq, b: bm, g, n }
     }
 
     fn infinity(&self) -> Point<N> {
@@ -408,11 +408,11 @@ fn p384() -> &'static Curve<6> {
     static C: OnceLock<Curve<6>> = OnceLock::new();
     C.get_or_init(|| {
         Curve::new(
-            "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff",
-            "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973",
-            "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef",
-            "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7",
-            "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f",
+            [0x00000000ffffffff, 0xffffffff00000000, 0xfffffffffffffffe, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff],
+            [0xecec196accc52973, 0x581a0db248b0a77a, 0xc7634d81f4372ddf, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff],
+            [0x2a85c8edd3ec2aef, 0xc656398d8a2ed19d, 0x0314088f5013875a, 0x181d9c6efe814112, 0x988e056be3f82d19, 0xb3312fa7e23ee7e4],
+            [0x3a545e3872760ab7, 0x5502f25dbf55296c, 0x59f741e082542a38, 0x6e1d3b628ba79b98, 0x8eb1c71ef320ad74, 0xaa87ca22be8b0537],
+            [0x7a431d7c90ea0e5f, 0x0a60b1ce1d7e819d, 0xe9da3113b5f0b8c0, 0xf8f41dbd289a147c, 0x5d9e98bf9292dc29, 0x3617de4a96262c6f],
         )
     })
 }

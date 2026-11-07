@@ -11,7 +11,6 @@
 mod decoder;
 mod encoder;
 pub mod huffman;
-mod huffman_table;
 mod prim;
 
 pub use decoder::{Decoded, Decoder};

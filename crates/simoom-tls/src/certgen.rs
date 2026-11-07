@@ -137,14 +137,18 @@ impl CertParams {
 
 pub(crate) fn sig_alg_for(key: &PrivateKey) -> Vec<u8> {
     match key {
+        #[cfg(feature = "p384")]
         PrivateKey::Ec { curve: EcCurve::P384, .. } => asn1::seq(&[asn1::oid("1.2.840.10045.4.3.3")]),
         PrivateKey::Ec { .. } => asn1::seq(&[asn1::oid("1.2.840.10045.4.3.2")]),
+        #[cfg(feature = "ed25519")]
         PrivateKey::Ed25519 { .. } => asn1::seq(&[asn1::oid(keys::OID_ED25519)]),
+        #[cfg(feature = "rsa")]
         PrivateKey::Rsa(_) => asn1::seq(&[asn1::oid("1.2.840.113549.1.1.11"), asn1::tlv(asn1::TAG_NULL, &[])]),
     }
 }
 
 pub(crate) fn sign_with(key: &PrivateKey, tbs: &[u8]) -> Vec<u8> {
+    #[cfg(feature = "rsa")]
     use crate::crypto::sha2::HashAlg;
     match key {
         PrivateKey::Ec { curve, d, .. } => {
@@ -152,7 +156,9 @@ pub(crate) fn sign_with(key: &PrivateKey, tbs: &[u8]) -> Vec<u8> {
             let (r, s) = curve.sign(d, &h.hash(tbs), h).expect("sign");
             keys::ecdsa_sig_to_der(&r, &s)
         }
-        PrivateKey::Ed25519 { seed, .. } => crate::crypto::ed25519::sign(seed, tbs).to_vec(),
+        #[cfg(feature = "ed25519")]
+        PrivateKey::Ed25519 { seed, public } => crate::crypto::ed25519::sign_with_public(seed, public, tbs).to_vec(),
+        #[cfg(feature = "rsa")]
         PrivateKey::Rsa(k) => k.sign_pkcs1(HashAlg::Sha256, &HashAlg::Sha256.hash(tbs)).expect("sign"),
     }
 }

@@ -157,10 +157,13 @@ impl AesGcm {
         ctr[15] = 2;
         match &self.imp {
             Imp::Hw(a, g) => {
+                // whole 128-byte groups on 256-bit registers when the CPU has VAES, then the rest
+                let done = arch::aes_gcm_vaes(a, g, &mut ctr, y, data, encrypt);
+                let rest = &mut data[done..];
                 if encrypt {
-                    arch::aes_gcm_seal(a, g, &mut ctr, y, data)
+                    arch::aes_gcm_seal(a, g, &mut ctr, y, rest)
                 } else {
-                    arch::aes_gcm_open(a, g, &mut ctr, y, data)
+                    arch::aes_gcm_open(a, g, &mut ctr, y, rest)
                 }
             }
             Imp::Soft(a, g) => {
@@ -250,9 +253,8 @@ mod tests {
             assert_eq!(seal_hex(&g, &[0; 12], &[], &[]), "58e2fccefa7e3061367f1d57a4e7455a");
             assert_eq!(seal_hex(&g, &[0; 12], &[], &[0u8; 16]), "0388dace60b6a392f328c2b971b2fe78ab6e47d42cec13bdf53a67b21257bddf");
         }
-        let p = unhex(
-            "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255",
-        );
+        let p =
+            unhex("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255");
         let nonce = n12("cafebabefacedbaddecaf888");
         for g in both(&unhex("feffe9928665731c6d6a8f9467308308")) {
             assert_eq!(
@@ -290,19 +292,20 @@ mod tests {
     fn hardware_and_soft_agree_on_every_length() {
         // Covers the 8-block bulk loop, the single-block tail and partial blocks, with a counter
         // that wraps inside a bulk step.
-        let key = [0x42u8; 16];
-        let [hw, soft] = both(&key);
-        let nonce = [0xabu8; 12];
-        for len in (0..300).chain([1024, 4096, 16384 + 17]) {
-            let pt: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
-            let aad: Vec<u8> = (0..(len % 37)).map(|i| i as u8).collect();
-            let (mut a, mut b) = (pt.clone(), pt.clone());
-            let ta = hw.seal(&nonce, &aad, &mut a);
-            let tb = soft.seal(&nonce, &aad, &mut b);
-            assert_eq!(a, b, "len {len}");
-            assert_eq!(ta, tb, "len {len}");
-            assert!(hw.open(&nonce, &aad, &mut a, &tb));
-            assert_eq!(a, pt);
+        for key in [&[0x42u8; 16][..], &[0x24u8; 32][..]] {
+            let [hw, soft] = both(key);
+            let nonce = [0xabu8; 12];
+            for len in (0..300).chain([1024, 4096, 16384 + 17]) {
+                let pt: Vec<u8> = (0..len).map(|i| (i * 7 + 3) as u8).collect();
+                let aad: Vec<u8> = (0..(len % 37)).map(|i| i as u8).collect();
+                let (mut a, mut b) = (pt.clone(), pt.clone());
+                let ta = hw.seal(&nonce, &aad, &mut a);
+                let tb = soft.seal(&nonce, &aad, &mut b);
+                assert_eq!(a, b, "len {len}");
+                assert_eq!(ta, tb, "len {len}");
+                assert!(hw.open(&nonce, &aad, &mut a, &tb));
+                assert_eq!(a, pt);
+            }
         }
     }
 

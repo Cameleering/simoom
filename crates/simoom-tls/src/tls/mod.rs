@@ -115,7 +115,7 @@ pub mod alert {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     /// A protocol violation detected locally; `alert` is sent to the peer.
-    Protocol { alert: u8, reason: String },
+    Protocol { alert: u8, reason: std::borrow::Cow<'static, str> },
     /// The peer sent a fatal alert.
     PeerAlert(u8),
     /// The peer's certificate failed validation.
@@ -127,7 +127,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub(crate) fn proto(alert: u8, reason: impl Into<String>) -> Error {
+    pub(crate) fn proto(alert: u8, reason: impl Into<std::borrow::Cow<'static, str>>) -> Error {
         Error::Protocol { alert, reason: reason.into() }
     }
     pub(crate) fn decode(what: &str) -> Error {
@@ -199,6 +199,7 @@ pub enum Level {
 pub enum CipherSuite {
     Aes128GcmSha256,
     Aes256GcmSha384,
+    #[cfg(feature = "chacha20")]
     Chacha20Poly1305Sha256,
 }
 
@@ -207,6 +208,7 @@ pub enum CipherSuite {
 pub enum AeadAlg {
     Aes128Gcm,
     Aes256Gcm,
+    #[cfg(feature = "chacha20")]
     Chacha20Poly1305,
 }
 
@@ -221,20 +223,25 @@ impl AeadAlg {
 
 impl CipherSuite {
     /// Every suite, in the default server preference when the CPU has AES instructions.
+    #[cfg(feature = "chacha20")]
     pub const ALL: [CipherSuite; 3] = [CipherSuite::Aes128GcmSha256, CipherSuite::Aes256GcmSha384, CipherSuite::Chacha20Poly1305Sha256];
+    /// Every suite, in the default server preference.
+    #[cfg(not(feature = "chacha20"))]
+    pub const ALL: [CipherSuite; 2] = [CipherSuite::Aes128GcmSha256, CipherSuite::Aes256GcmSha384];
 
     /// The default preference: AES-GCM first with hardware AES, ChaCha20-Poly1305 first without.
     pub fn default_order() -> Vec<CipherSuite> {
-        if simoom_sys::arch::has_aes() && simoom_sys::arch::has_clmul() {
-            CipherSuite::ALL.to_vec()
-        } else {
-            vec![CipherSuite::Chacha20Poly1305Sha256, CipherSuite::Aes128GcmSha256, CipherSuite::Aes256GcmSha384]
+        #[cfg(feature = "chacha20")]
+        if !(simoom_sys::arch::has_aes() && simoom_sys::arch::has_clmul()) {
+            return vec![CipherSuite::Chacha20Poly1305Sha256, CipherSuite::Aes128GcmSha256, CipherSuite::Aes256GcmSha384];
         }
+        CipherSuite::ALL.to_vec()
     }
     pub fn id(self) -> u16 {
         match self {
             CipherSuite::Aes128GcmSha256 => 0x1301,
             CipherSuite::Aes256GcmSha384 => 0x1302,
+            #[cfg(feature = "chacha20")]
             CipherSuite::Chacha20Poly1305Sha256 => 0x1303,
         }
     }
@@ -246,6 +253,7 @@ impl CipherSuite {
         match self {
             CipherSuite::Aes128GcmSha256 => "TLS_AES_128_GCM_SHA256",
             CipherSuite::Aes256GcmSha384 => "TLS_AES_256_GCM_SHA384",
+            #[cfg(feature = "chacha20")]
             CipherSuite::Chacha20Poly1305Sha256 => "TLS_CHACHA20_POLY1305_SHA256",
         }
     }
@@ -259,6 +267,7 @@ impl CipherSuite {
         match self {
             CipherSuite::Aes128GcmSha256 => AeadAlg::Aes128Gcm,
             CipherSuite::Aes256GcmSha384 => AeadAlg::Aes256Gcm,
+            #[cfg(feature = "chacha20")]
             CipherSuite::Chacha20Poly1305Sha256 => AeadAlg::Chacha20Poly1305,
         }
     }
@@ -325,6 +334,7 @@ impl KeyShare {
 }
 
 /// Signature schemes (RFC 8446 section 4.2.3).
+#[allow(dead_code)] // some are unused without the rsa or ed25519 features
 pub(crate) mod sigscheme {
     pub const RSA_PKCS1_SHA256: u16 = 0x0401;
     pub const RSA_PKCS1_SHA384: u16 = 0x0501;
@@ -338,15 +348,23 @@ pub(crate) mod sigscheme {
 
     /// What we offer and accept in signature_algorithms. PKCS#1 v1.5 is listed because it
     /// also covers certificate signatures; it is never accepted in CertificateVerify.
-    pub const SUPPORTED: [u16; 9] = [
+    pub const SUPPORTED: &[u16] = &[
+        #[cfg(feature = "ed25519")]
         ED25519,
         ECDSA_SECP256R1_SHA256,
+        #[cfg(feature = "p384")]
         ECDSA_SECP384R1_SHA384,
+        #[cfg(feature = "rsa")]
         RSA_PSS_RSAE_SHA256,
+        #[cfg(feature = "rsa")]
         RSA_PSS_RSAE_SHA384,
+        #[cfg(feature = "rsa")]
         RSA_PSS_RSAE_SHA512,
+        #[cfg(feature = "rsa")]
         RSA_PKCS1_SHA256,
+        #[cfg(feature = "rsa")]
         RSA_PKCS1_SHA384,
+        #[cfg(feature = "rsa")]
         RSA_PKCS1_SHA512,
     ];
 }
@@ -366,8 +384,11 @@ pub(crate) fn choose_scheme(key: &PrivateKey, offered: &[u16]) -> Option<u16> {
     use sigscheme::*;
     let candidates: &[u16] = match key {
         PrivateKey::Ec { curve: EcCurve::P256, .. } => &[ECDSA_SECP256R1_SHA256],
+        #[cfg(feature = "p384")]
         PrivateKey::Ec { curve: EcCurve::P384, .. } => &[ECDSA_SECP384R1_SHA384],
+        #[cfg(feature = "ed25519")]
         PrivateKey::Ed25519 { .. } => &[ED25519],
+        #[cfg(feature = "rsa")]
         PrivateKey::Rsa(_) => &[RSA_PSS_RSAE_SHA256, RSA_PSS_RSAE_SHA384, RSA_PSS_RSAE_SHA512],
     };
     candidates.iter().copied().find(|c| offered.contains(c))
@@ -376,8 +397,9 @@ pub(crate) fn choose_scheme(key: &PrivateKey, offered: &[u16]) -> Option<u16> {
 /// Signs a CertificateVerify message.
 pub(crate) fn sign_message(key: &PrivateKey, scheme: u16, message: &[u8]) -> Result<Vec<u8>> {
     let fail = || Error::proto(alert::INTERNAL_ERROR, "signing failed");
-    if let PrivateKey::Ed25519 { seed, .. } = key {
-        return Ok(crate::crypto::ed25519::sign(seed, message).to_vec());
+    #[cfg(feature = "ed25519")]
+    if let PrivateKey::Ed25519 { seed, public } = key {
+        return Ok(crate::crypto::ed25519::sign_with_public(seed, public, message).to_vec());
     }
     let h = scheme_hash(scheme).ok_or_else(fail)?;
     let digest = h.hash(message);
@@ -385,7 +407,9 @@ pub(crate) fn sign_message(key: &PrivateKey, scheme: u16, message: &[u8]) -> Res
         PrivateKey::Ec { curve, d, .. } => {
             curve.sign(d, &digest, h).map(|(r, s)| crate::keys::ecdsa_sig_to_der(&r, &s)).ok_or_else(fail)
         }
+        #[cfg(feature = "rsa")]
         PrivateKey::Rsa(k) => k.sign_pss(h, &digest).ok_or_else(fail),
+        #[cfg(feature = "ed25519")]
         PrivateKey::Ed25519 { .. } => Err(fail()),
     }
 }
@@ -397,6 +421,7 @@ pub(crate) fn verify_message(key: &PublicKey, scheme: u16, message: &[u8], sig: 
     let fail = || Error::proto(alert::DECRYPT_ERROR, "handshake signature verification failed");
     let mismatch = || Error::proto(alert::ILLEGAL_PARAMETER, "signature scheme does not match the key");
     let ok = match (key, scheme) {
+        #[cfg(feature = "ed25519")]
         (PublicKey::Ed25519(k), ED25519) => crate::crypto::ed25519::verify(k, message, sig),
         (PublicKey::Ec { curve, point }, ECDSA_SECP256R1_SHA256 | ECDSA_SECP384R1_SHA384) => {
             if (scheme == ECDSA_SECP256R1_SHA256) != (*curve == EcCurve::P256) {
@@ -408,6 +433,7 @@ pub(crate) fn verify_message(key: &PublicKey, scheme: u16, message: &[u8], sig: 
                 None => false,
             }
         }
+        #[cfg(feature = "rsa")]
         (PublicKey::Rsa(k), RSA_PSS_RSAE_SHA256 | RSA_PSS_RSAE_SHA384 | RSA_PSS_RSAE_SHA512) => {
             let h = scheme_hash(scheme).unwrap();
             k.verify_pss(h, &h.hash(message), sig, Some(h.output_len()))

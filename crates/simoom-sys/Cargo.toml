@@ -12,3 +12,9 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+
+[features]
+# The Linux io_uring back end. Without it `Backend::IoUring` falls back to epoll. Off here, so
+# the protocol crates that use only the SIMD scan and crypto intrinsics don't switch it on;
+# simoom-rt turns it on by default. Test it with `cargo test -p simoom-sys --features io-uring`.
+io-uring = []

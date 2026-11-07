@@ -16,6 +16,7 @@
 //! [`Secrets::next_packet_keys`] instead).
 
 use crate::crypto::aes::Aes;
+#[cfg(feature = "chacha20")]
 use crate::crypto::chacha::chacha20_block;
 use crate::crypto::gcm::AesGcm;
 use crate::crypto::sha2::HashAlg;
@@ -102,6 +103,7 @@ impl PacketKey {
     /// Packets that may be encrypted under this key (RFC 9001 section 6.6).
     pub fn confidentiality_limit(&self) -> u64 {
         match self.alg {
+            #[cfg(feature = "chacha20")]
             AeadAlg::Chacha20Poly1305 => 1 << 62,
             _ => 1 << 23,
         }
@@ -110,6 +112,7 @@ impl PacketKey {
     /// Forged packets tolerated before the connection must close (RFC 9001 section 6.6).
     pub fn integrity_limit(&self) -> u64 {
         match self.alg {
+            #[cfg(feature = "chacha20")]
             AeadAlg::Chacha20Poly1305 => 1 << 36,
             _ => 1 << 52,
         }
@@ -121,6 +124,7 @@ impl PacketKey {
 #[allow(clippy::large_enum_variant)] // one per connection or key; boxing would add an indirection on the hot path
 pub enum HeaderProtectionKey {
     Aes(Aes),
+    #[cfg(feature = "chacha20")]
     ChaCha([u8; 32]),
 }
 
@@ -128,6 +132,7 @@ impl std::fmt::Debug for HeaderProtectionKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             HeaderProtectionKey::Aes(_) => "HeaderProtectionKey(AES)",
+            #[cfg(feature = "chacha20")]
             HeaderProtectionKey::ChaCha(_) => "HeaderProtectionKey(ChaCha20)",
         })
     }
@@ -137,6 +142,7 @@ impl HeaderProtectionKey {
     fn new(suite: CipherSuite, version: u32, secret: &[u8]) -> HeaderProtectionKey {
         let key = expand_label_vec(suite.hash(), secret, labels(version).hp, &[], suite.aead().key_len());
         match suite.aead() {
+            #[cfg(feature = "chacha20")]
             AeadAlg::Chacha20Poly1305 => HeaderProtectionKey::ChaCha(key.try_into().unwrap()),
             _ => HeaderProtectionKey::Aes(Aes::new(&key)),
         }
@@ -152,6 +158,7 @@ impl HeaderProtectionKey {
                 a.encrypt_block(&mut b);
                 out.copy_from_slice(&b[..5]);
             }
+            #[cfg(feature = "chacha20")]
             HeaderProtectionKey::ChaCha(k) => {
                 let counter = u32::from_le_bytes(sample[..4].try_into().unwrap());
                 let block = chacha20_block(k, counter, sample[4..16].try_into().unwrap());

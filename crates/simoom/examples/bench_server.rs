@@ -3,9 +3,14 @@
 //! service call with panic catching and the stall watchdog, a `Date` header).
 //!
 //! ```text
-//! cargo run --release -p simoom --example bench_server -- --port 8080 --threads 4 --secs 30
-//!     [--backend auto|epoll|io_uring|iocp] [--mode fixed|builder] [--cpus 0,2,4,6] [--no-watchdog]
+//! cargo run --release -p simoom --example bench_server -- [--addr 127.0.0.1:8080] [--threads 4]
+//!     [--secs 30] [--backend auto|epoll|io_uring|iocp] [--mode fixed|builder] [--cpus 0,2,4,6]
+//!     [--no-watchdog]
 //! ```
+//!
+//! `--addr` takes `host:port` (`0.0.0.0:8080` to serve other machines) or a bare host;
+//! `--port` sets the port alone. Without `--secs` the server runs until it is killed, printing
+//! its counters every 10 seconds.
 //!
 //! `--mode fixed` (the default) answers with a pre-serialized `StaticReply`; `--mode builder`
 //! builds the reply with `status`/`header`/`body_static` on every request.
@@ -17,9 +22,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 fn main() {
+    let mut host = "127.0.0.1".to_string();
     let mut port = 8080u16;
     let mut threads = 0usize;
-    let mut secs = 30u64;
+    let mut secs: Option<u64> = None;
     let mut backend = Backend::Auto;
     let mut mode = "fixed".to_string();
     let mut cpus: Option<Vec<usize>> = None;
@@ -31,7 +37,14 @@ fn main() {
         match v[i].as_str() {
             "--port" => port = val.parse().expect("--port"),
             "--threads" => threads = val.parse().expect("--threads"),
-            "--secs" => secs = val.parse().expect("--secs"),
+            "--secs" => secs = Some(val.parse().expect("--secs")),
+            "--addr" => match val.rsplit_once(':') {
+                Some((h, p)) if !h.is_empty() && !h.ends_with(':') => {
+                    host = h.trim_start_matches('[').trim_end_matches(']').to_string();
+                    port = p.parse().expect("--addr port");
+                }
+                _ => host = val,
+            },
             "--mode" => mode = val,
             "--backend" => {
                 backend = match val.as_str() {
@@ -63,7 +76,7 @@ fn main() {
         }
     };
     let server = Server::builder()
-        .listen(("127.0.0.1", port))
+        .listen((host.as_str(), port))
         .threads(threads)
         .backend(backend)
         .limits(limits)
@@ -83,12 +96,31 @@ fn main() {
         server.backend(),
         server.fallback_reason().map(|r| format!(" ({r})")).unwrap_or_default()
     );
+    let Some(secs) = secs else {
+        loop {
+            std::thread::sleep(Duration::from_secs(10));
+            report(&server);
+        }
+    };
     std::thread::sleep(Duration::from_secs(secs));
+    report(&server);
+    server.stop(Duration::from_millis(100));
+    server.join();
+}
+
+fn report(server: &simoom::ServerHandle) {
     let s = server.stats();
     let d = s.runtime.total().driver;
     let per = |x: u64| if s.requests == 0 { 0.0 } else { x as f64 / s.requests as f64 };
     println!("served {} requests on {} connections", s.requests, s.accepted);
-    println!("per request: {:.3} syscalls (waits {:.3}, recv {:.3}, send {:.3}); {} stalls", per(d.syscalls()), per(d.waits), per(d.recv_calls), per(d.send_calls), s.stalls);
-    server.stop(Duration::from_millis(100));
-    server.join();
+    println!(
+        "per request: {:.3} syscalls (waits {:.3}, recv {:.3}, send {:.3}, other {:.3}); {:.3} OS events; {} stalls",
+        per(d.syscalls()),
+        per(d.waits),
+        per(d.recv_calls),
+        per(d.send_calls),
+        per(d.other_calls),
+        per(d.os_events),
+        s.stalls
+    );
 }

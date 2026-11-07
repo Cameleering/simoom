@@ -56,6 +56,9 @@
 #![forbid(unsafe_code)]
 // A build without any protocol feature serves nothing; it still compiles, quietly.
 #![cfg_attr(not(any(feature = "http1", feature = "http2", feature = "http3")), allow(dead_code, unused_imports, unused_variables))]
+// Builds without HTTP/1.1 (h2c only, h2 over TLS only, HTTP/3 only) leave the HTTP/1.1 output
+// helpers and fields unused; the linker drops them.
+#![cfg_attr(not(feature = "http1"), allow(dead_code))]
 
 mod conn;
 mod handle;

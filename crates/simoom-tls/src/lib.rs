@@ -59,7 +59,18 @@
 //!
 //! TLS 1.2 is not implemented (the plan's optional `tls12` feature).
 //!
-//! The `client` feature (default) provides the client side; servers can turn it off.
+//! # Cargo features
+//!
+//! All on by default: `client` (the client side; servers can turn it off), `rsa`, `p384`,
+//! `ed25519` (key and certificate types; `ed25519` also speeds up X25519 key generation) and
+//! `chacha20` (the ChaCha20-Poly1305 suite). `--no-default-features` is the smallest server:
+//! X25519, P-256 and AES-GCM.
+//!
+//! # Hardware paths
+//!
+//! On x86-64 the public-key arithmetic uses MULX/ADX kernels (P-256 field and order, the
+//! X25519 field, RSA's Montgomery multiplication) and Poly1305 an AVX2 kernel, all in
+//! `simoom_sys::arch` with portable fallbacks chosen at run time.
 
 #![forbid(unsafe_code)]
 

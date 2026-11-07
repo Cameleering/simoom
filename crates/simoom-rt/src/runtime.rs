@@ -1,5 +1,8 @@
 //! Starting, observing and stopping a runtime.
 
+// Without the `udp` feature the UDP slots stay empty and their code is left out.
+#![cfg_attr(not(feature = "udp"), allow(dead_code, unused_imports, unused_mut))]
+
 use crate::event_loop::{build, ListenerSlot, LoopHandle, LoopSetup, UdpSlot};
 use crate::handler::{Acceptor, UdpService};
 use crate::offload::{OffloadConfig, OffloadPool};
@@ -9,7 +12,7 @@ use simoom_sys::net::{ListenOptions, Socket, UdpOptions};
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -195,6 +198,76 @@ impl Stats {
     }
 }
 
+/// The start-up rendezvous between [`Builder::start`] and the loop threads: one mutex and one
+/// condition variable (two channel types cost about 20 KB of code).
+struct StartGate {
+    st: Mutex<StartState>,
+    cv: Condvar,
+}
+
+type LoopReport = io::Result<(LoopHandle, (Backend, Option<String>))>;
+
+struct StartState {
+    reports: Vec<Option<LoopReport>>,
+    reported: usize,
+    /// `None` until decided; `Some(None)` tells the loops to exit.
+    peers: Option<Option<Arc<Vec<LoopHandle>>>>,
+}
+
+impl StartGate {
+    fn lock(&self) -> MutexGuard<'_, StartState> {
+        self.st.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Waits for the decision of [`Builder::start`]: every loop's handle, or `None` to exit.
+    fn peers(&self) -> Option<Arc<Vec<LoopHandle>>> {
+        let mut st = self.lock();
+        loop {
+            if let Some(p) = &st.peers {
+                return p.clone();
+            }
+            st = self.cv.wait(st).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    fn release(&self, peers: Option<Arc<Vec<LoopHandle>>>) {
+        self.lock().peers = Some(peers);
+        self.cv.notify_all();
+    }
+}
+
+/// A loop thread's report slot; a thread that ends without reporting counts as failed.
+struct Reporter {
+    gate: Arc<StartGate>,
+    index: usize,
+    done: bool,
+}
+
+impl Reporter {
+    fn report(&mut self, r: LoopReport) {
+        if !self.done {
+            self.done = true;
+            let mut st = self.gate.lock();
+            st.reports[self.index] = Some(r);
+            st.reported += 1;
+            drop(st);
+            self.gate.cv.notify_all();
+        }
+    }
+}
+
+impl Drop for Reporter {
+    fn drop(&mut self) {
+        if !self.done {
+            self.done = true;
+            let mut st = self.gate.lock();
+            st.reported += 1;
+            drop(st);
+            self.gate.cv.notify_all();
+        }
+    }
+}
+
 enum ListenSource {
     Addr(io::Result<Vec<SocketAddr>>),
     Socket(Socket),
@@ -253,13 +326,19 @@ impl Builder {
     /// its own `SO_REUSEPORT` listener; elsewhere one listener is shared and connections are
     /// handed to the less busy of two loops (on Windows, through one `AcceptEx` queue).
     /// Address errors are reported by [`Builder::start`].
-    pub fn listen(mut self, addr: impl ToSocketAddrs, acceptor: impl Acceptor) -> Builder {
-        let addrs = addr.to_socket_addrs().map(|a| {
-            let mut v: Vec<SocketAddr> = a.collect();
-            v.sort_by_key(|a| a.is_ipv6()); // IPv4 first, as `localhost` should mean 127.0.0.1
-            v
+    pub fn listen(self, addr: impl ToSocketAddrs, acceptor: impl Acceptor) -> Builder {
+        let addrs = addr.to_socket_addrs().map(|a| a.collect());
+        self.listen_addrs(addrs, Arc::new(acceptor))
+    }
+
+    fn listen_addrs(mut self, addrs: io::Result<Vec<SocketAddr>>, acceptor: Arc<dyn Acceptor>) -> Builder {
+        // IPv4 first, as `localhost` should mean 127.0.0.1 (a stable partition, not a sort).
+        let addrs = addrs.map(|v| {
+            let (mut v4, v6): (Vec<SocketAddr>, Vec<SocketAddr>) = v.into_iter().partition(SocketAddr::is_ipv4);
+            v4.extend(v6);
+            v4
         });
-        self.listeners.push((ListenSource::Addr(addrs), Arc::new(acceptor)));
+        self.listeners.push((ListenSource::Addr(addrs), acceptor));
         self
     }
 
@@ -272,7 +351,8 @@ impl Builder {
     }
 
     /// Binds UDP on `addr` and creates an endpoint per loop with `service` (one `SO_REUSEPORT`
-    /// socket per loop on Linux; one socket on loop 0 elsewhere).
+    /// socket per loop on Linux; one socket on loop 0 elsewhere). Feature `udp`.
+    #[cfg(feature = "udp")]
     pub fn udp(mut self, addr: impl ToSocketAddrs, opts: UdpOptions, service: impl UdpService) -> Builder {
         let addrs = addr.to_socket_addrs().map(|a| a.collect());
         self.udps.push((addrs, opts, Arc::new(service)));
@@ -283,7 +363,11 @@ impl Builder {
     pub fn start(self) -> io::Result<RuntimeHandle> {
         let mut cfg = self.cfg;
         let cpus = cfg.cpus.clone().unwrap_or_else(simoom_sys::cpu::allowed_cpus);
-        let n = if cfg.threads == 0 { cpus.len().max(1) } else { cfg.threads };
+        let n = match (cfg.threads, &cfg.cpus) {
+            (0, Some(_)) => cpus.len().max(1),
+            (0, None) => simoom_sys::cpu::cpu_count(),
+            (t, _) => t,
+        };
         cfg.threads = n;
         if cfg.write_low_water > cfg.write_high_water {
             cfg.write_low_water = cfg.write_high_water;
@@ -327,6 +411,7 @@ impl Builder {
         // UDP sockets per loop.
         let mut per_loop_udps: Vec<Vec<UdpSlot>> = (0..n).map(|_| Vec::new()).collect();
         let mut udp_addrs = Vec::new();
+        #[cfg(feature = "udp")]
         for (b, (a, opts, service)) in self.udps.into_iter().enumerate() {
             let list = a?;
             let first = *list.first().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no address to bind"))?;
@@ -335,10 +420,10 @@ impl Builder {
             let s0 = Socket::udp_bind(first, &opts)?;
             let bound = s0.local_addr()?;
             udp_addrs.push(bound);
-            per_loop_udps[0].push(UdpSlot::new(service.clone(), b, s0));
+            per_loop_udps[0].push(UdpSlot::new(service.clone(), b, s0, opts.gro));
             if per_loop {
                 for slots in per_loop_udps.iter_mut().skip(1) {
-                    slots.push(UdpSlot::new(service.clone(), b, Socket::udp_bind(bound, &opts)?));
+                    slots.push(UdpSlot::new(service.clone(), b, Socket::udp_bind(bound, &opts)?, opts.gro));
                 }
             }
         }
@@ -359,63 +444,67 @@ impl Builder {
 
         // Start the loops: each creates its driver on its own thread, reports its handle, then
         // waits for the handles of all loops before serving.
-        let (ready_tx, ready_rx) = mpsc::channel();
-        let mut peer_txs = Vec::new();
+        let gate = Arc::new(StartGate { st: Mutex::new(StartState { reports: (0..n).map(|_| None).collect(), reported: 0, peers: None }), cv: Condvar::new() });
         let mut threads = Vec::new();
         for (i, (listeners, udps)) in per_loop_listeners.into_iter().zip(per_loop_udps).enumerate() {
             let setup = LoopSetup { index: i, cfg: cfg.clone(), shared: shared.clone(), offload: offload.clone(), listeners, udps };
-            let ready_tx = ready_tx.clone();
-            let (peers_tx, peers_rx) = mpsc::channel::<Option<Vec<LoopHandle>>>();
-            peer_txs.push(peers_tx);
             let pin = if cfg.pin_threads && !cpus.is_empty() { Some(cpus[i % cpus.len()]) } else { None };
-            let t = std::thread::Builder::new().name(format!("{}-{i}", cfg.thread_name)).spawn(move || {
+            let mut reporter = Reporter { gate: gate.clone(), index: i, done: false };
+            let spawned = std::thread::Builder::new().name(format!("{}-{i}", cfg.thread_name)).spawn(move || {
                 if let Some(cpu) = pin {
                     let _ = simoom_sys::cpu::pin_current_thread(cpu);
                 }
                 let (mut core, queue) = match build(setup) {
                     Ok(x) => x,
-                    Err(e) => {
-                        let _ = ready_tx.send((i, Err(e)));
-                        return;
-                    }
+                    Err(e) => return reporter.report(Err(e)),
                 };
-                let handle = LoopHandle { index: i, queue };
-                let _ = ready_tx.send((i, Ok((handle, core.backend()))));
-                let Ok(Some(peers)) = peers_rx.recv() else { return };
-                core.set_peers(peers);
+                let backend = core.backend();
+                reporter.report(Ok((LoopHandle { index: i, queue }, backend)));
+                let Some(peers) = reporter.gate.peers() else { return };
+                core.set_peers(peers.to_vec());
+                drop(reporter);
                 if let Err(e) = core.run() {
                     eprintln!("simoom loop {i} failed: {e}");
                 }
-            })?;
-            threads.push(t);
+            });
+            match spawned {
+                Ok(t) => threads.push(t),
+                Err(e) => {
+                    gate.release(None);
+                    for t in threads {
+                        let _ = t.join();
+                    }
+                    return Err(e);
+                }
+            }
         }
-        drop(ready_tx);
-        let mut handles: Vec<Option<LoopHandle>> = (0..n).map(|_| None).collect();
         let mut backend = (Backend::Auto, None);
         let mut err = None;
-        for _ in 0..n {
-            match ready_rx.recv() {
-                Ok((i, Ok((h, b)))) => {
-                    handles[i] = Some(h);
-                    backend = b;
+        let mut loops = Vec::with_capacity(n);
+        {
+            let mut st = gate.lock();
+            while st.reported < n {
+                st = gate.cv.wait(st).unwrap_or_else(PoisonError::into_inner);
+            }
+            for r in st.reports.iter_mut() {
+                match r.take() {
+                    Some(Ok((h, b))) => {
+                        loops.push(h);
+                        backend = b;
+                    }
+                    Some(Err(e)) => err = Some(e),
+                    None => err = Some(io::Error::other("a loop thread died during start")),
                 }
-                Ok((_, Err(e))) => err = Some(e),
-                Err(_) => err = Some(io::Error::other("a loop thread died during start")),
             }
         }
         if let Some(e) = err {
-            for tx in &peer_txs {
-                let _ = tx.send(None);
-            }
+            gate.release(None);
             for t in threads {
                 let _ = t.join();
             }
             return Err(e);
         }
-        let loops: Vec<LoopHandle> = handles.into_iter().map(Option::unwrap).collect();
-        for tx in &peer_txs {
-            let _ = tx.send(Some(loops.clone()));
-        }
+        gate.release(Some(Arc::new(loops.clone())));
         Ok(RuntimeHandle { loops, threads, shared, addrs, udp_addrs, offload, backend: backend.0, fallback: backend.1 })
     }
 }

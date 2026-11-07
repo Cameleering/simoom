@@ -22,7 +22,7 @@
 //! cancellation round, their memory is leaked rather than freed under the kernel.
 
 use super::epoll::{drain_eventfd, eventfd, eventfd_waker};
-use super::{DriverConfig, DriverStats, Event, Id, OutBuf, Slab, Waker};
+use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Waker, LARGE_BATCH};
 use crate::net::Socket;
 use crate::os::linux as sys;
 use crate::udp::{RecvMeta, Transmit, BATCH};
@@ -58,6 +58,7 @@ const OP_ACCEPT: u8 = 13;
 const OP_ASYNC_CANCEL: u8 = 14;
 const OP_SEND: u8 = 26;
 const OP_RECV: u8 = 27;
+const OP_PROVIDE_BUFFERS: u8 = 31;
 
 const SQE_FIXED_FILE: u8 = 1 << 0;
 const SQE_BUFFER_SELECT: u8 = 1 << 5;
@@ -214,6 +215,10 @@ struct Probe {
 }
 
 fn setup(entries: u32, p: &mut Params) -> io::Result<OwnedFd> {
+    #[cfg(test)]
+    if p.flags & REFUSE_SETUP.with(|r| r.get()) != 0 {
+        return Err(io::Error::from_raw_os_error(sys::EINVAL));
+    }
     // SAFETY: io_uring_setup reads and writes the params struct we pass.
     let r = unsafe { sys::syscall(sys::SYS_IO_URING_SETUP, entries, p as *mut Params) };
     if r < 0 {
@@ -287,18 +292,72 @@ struct Ring {
     tail: u32,
 }
 
+/// Optional set-up flags with their names. `CQSIZE` and `CLAMP` (5.5) are always asked for.
+const OPTIONAL_SETUP: [(u32, &str); 3] = [(SETUP_SUBMIT_ALL, "SUBMIT_ALL"), (SETUP_DEFER_TASKRUN, "DEFER_TASKRUN"), (SETUP_SINGLE_ISSUER, "SINGLE_ISSUER")];
+
+/// The optional flags to leave out, tried in this order while the kernel answers `EINVAL` (a
+/// flag it doesn't know, or a combination it refuses): one flag at a time first, so a kernel
+/// gets the best subset it accepts. `DEFER_TASKRUN` needs `SINGLE_ISSUER`.
+const SETUP_DROPS: [u32; 6] = [
+    0,
+    SETUP_SUBMIT_ALL,
+    SETUP_DEFER_TASKRUN,
+    SETUP_DEFER_TASKRUN | SETUP_SUBMIT_ALL,
+    SETUP_DEFER_TASKRUN | SETUP_SINGLE_ISSUER,
+    SETUP_DEFER_TASKRUN | SETUP_SINGLE_ISSUER | SETUP_SUBMIT_ALL,
+];
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: set-up flags `io_uring_setup` pretends not to know (answers `EINVAL`).
+    pub(crate) static REFUSE_SETUP: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+    /// Tests: act as if a provided-buffer ring in user memory were refused (as on 6.8).
+    pub(crate) static FORCE_PBUF_MMAP: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+    /// Tests: act as if provided-buffer rings were refused altogether (Ubuntu's 6.8).
+    pub(crate) static FORCE_PBUF_LEGACY: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Annotates a set-up error with the step that failed, keeping its kind.
+#[cold]
+#[inline(never)]
+fn step(what: &str, e: io::Error) -> io::Error {
+    io::Error::new(e.kind(), format!("{what}: {e}"))
+}
+
 impl Ring {
-    fn new(entries: u32) -> io::Result<Ring> {
-        let mut p = Params { flags: SETUP_SINGLE_ISSUER | SETUP_DEFER_TASKRUN | SETUP_CQSIZE | SETUP_CLAMP | SETUP_SUBMIT_ALL, cq_entries: entries * 4, ..Default::default() };
-        let fd = setup(entries, &mut p)?;
+    /// Sets up a ring with the best set-up flags the kernel accepts; `dropped` collects the
+    /// names of the optional flags it refused.
+    fn new(entries: u32, dropped: &mut Vec<&'static str>) -> io::Result<Ring> {
+        let all = SETUP_CQSIZE | SETUP_CLAMP | SETUP_SUBMIT_ALL | SETUP_DEFER_TASKRUN | SETUP_SINGLE_ISSUER;
+        let mut found = None;
+        let mut last = None;
+        for drop in SETUP_DROPS {
+            let mut p = Params { flags: all & !drop, cq_entries: entries * 4, ..Default::default() };
+            match setup(entries, &mut p) {
+                Ok(fd) => {
+                    found = Some((fd, p, drop));
+                    break;
+                }
+                Err(e) if e.raw_os_error() == Some(sys::EINVAL) => last = Some(e),
+                Err(e) => return Err(step("io_uring_setup", e)),
+            }
+        }
+        let Some((fd, p, drop)) = found else {
+            return Err(step("io_uring_setup", last.unwrap_or_else(|| io::Error::from_raw_os_error(sys::EINVAL))));
+        };
+        for (f, name) in OPTIONAL_SETUP {
+            if drop & f != 0 {
+                dropped.push(name);
+            }
+        }
         let need = FEAT_SINGLE_MMAP | FEAT_NODROP | FEAT_EXT_ARG;
         if p.features & need != need {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "io_uring lacks SINGLE_MMAP, NODROP or EXT_ARG"));
         }
         let sq_len = p.sq_off.array as usize + p.sq_entries as usize * 4;
         let cq_len = p.cq_off.cqes as usize + p.cq_entries as usize * core::mem::size_of::<Cqe>();
-        let sq_map = Mmap::ring(fd.as_raw_fd(), sq_len.max(cq_len), OFF_SQ_RING)?;
-        let sqe_map = Mmap::ring(fd.as_raw_fd(), p.sq_entries as usize * core::mem::size_of::<Sqe>(), OFF_SQES)?;
+        let sq_map = Mmap::ring(fd.as_raw_fd(), sq_len.max(cq_len), OFF_SQ_RING).map_err(|e| step("mmap of the rings", e))?;
+        let sqe_map = Mmap::ring(fd.as_raw_fd(), p.sq_entries as usize * core::mem::size_of::<Sqe>(), OFF_SQES).map_err(|e| step("mmap of the SQEs", e))?;
         // One mapping holds both rings (FEAT_SINGLE_MMAP).
         let base = sq_map.ptr;
         // SAFETY: every offset comes from the kernel and lies inside the mapping; the rings are
@@ -400,24 +459,27 @@ impl Ring {
 /// Checks that this kernel offers what the driver needs: a 6.1+ ring with single-issuer and
 /// deferred task running, the opcodes used here, and provided-buffer rings.
 pub fn available() -> io::Result<()> {
-    let ring = Ring::new(8)?;
-    probe_ops(&ring)?;
-    let pb = BufRing::new(ring.fd.as_raw_fd(), 8)?;
+    let ring = Ring::new(8, &mut Vec::new())?;
+    let provide_ok = probe_ops(&ring)?;
+    let pb = BufRing::new(ring.fd.as_raw_fd(), 8, provide_ok, &mut Vec::new())?;
     drop(pb);
     Ok(())
 }
 
-fn probe_ops(ring: &Ring) -> io::Result<()> {
+/// Checks the opcodes the driver needs; returns whether `IORING_OP_PROVIDE_BUFFERS` (the
+/// fallback for kernels that refuse provided-buffer rings) is there too.
+fn probe_ops(ring: &Ring) -> io::Result<bool> {
     // SAFETY: an all-zero probe is what the kernel expects as input.
     let mut probe: Probe = unsafe { core::mem::zeroed() };
-    register(ring.fd.as_raw_fd(), REGISTER_PROBE, (&mut probe as *mut Probe).cast(), 64)?;
+    register(ring.fd.as_raw_fd(), REGISTER_PROBE, (&mut probe as *mut Probe).cast(), 64).map_err(|e| step("IORING_REGISTER_PROBE", e))?;
     for op in [OP_POLL_ADD, OP_SENDMSG, OP_ACCEPT, OP_ASYNC_CANCEL, OP_SEND, OP_RECV] {
         let ok = (op as usize) < probe.ops_len as usize && probe.ops[op as usize].flags & PROBE_OP_SUPPORTED != 0;
         if !ok {
             return Err(io::Error::new(io::ErrorKind::Unsupported, format!("io_uring opcode {op} not supported")));
         }
     }
-    Ok(())
+    let op = OP_PROVIDE_BUFFERS as usize;
+    Ok(op < probe.ops_len as usize && probe.ops[op].flags & PROBE_OP_SUPPORTED != 0)
 }
 
 // --- provided-buffer ring ---------------------------------------------------------------------
@@ -427,15 +489,53 @@ struct BufRing {
     entries: u16,
     mask: u16,
     tail: u16,
+    /// No ring: buffers are handed over with `IORING_OP_PROVIDE_BUFFERS` (5.7), one SQE each.
+    /// Ubuntu's 6.8 kernels refuse every `IORING_REGISTER_PBUF_RING` with `EINVAL`.
+    legacy: bool,
 }
 
+/// `IOU_PBUF_RING_MMAP` (6.4): the kernel allocates the provided-buffer ring and the
+/// application maps it from the ring descriptor.
+const PBUF_RING_MMAP: u16 = 1;
+const OFF_PBUF_RING: i64 = 0x8000_0000;
+const OFF_PBUF_SHIFT: u32 = 16;
+
 impl BufRing {
-    fn new(ring_fd: i32, entries: u16) -> io::Result<BufRing> {
+    /// Registers the ring in our own memory; where the kernel refuses that (6.8 refuses a ring
+    /// in user memory larger than one page with `EINVAL`), asks the kernel to allocate it
+    /// (`IOU_PBUF_RING_MMAP`). `notes` records the second case.
+    fn new(ring_fd: i32, entries: u16, provide_ok: bool, notes: &mut Vec<&'static str>) -> io::Result<BufRing> {
         let entries = entries.next_power_of_two().clamp(1, 32768);
-        let map = Mmap::anon(entries as usize * core::mem::size_of::<RingBuf>())?;
+        let len = entries as usize * core::mem::size_of::<RingBuf>();
+        let map = Mmap::anon(len)?;
         let reg = BufReg { ring_addr: map.ptr as u64, ring_entries: entries as u32, bgid: BGID, flags: 0, resv: [0; 3] };
-        register(ring_fd, REGISTER_PBUF_RING, (&reg as *const BufReg).cast(), 1)?;
-        Ok(BufRing { map, entries, mask: entries - 1, tail: 0 })
+        #[cfg(test)]
+        let user = if FORCE_PBUF_MMAP.with(|f| f.get()) { Err(io::Error::from_raw_os_error(sys::EINVAL)) } else { register(ring_fd, REGISTER_PBUF_RING, (&reg as *const BufReg).cast(), 1) };
+        #[cfg(not(test))]
+        let user = register(ring_fd, REGISTER_PBUF_RING, (&reg as *const BufReg).cast(), 1);
+        match user {
+            Ok(_) => return Ok(BufRing { map, entries, mask: entries - 1, tail: 0, legacy: false }),
+            Err(e) if e.raw_os_error() != Some(sys::EINVAL) => return Err(step("IORING_REGISTER_PBUF_RING", e)),
+            Err(_) => drop(map),
+        }
+        let reg = BufReg { ring_addr: 0, ring_entries: entries as u32, bgid: BGID, flags: PBUF_RING_MMAP, resv: [0; 3] };
+        #[cfg(test)]
+        let r = if FORCE_PBUF_LEGACY.with(|f| f.get()) { Err(io::Error::from_raw_os_error(sys::EINVAL)) } else { register(ring_fd, REGISTER_PBUF_RING, (&reg as *const BufReg).cast(), 1) };
+        #[cfg(not(test))]
+        let r = register(ring_fd, REGISTER_PBUF_RING, (&reg as *const BufReg).cast(), 1);
+        match r {
+            Ok(_) => {
+                let off = OFF_PBUF_RING | ((BGID as i64) << OFF_PBUF_SHIFT);
+                let map = Mmap::ring(ring_fd, len, off).map_err(|e| step("mmap of the provided-buffer ring", e))?;
+                notes.push("provided-buffer ring in user memory (kernel-allocated ring used)");
+                Ok(BufRing { map, entries, mask: entries - 1, tail: 0, legacy: false })
+            }
+            Err(e) if e.raw_os_error() == Some(sys::EINVAL) && provide_ok => {
+                notes.push("provided-buffer rings (IORING_REGISTER_PBUF_RING refused; IORING_OP_PROVIDE_BUFFERS used)");
+                Ok(BufRing { map: Mmap { ptr: core::ptr::null_mut(), len: 0 }, entries, mask: entries - 1, tail: 0, legacy: true })
+            }
+            Err(e) => Err(step("IORING_REGISTER_PBUF_RING", e)),
+        }
     }
 
     /// Adds a buffer (not yet visible to the kernel until `publish`).
@@ -453,6 +553,9 @@ impl BufRing {
     }
 
     fn publish(&self) {
+        if self.legacy {
+            return;
+        }
         // SAFETY: the tail is the u16 at offset 14 of entry 0; Release orders the entries first.
         unsafe { (*self.map.ptr.add(14).cast::<AtomicU16>()).store(self.tail, Ordering::Release) };
     }
@@ -509,6 +612,8 @@ struct Entry {
     send: Option<Box<SendOp>>,
     out: VecDeque<OutBuf>,
     off: usize,
+    /// A UDP socket receiving into large buffers (GRO).
+    large: bool,
 }
 
 impl Entry {
@@ -539,26 +644,52 @@ pub(crate) struct Driver {
     cqes: Vec<Cqe>,
     send_pool: Vec<Box<SendOp>>,
     scratch: Vec<Vec<u8>>,
+    large: LargeBufs,
     udp_count: usize,
     stats: DriverStats,
     budget: usize,
+    /// Optional features the kernel refused (set-up flags, registered files).
+    dropped: Vec<&'static str>,
 }
 
 impl Driver {
+    /// The optional io_uring features this kernel refused, if any.
+    pub(crate) fn degraded(&self) -> Option<String> {
+        if self.dropped.is_empty() {
+            None
+        } else {
+            let mut s = String::from("io_uring without ");
+            for (i, d) in self.dropped.iter().enumerate() {
+                if i > 0 {
+                    s.push_str(", ");
+                }
+                s.push_str(d);
+            }
+            Some(s)
+        }
+    }
+
+    #[inline(never)]
     pub(crate) fn new(cfg: &DriverConfig) -> io::Result<Driver> {
         let fail = cfg.uring_simulate_failure.or_else(|| std::env::var("SIMOOM_IO_URING_FAIL").ok().and_then(|v| v.parse().ok()));
         if let Some(errno) = fail {
             return Err(io::Error::from_raw_os_error(errno));
         }
-        let ring = Ring::new(cfg.uring_entries.clamp(8, 32768))?;
-        probe_ops(&ring)?;
-        let bufring = BufRing::new(ring.fd.as_raw_fd(), cfg.uring_buffers.max(8))?;
+        let mut dropped = Vec::new();
+        let ring = Ring::new(cfg.uring_entries.clamp(8, 32768), &mut dropped)?;
+        let provide_ok = probe_ops(&ring)?;
+        let bufring = BufRing::new(ring.fd.as_raw_fd(), cfg.uring_buffers.max(8), provide_ok, &mut dropped)?;
         let entries = bufring.entries;
         let mut stats = DriverStats::default();
         let mut fixed = false;
         let mut slots_free = Vec::new();
         if cfg.uring_fixed_files && cfg.uring_max_files > 0 {
-            let n = cfg.uring_max_files.min(1 << 20);
+            // The kernel refuses a table larger than RLIMIT_NOFILE (EMFILE); shells default the
+            // soft limit to 1024, so ask for at most that many.
+            let mut lim = sys::rlimit::default();
+            // SAFETY: getrlimit writes one rlimit.
+            let soft = if unsafe { sys::getrlimit(sys::RLIMIT_NOFILE, &mut lim) } == 0 { lim.rlim_cur } else { 1024 };
+            let n = cfg.uring_max_files.min(1 << 20).min(soft.min(u32::MAX as u64) as u32);
             let reg = RsrcRegister { nr: n, flags: RSRC_REGISTER_SPARSE, resv2: 0, data: 0, tags: 0 };
             stats.other_calls += 1;
             let ok = register(ring.fd.as_raw_fd(), REGISTER_FILES2, (&reg as *const RsrcRegister).cast(), core::mem::size_of::<RsrcRegister>() as u32).is_ok() || {
@@ -569,6 +700,8 @@ impl Driver {
             if ok {
                 fixed = true;
                 slots_free = (0..n).rev().collect();
+            } else {
+                dropped.push("registered files");
             }
         }
         let efd = Arc::new(eventfd()?);
@@ -595,9 +728,11 @@ impl Driver {
             cqes: Vec::with_capacity(cfg.events.max(64)),
             send_pool: Vec::new(),
             scratch: Vec::with_capacity(BATCH),
+            large: LargeBufs::default(),
             udp_count: 0,
             stats,
             budget: cfg.recv_budget.max(1),
+            dropped,
         };
         d.arm_wake();
         Ok(d)
@@ -691,6 +826,7 @@ impl Driver {
             send: None,
             out: VecDeque::new(),
             off: 0,
+            large: false,
         });
         if kind == Kind::Udp {
             self.udp_count += 1;
@@ -711,6 +847,15 @@ impl Driver {
 
     pub(crate) fn udp(&mut self, sock: Socket, key: u64) -> io::Result<Id> {
         self.add(sock, key, Kind::Udp)
+    }
+
+    pub(crate) fn udp_large(&mut self, sock: Socket, key: u64, size: usize) -> io::Result<Id> {
+        let id = self.add(sock, key, Kind::Udp)?;
+        self.large.size = self.large.size.max(size);
+        if let Some(e) = self.slab.get_mut(id) {
+            e.large = true;
+        }
+        Ok(id)
     }
 
     pub(crate) fn recv(&mut self, id: Id, on: bool) {
@@ -814,7 +959,8 @@ impl Driver {
         self.slab.get(id).map(|e| &e.sock)
     }
 
-    pub(crate) fn provide(&mut self, mut buf: Vec<u8>) {
+    pub(crate) fn provide(&mut self, buf: Vec<u8>) {
+        let Some(mut buf) = self.large.keep(buf) else { return };
         buf.clear();
         // UDP sockets read with recvmmsg, from the stash; streams use the ring.
         if self.udp_count > 0 && self.stash.len() < BATCH {
@@ -826,11 +972,33 @@ impl Driver {
                 let cap = buf.capacity().min(u32::MAX as usize) as u32;
                 let ptr = buf.as_mut_ptr();
                 self.bufs[bid as usize] = Some(buf);
-                self.bufring.add(ptr, cap, bid);
+                self.give(ptr, cap, bid);
                 self.bufring.publish();
             }
             Some(bid) => self.free_bids.push(bid),
             None => self.stash.push(buf),
+        }
+    }
+
+    /// Hands one buffer to the kernel: into the ring, or with a `PROVIDE_BUFFERS` SQE (submitted
+    /// with the next `io_uring_enter`, before anything that could pick it).
+    fn give(&mut self, ptr: *mut u8, cap: u32, bid: u16) {
+        if self.bufring.legacy {
+            let sqe = Sqe {
+                opcode: OP_PROVIDE_BUFFERS,
+                flags: SQE_CQE_SKIP_SUCCESS,
+                fd: 1, // one buffer
+                addr: ptr as u64,
+                len: cap,
+                off: bid as u64,
+                buf_index: BGID,
+                user_data: (Op::Cancel as u64) << 56, // completions (errors only) are ignored
+                ..Default::default()
+            };
+            self.push(sqe);
+            self.stats.sqes -= 1; // a buffer hand-over, not I/O: kept out of the SQE count
+        } else {
+            self.bufring.add(ptr, cap, bid);
         }
     }
 
@@ -847,7 +1015,7 @@ impl Driver {
             let cap = buf.capacity().min(u32::MAX as usize) as u32;
             let ptr = buf.as_mut_ptr();
             self.bufs[bid as usize] = Some(buf);
-            self.bufring.add(ptr, cap, bid);
+            self.give(ptr, cap, bid);
             moved = true;
         }
         if moved {
@@ -1096,12 +1264,19 @@ impl Driver {
             }
             let mut done = false;
             for _ in 0..self.budget {
-                let n = self.stash.len().min(BATCH);
-                if n == 0 {
-                    break;
-                }
-                let at = self.stash.len() - n;
-                self.scratch.extend(self.stash.drain(at..));
+                let n = if e.large {
+                    let large = &mut self.large;
+                    self.scratch.extend((0..LARGE_BATCH).map(|_| large.take()));
+                    LARGE_BATCH
+                } else {
+                    let n = self.stash.len().min(BATCH);
+                    if n == 0 {
+                        break;
+                    }
+                    let at = self.stash.len() - n;
+                    self.scratch.extend(self.stash.drain(at..));
+                    n
+                };
                 let mut meta = [RecvMeta::default(); BATCH];
                 self.stats.recv_calls += 1;
                 let r = e.sock.recv_msgs(&mut self.scratch, &mut meta);
@@ -1117,9 +1292,11 @@ impl Driver {
                 for (i, buf) in self.scratch.drain(..got).enumerate() {
                     out.push(Event::Datagram { key: e.key, buf, meta: meta[i] });
                 }
-                for mut b in self.scratch.drain(..) {
-                    b.clear();
-                    self.stash.push(b);
+                for b in self.scratch.drain(..) {
+                    if let Some(mut b) = self.large.keep(b) {
+                        b.clear();
+                        self.stash.push(b);
+                    }
                 }
                 if got < n {
                     done = true;

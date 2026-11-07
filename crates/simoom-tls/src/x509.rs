@@ -301,7 +301,7 @@ pub fn dns_name_matches(pattern: &str, host: &str) -> bool {
 }
 
 /// Certificate validation failures.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum CertError {
     NoCertificates,
     Parse(String),
@@ -337,6 +337,13 @@ impl fmt::Display for CertError {
                 write!(f, "unsupported critical extension {oid} in '{subject}'")
             }
         }
+    }
+}
+
+/// Debug output is the Display text (smaller than a derived implementation).
+impl fmt::Debug for CertError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }
 
@@ -493,7 +500,7 @@ pub fn verify_chain(
     if chain.len() > MAX_PATH_DEPTH + 2 {
         return Err(CertError::PathTooLong);
     }
-    let certs: Vec<Certificate> = chain
+    let mut certs: Vec<Certificate> = chain
         .iter()
         .map(|d| Certificate::from_der(d).map_err(|e| CertError::Parse(e.to_string())))
         .collect::<Result<_, _>>()?;
@@ -522,12 +529,12 @@ pub fn verify_chain(
     }
     // a leaf that is itself a trust anchor (pinned self-signed certificate)
     if roots.roots.iter().any(|r| r.der == leaf.der) {
-        return Ok(leaf.clone());
+        return Ok(certs.swap_remove(0));
     }
     let mut used = vec![false; certs.len()];
     used[0] = true;
     build_path(&certs, 0, roots, now, &mut used, 0)?;
-    Ok(leaf.clone())
+    Ok(certs.swap_remove(0))
 }
 
 fn build_path(
@@ -599,6 +606,8 @@ fn build_path(
 
 #[cfg(test)]
 mod tests {
+    // some fixtures are used only by the tests that need every key type
+    #![cfg_attr(not(all(feature = "rsa", feature = "p384", feature = "ed25519")), allow(dead_code))]
     use super::*;
 
     fn der_of(pem_text: &str) -> Vec<u8> {
@@ -611,6 +620,7 @@ mod tests {
     const RSA_SELF: &str = include_str!("../testdata/rsa_selfsigned.pem");
 
     #[test]
+    #[cfg(all(feature = "rsa", feature = "p384", feature = "ed25519"))] // the test chain uses RSA and P-384
     fn parse_openssl_chain() {
         let leaf = Certificate::from_der(&der_of(LEAF)).unwrap();
         assert_eq!(leaf.version, 3);
@@ -638,6 +648,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "rsa", feature = "p384", feature = "ed25519"))] // the test chain uses RSA and P-384
     fn chain_validation() {
         let mut roots = RootStore::empty();
         roots.add_pem(CA.as_bytes()).unwrap();

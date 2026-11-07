@@ -149,8 +149,24 @@ pub trait Endpoint: 'static {
         let _ = (cx, msg);
     }
 
-    /// The runtime is stopping. The socket is closed when the loop exits.
+    /// The runtime is stopping gracefully. Start winding down (QUIC: GOAWAY, then close each
+    /// connection once its streams finish). The loop keeps serving this endpoint, with its
+    /// datagrams, timers and messages, while [`Endpoint::is_busy`] says so and the grace
+    /// period lasts; then the socket is closed.
     fn on_stop(&mut self, cx: &mut UdpCtx<'_>) {
+        let _ = cx;
+    }
+
+    /// Whether the endpoint still has work in flight. Asked after every loop turn once the
+    /// runtime is stopping: while it is `true` (and the grace period lasts) the loop stays
+    /// alive. The default is `false`: the socket closes as soon as the TCP side is done.
+    fn is_busy(&self) -> bool {
+        false
+    }
+
+    /// The grace period ran out while the endpoint was still busy: close everything now (QUIC:
+    /// send CONNECTION_CLOSE). The socket is closed right after.
+    fn on_abort(&mut self, cx: &mut UdpCtx<'_>) {
         let _ = cx;
     }
 }

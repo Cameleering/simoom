@@ -3,7 +3,7 @@
 use std::io;
 
 /// The CPUs this process may run on, as indices (the affinity mask on Linux and Windows).
-/// Falls back to `0..available_parallelism` where the mask can't be read.
+/// Falls back to `0..cpu_count()` (or one CPU) where the mask can't be read.
 pub fn allowed_cpus() -> Vec<usize> {
     #[cfg(target_os = "linux")]
     {
@@ -26,12 +26,77 @@ pub fn allowed_cpus() -> Vec<usize> {
             return (0..usize::BITS as usize).filter(|&i| p & (1 << i) != 0).collect();
         }
     }
-    (0..cpu_count()).collect()
+    #[cfg(any(target_os = "linux", windows))]
+    {
+        vec![0]
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        (0..cpu_count()).collect()
+    }
 }
 
-/// The number of CPUs this process may use (at least 1).
+/// The number of CPUs this process may use (at least 1): the affinity mask, capped on Linux by
+/// a cgroup v2 CPU quota (`cpu.max`, as containers set it), like
+/// `std::thread::available_parallelism` but without its cgroup v1 code.
 pub fn cpu_count() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+    #[cfg(any(target_os = "linux", windows))]
+    {
+        let n = allowed_cpus().len().max(1);
+        #[cfg(target_os = "linux")]
+        if let Some(q) = cgroup_quota() {
+            return n.min(q).max(1);
+        }
+        n
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+    }
+}
+
+/// The CPU quota of this process's cgroup v2 (and its parents), rounded up, if one is set.
+#[cfg(target_os = "linux")]
+#[inline(never)]
+fn cgroup_quota() -> Option<usize> {
+    let mut buf = [0u8; 4096];
+    let groups = read_small("/proc/self/cgroup", &mut buf)?;
+    let path = groups.lines().find_map(|l| l.strip_prefix("0::"))?;
+    let mut dir = format!("/sys/fs/cgroup{}", path.trim_end_matches('/'));
+    let mut best: Option<usize> = None;
+    loop {
+        let mut b = [0u8; 64];
+        if let Some(q) = read_small(&format!("{dir}/cpu.max"), &mut b).and_then(parse_cpu_max) {
+            best = Some(best.map_or(q, |b| b.min(q)));
+        }
+        if dir.len() <= "/sys/fs/cgroup".len() {
+            return best;
+        }
+        match dir.rfind('/') {
+            Some(i) => dir.truncate(i),
+            None => return best,
+        }
+    }
+}
+
+/// Reads a small file into `buf` (one read: these kernel files are produced whole).
+#[cfg(target_os = "linux")]
+fn read_small<'b>(path: &str, buf: &'b mut [u8]) -> Option<&'b str> {
+    use std::io::Read;
+    let n = std::fs::File::open(path).ok()?.read(buf).ok()?;
+    std::str::from_utf8(&buf[..n]).ok()
+}
+
+/// Parses a cgroup v2 `cpu.max` (`"max 100000"` or `"<quota> <period>"`) into whole CPUs.
+#[cfg(target_os = "linux")]
+fn parse_cpu_max(s: &str) -> Option<usize> {
+    let mut it = s.split_ascii_whitespace();
+    let quota: u64 = it.next()?.parse().ok()?;
+    let period: u64 = it.next().map_or(Some(100_000), |p| p.parse().ok())?;
+    if quota == 0 || period == 0 {
+        return None;
+    }
+    Some(quota.div_ceil(period) as usize)
 }
 
 /// Pins the calling thread to one CPU. Returns `Unsupported` on macOS, which has no hard
@@ -72,6 +137,19 @@ pub fn pin_current_thread(cpu: usize) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cpu_max_parsing() {
+        assert_eq!(parse_cpu_max("max 100000
+"), None);
+        assert_eq!(parse_cpu_max("200000 100000
+"), Some(2));
+        assert_eq!(parse_cpu_max("150000 100000"), Some(2));
+        assert_eq!(parse_cpu_max("50000 100000"), Some(1));
+        assert_eq!(parse_cpu_max(""), None);
+        assert!(cpu_count() <= allowed_cpus().len());
+    }
 
     #[test]
     fn count_and_pin() {

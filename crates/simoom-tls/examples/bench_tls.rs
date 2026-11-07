@@ -132,8 +132,14 @@ fn main() {
         black_box(p256::verify(&pub256, &h, &r, &s));
     }));
     let seed = [5u8; 32];
+    let edpub = simoom_tls::crypto::ed25519::public_key(&seed);
+    // as the server signs: the key's public half is known (OpenSSL keeps it in the key too)
     println!("{:<34} {:>12.0}", "Ed25519 sign", rate(d, || {
-        black_box(simoom_tls::crypto::ed25519::sign(&seed, b"message"));
+        black_box(simoom_tls::crypto::ed25519::sign_with_public(&seed, &edpub, b"message"));
+    }));
+    let edsig = simoom_tls::crypto::ed25519::sign(&seed, b"message");
+    println!("{:<34} {:>12.0}", "Ed25519 verify", rate(d, || {
+        black_box(simoom_tls::crypto::ed25519::verify(&edpub, b"message", &edsig));
     }));
     let rsa = PrivateKey::from_pem(include_bytes!("../testdata/rsa2048.pkcs1.pem")).unwrap();
     if let PrivateKey::Rsa(k) = &rsa {

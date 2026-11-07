@@ -17,7 +17,7 @@
 //! dequeued (or it completed inline). Closing a socket aborts its pending operations, whose
 //! completions still arrive; the entry is freed once all have.
 
-use super::{DriverConfig, DriverStats, Event, Id, OutBuf, Slab, Waker};
+use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Waker};
 use crate::net::{decode_addr, last_error, SockAddrBuf, Socket};
 use crate::os::windows as sys;
 use crate::udp::{finish_meta_windows, wsa_recvmsg, Transmit};
@@ -120,6 +120,8 @@ struct Entry {
     off: usize,
     accepts: Vec<Box<AcceptOp>>,
     udps: Vec<Box<UdpOp>>,
+    /// A UDP socket receiving into large buffers (GRO / URO).
+    large: bool,
 }
 
 impl Entry {
@@ -133,6 +135,7 @@ pub(crate) struct Driver {
     waker: Waker,
     slab: Slab<Entry>,
     stash: Vec<Vec<u8>>,
+    large: LargeBufs,
     target: usize,
     read_list: Vec<Id>,
     flush_list: Vec<Id>,
@@ -211,6 +214,7 @@ impl Driver {
             waker,
             slab: Slab::new(),
             stash: Vec::new(),
+            large: LargeBufs::default(),
             target: 16,
             read_list: Vec::new(),
             flush_list: Vec::new(),
@@ -274,6 +278,7 @@ impl Driver {
             off: 0,
             accepts: Vec::new(),
             udps: Vec::new(),
+            large: false,
         });
         if let Err(e) = self.associate(&sock, id) {
             self.slab.remove(id);
@@ -319,6 +324,15 @@ impl Driver {
 
     pub(crate) fn udp(&mut self, sock: Socket, key: u64) -> io::Result<Id> {
         self.add(sock, key, Kind::Udp)
+    }
+
+    pub(crate) fn udp_large(&mut self, sock: Socket, key: u64, size: usize) -> io::Result<Id> {
+        let id = self.add(sock, key, Kind::Udp)?;
+        self.large.size = self.large.size.max(size);
+        if let Some(e) = self.slab.get_mut(id) {
+            e.large = true;
+        }
+        Ok(id)
     }
 
     /// Posts AcceptEx number `i` of a listener, handling inline completions.
@@ -561,6 +575,9 @@ impl Driver {
                 i += 1;
                 continue;
             }
+            if op.buf.is_none() && e.large {
+                op.buf = Some(self.large.take());
+            }
             if op.buf.is_none() {
                 match self.stash.pop() {
                     Some(b) => op.buf = Some(b),
@@ -689,7 +706,7 @@ impl Driver {
                     self.stash.push(b);
                 }
                 for mut op in e.udps.drain(..) {
-                    if let Some(b) = op.buf.take() {
+                    if let Some(b) = op.buf.take().and_then(|b| self.large.keep(b)) {
                         self.stash.push(b);
                     }
                 }
@@ -702,9 +719,11 @@ impl Driver {
         self.slab.get(id).and_then(|e| e.sock.as_ref())
     }
 
-    pub(crate) fn provide(&mut self, mut buf: Vec<u8>) {
-        buf.clear();
-        self.stash.push(buf);
+    pub(crate) fn provide(&mut self, buf: Vec<u8>) {
+        if let Some(mut buf) = self.large.keep(buf) {
+            buf.clear();
+            self.stash.push(buf);
+        }
     }
 
     pub(crate) fn buffers_wanted(&self) -> usize {

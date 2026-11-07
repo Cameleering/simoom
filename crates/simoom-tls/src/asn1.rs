@@ -20,7 +20,7 @@ pub const TAG_SEQUENCE: u8 = 0x30;
 pub const TAG_SET: u8 = 0x31;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DerError(pub String);
+pub struct DerError(pub std::borrow::Cow<'static, str>);
 
 impl fmt::Display for DerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -32,8 +32,8 @@ impl std::error::Error for DerError {}
 
 pub type DerResult<T> = Result<T, DerError>;
 
-fn err<T>(msg: &str) -> DerResult<T> {
-    Err(DerError(msg.to_string()))
+fn err<T>(msg: &'static str) -> DerResult<T> {
+    Err(DerError(msg.into()))
 }
 
 /// One decoded TLV element.
@@ -113,7 +113,7 @@ impl<'a> Der<'a> {
     pub fn expect(&mut self, tag: u8) -> DerResult<Tlv<'a>> {
         let t = self.read()?;
         if t.tag != tag {
-            return Err(DerError(format!("expected tag {:#04x}, found {:#04x}", tag, t.tag)));
+            return err("unexpected tag");
         }
         Ok(t)
     }

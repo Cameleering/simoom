@@ -1,5 +1,8 @@
 //! Runtime tests, on every back end this machine has.
 
+// The UDP tests need the `udp` feature (on by default).
+#![cfg_attr(not(feature = "udp"), allow(unused_imports, dead_code))]
+
 mod common;
 
 use common::{backends, builder, wait_until};
@@ -100,6 +103,7 @@ impl Endpoint for UdpEcho {
     }
 }
 
+#[cfg(feature = "udp")]
 #[test]
 fn udp_echo() {
     for b in backends() {
@@ -127,6 +131,135 @@ fn udp_echo() {
         }
         assert!(ok >= 48, "{b:?}: {ok}/50 echoed");
         assert!(seen.load(Ordering::Relaxed) >= 48);
+    }
+}
+
+/// Counts datagrams (segments of GRO batches) and the largest batch.
+struct GroCount(Arc<Mutex<(usize, usize, usize)>>);
+impl Endpoint for GroCount {
+    fn on_datagram(&mut self, _: &mut UdpCtx<'_>, data: &[u8], meta: &RecvMeta) {
+        let mut g = self.0.lock().unwrap();
+        for seg in data.chunks(meta.segment_size.max(1)) {
+            assert_eq!(seg.len(), 1200);
+            g.0 += 1;
+        }
+        g.1 = g.1.max(data.len());
+        g.2 += data.len();
+    }
+}
+
+#[cfg(feature = "udp")]
+#[test]
+fn udp_with_gro_delivers_whole_batches_to_the_endpoint() {
+    for b in backends() {
+        let got = Arc::new(Mutex::new((0, 0, 0)));
+        let g2 = got.clone();
+        let rt = builder(b, 1)
+            .udp("127.0.0.1:0", UdpOptions { gro: true, recv_buffer: Some(4 << 20), ..UdpOptions::default() }, move |_: &UdpInfo| Box::new(GroCount(g2.clone())) as Box<dyn Endpoint>)
+            .start()
+            .unwrap();
+        let addr = rt.udp_addrs()[0];
+        let sender = simoom_rt::Socket::udp_bind("127.0.0.1:0".parse().unwrap(), &UdpOptions::default()).unwrap();
+        let data = vec![5u8; 30 * 1200];
+        let mut sent = 0;
+        for _ in 0..5 {
+            let t = Transmit { peer: addr, data: &data, segment_size: 1200, ecn: 0, src_ip: None };
+            if sender.send_msgs(&[t]).is_ok() {
+                sent += 30;
+            } else {
+                for c in data.chunks(1200) {
+                    if sender.send_msgs(&[Transmit { peer: addr, data: c, segment_size: 0, ecn: 0, src_ip: None }]).is_ok() {
+                        sent += 1;
+                    }
+                }
+            }
+            // One batch at a time, so a small socket buffer (Windows) drops nothing.
+            assert!(wait_until(10, || got.lock().unwrap().0 >= sent), "{b:?}: {:?} of {sent} datagrams", got.lock().unwrap());
+        }
+        assert!(wait_until(10, || got.lock().unwrap().0 >= sent), "{b:?}: {:?} of {sent} datagrams", got.lock().unwrap());
+        let (n, largest, bytes) = *got.lock().unwrap();
+        assert_eq!(bytes, n * 1200);
+        #[cfg(target_os = "linux")]
+        assert!(largest > 1200, "{b:?}: no GRO batch reached the endpoint");
+        let _ = largest;
+        rt.stop(Duration::from_secs(1));
+        rt.join();
+    }
+}
+
+/// An endpoint that stays busy after `on_stop` until a timer it sets then fires (or forever).
+struct Lingering {
+    linger: Option<Duration>,
+    busy: bool,
+    log: Arc<Mutex<Vec<&'static str>>>,
+}
+impl Endpoint for Lingering {
+    fn on_datagram(&mut self, _: &mut UdpCtx<'_>, _: &[u8], _: &RecvMeta) {}
+    fn on_stop(&mut self, cx: &mut UdpCtx<'_>) {
+        self.busy = true;
+        self.log.lock().unwrap().push("stop");
+        // A periodic timer: the loop must keep firing timers while the endpoint is busy.
+        cx.set_timer(self.linger.unwrap_or(Duration::from_millis(20)), 0);
+    }
+    fn on_timer(&mut self, cx: &mut UdpCtx<'_>, _: u64) {
+        self.log.lock().unwrap().push("timer");
+        match self.linger {
+            Some(_) => self.busy = false,
+            None => {
+                cx.set_timer(Duration::from_millis(20), 0);
+            }
+        }
+    }
+    fn is_busy(&self) -> bool {
+        self.busy
+    }
+    fn on_abort(&mut self, _: &mut UdpCtx<'_>) {
+        self.log.lock().unwrap().push("abort");
+        self.busy = false;
+    }
+}
+
+#[cfg(feature = "udp")]
+fn lingering_runtime(b: simoom_rt::Backend, linger: Option<Duration>, log: &Arc<Mutex<Vec<&'static str>>>) -> simoom_rt::RuntimeHandle {
+    let log = log.clone();
+    builder(b, 1)
+        .udp("127.0.0.1:0", UdpOptions::default(), move |_: &UdpInfo| Box::new(Lingering { linger, busy: false, log: log.clone() }) as Box<dyn Endpoint>)
+        .start()
+        .unwrap()
+}
+
+#[cfg(feature = "udp")]
+#[test]
+fn a_busy_udp_endpoint_keeps_its_loop_alive_until_idle() {
+    for b in backends() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let rt = lingering_runtime(b, Some(Duration::from_millis(300)), &log);
+        let t0 = Instant::now();
+        rt.stop(Duration::from_secs(10));
+        rt.join();
+        let took = t0.elapsed();
+        assert!(took >= Duration::from_millis(290), "{b:?}: the loop exited after {took:?}, before the endpoint was idle");
+        assert!(took < Duration::from_secs(5), "{b:?}: the loop lingered {took:?} after the endpoint was idle");
+        assert_eq!(*log.lock().unwrap(), ["stop", "timer"], "{b:?}");
+    }
+}
+
+#[cfg(feature = "udp")]
+#[test]
+fn a_udp_endpoint_still_busy_at_the_deadline_is_aborted() {
+    for b in backends() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let rt = lingering_runtime(b, None, &log);
+        let t0 = Instant::now();
+        rt.stop(Duration::from_millis(250));
+        rt.join();
+        let took = t0.elapsed();
+        assert!(took >= Duration::from_millis(240) && took < Duration::from_secs(3), "{b:?}: stop took {took:?}");
+        let log = log.lock().unwrap();
+        assert_eq!(log.first(), Some(&"stop"), "{b:?}: {log:?}");
+        assert_eq!(log.last(), Some(&"abort"), "{b:?}: {log:?}");
+        assert!(log.iter().filter(|e| **e == "timer").count() >= 3, "{b:?}: timers stopped while the endpoint was busy: {log:?}");
+        assert_eq!(log.iter().filter(|e| **e == "abort").count(), 1, "{b:?}");
     }
 }
 

@@ -181,7 +181,17 @@ pub struct timespec {
     pub tv_nsec: i64,
 }
 
+pub const RLIMIT_NOFILE: c_int = 7;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct rlimit {
+    pub rlim_cur: u64,
+    pub rlim_max: u64,
+}
+
 extern "C" {
+    pub fn getrlimit(resource: c_int, rlim: *mut rlimit) -> c_int;
     pub fn socket(domain: c_int, ty: c_int, protocol: c_int) -> c_int;
     pub fn bind(fd: c_int, addr: *const c_void, len: socklen_t) -> c_int;
     pub fn listen(fd: c_int, backlog: c_int) -> c_int;
