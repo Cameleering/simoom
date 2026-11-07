@@ -13,3 +13,8 @@ workspace = true
 
 [dependencies]
 simoom-sys = { path = "../simoom-sys" }
+
+[features]
+default = ["websocket"]
+# RFC 6455 handshake and frame codec (adds SHA-1).
+websocket = []
