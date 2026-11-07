@@ -1,0 +1,18 @@
+== open loop 50000 req/s, 1024 conns: wrk2, then simoom-bench with the ticker (20 us) and without
+ 50.000%    2.04ms
+ 99.000%    5.84ms
+ 99.900%    6.73ms
+Requests/sec:  48517.84
+simoom-bench: back end epoll (io_uring unavailable (Invalid argument (os error 22)); using epoll)
+RESULT proto=h1 mode=open depth=1 dist=fixed rate=50000 achieved=50001 conns=1024 connected=1024 received=1500019 samples=1500014 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=236.0 p90_us=306.4 p99_us=417.0 p999_us=866.8 p9999_us=1681.4 max_us=3180.6 mean_us=245.5 lag_p99_us=123.6 lag_max_us=706.8 gen_cpu_pct=41.4 gen_thread_max_pct=47.2 node_cpu_pct=47.1 softirq_pct=11.6 gen_syscalls_per_req=4.69 window_s=30.0 nodes=1 backend=epoll
+simoom-bench: back end epoll (io_uring unavailable (Invalid argument (os error 22)); using epoll)
+RESULT proto=h1 mode=open depth=1 dist=fixed rate=50000 achieved=50000 conns=1024 connected=1024 received=1500007 samples=1500014 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=358.7 p90_us=1123.3 p99_us=1401.9 p999_us=1645.6 p9999_us=3373.1 max_us=6906.7 mean_us=526.7 lag_p99_us=1055.7 lag_max_us=4878.8 gen_cpu_pct=23.6 gen_thread_max_pct=32.2 node_cpu_pct=29.1 softirq_pct=10.5 gen_syscalls_per_req=2.92 window_s=30.0 nodes=1 backend=epoll
+== open loop 100000 req/s, 1024 conns: wrk2, then simoom-bench with the ticker (20 us) and without
+ 50.000%    2.98ms
+ 99.000%    8.89ms
+ 99.900%   11.12ms
+Requests/sec:  97002.46
+simoom-bench: back end epoll (io_uring unavailable (Invalid argument (os error 22)); using epoll)
+RESULT proto=h1 mode=open depth=1 dist=fixed rate=100000 achieved=100001 conns=1024 connected=1024 received=3000016 samples=3000023 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=277.0 p90_us=581.1 p99_us=1060.9 p999_us=6946.8 p9999_us=11337.7 max_us=12984.8 mean_us=362.2 lag_p99_us=271.6 lag_max_us=13127.9 gen_cpu_pct=65.2 gen_thread_max_pct=91.6 node_cpu_pct=68.8 softirq_pct=18.7 gen_syscalls_per_req=3.45 window_s=30.0 nodes=1 backend=epoll load_node_over_60pct=1
+simoom-bench: back end epoll (io_uring unavailable (Invalid argument (os error 22)); using epoll)
+RESULT proto=h1 mode=open depth=1 dist=fixed rate=100000 achieved=100001 conns=1024 connected=1024 received=3000017 samples=3000023 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=295.4 p90_us=613.4 p99_us=1249.3 p999_us=2152.4 p9999_us=4268.0 max_us=208367.2 mean_us=371.5 lag_p99_us=803.3 lag_max_us=10773.9 gen_cpu_pct=51.9 gen_thread_max_pct=83.5 node_cpu_pct=55.6 softirq_pct=18.0 gen_syscalls_per_req=2.86 window_s=30.0 nodes=1 backend=epoll

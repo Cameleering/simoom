@@ -1,0 +1,7 @@
+date: 2026-11-07 04:16 UTC
+kernel: 6.18.54.1-microsoft-standard-WSL2
+cpu: AMD Ryzen 5 5600X 6-Core Processor
+server: /home/sudheesh/simoom-target-bench/release/examples/raw_http --port 18080 --threads 4 --secs 100000 (cpus 0-3); generators on cpus 4-7; 64 connections, 4 threads, 15 s
+wrk: wrk debian/4.1.0-4build2 [epoll] Copyright (C) 2012 Will Glozer
+wrk2: 44a94c1 2019-09-23
+simoom-bench: simoom-bench 0.1.0

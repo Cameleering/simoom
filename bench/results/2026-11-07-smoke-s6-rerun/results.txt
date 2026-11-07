@@ -1,0 +1,27 @@
+VERSION server=simoom simoom 60345ef+worktree side=raw 
+SIZE server=simoom bytes=1019016 unstripped=1214648 path=/root/simoom/target/release/simoom-bench
+COLDSTART server=simoom min_ms=1.13 median_ms=1.28 max_ms=1.43 runs=10
+BASE server=simoom pss_kb=1833 mem_kb=1088
+PEAK server=simoom pss_kb=1835 mem_peak_kb=1600
+RESULT server=simoom scenario=S6 conns=10000 proto=h1 mode=idle depth=1 dist=fixed rate=0 achieved=190 conns=10000 connected=10000 received=5702 samples=0 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=0.0 p90_us=0.0 p99_us=0.0 p999_us=0.0 p9999_us=0.0 max_us=0.0 mean_us=0.0 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=0.0 gen_thread_max_pct=0.1 node_cpu_pct=0.1 softirq_pct=- gen_syscalls_per_req=1.76 window_s=30.0 nodes=3 backend=epoll
+IDLE server=simoom conns=10000 established=10000 pss0_kb=1835 pss_kb=4511 mem_kb=20076 per_conn_b=274
+RESULT server=simoom scenario=S6 conns=100000 proto=h1 mode=idle depth=1 dist=fixed rate=0 achieved=2561 conns=100000 connected=100000 received=76831 samples=0 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=0.0 p90_us=0.0 p99_us=0.0 p999_us=0.0 p9999_us=0.0 max_us=0.0 mean_us=0.0 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=0.4 gen_thread_max_pct=0.7 node_cpu_pct=0.8 softirq_pct=- gen_syscalls_per_req=1.80 window_s=30.0 nodes=3 backend=epoll
+IDLE server=simoom conns=100000 established=100000 pss0_kb=1894 pss_kb=25501 mem_kb=199848 per_conn_b=241
+VERSION server=nginx nginx version: nginx/1.24.0 (Ubuntu) 
+SIZE server=nginx bytes=1314136 unstripped=1314136 path=/usr/sbin/nginx
+simoom-bench: 127.0.0.1:8080 is still answering before the start
+BASE server=nginx pss_kb=72490 mem_kb=70524
+PEAK server=nginx pss_kb=72498 mem_peak_kb=70948
+RESULT server=nginx scenario=S6 conns=10000 proto=h1 mode=idle depth=1 dist=fixed rate=0 achieved=184 conns=10000 connected=10000 received=5520 samples=0 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=0.0 p90_us=0.0 p99_us=0.0 p999_us=0.0 p9999_us=0.0 max_us=0.0 mean_us=0.0 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=0.0 gen_thread_max_pct=0.1 node_cpu_pct=0.1 softirq_pct=- gen_syscalls_per_req=1.72 window_s=30.0 nodes=3 backend=epoll
+IDLE server=nginx conns=10000 established=10000 pss0_kb=72438 pss_kb=77711 mem_kb=90948 per_conn_b=539
+RESULT server=nginx scenario=S6 conns=100000 proto=h1 mode=idle depth=1 dist=fixed rate=0 achieved=2829 conns=100000 connected=100000 received=84858 samples=0 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=0.0 p90_us=0.0 p99_us=0.0 p999_us=0.0 p9999_us=0.0 max_us=0.0 mean_us=0.0 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=0.4 gen_thread_max_pct=0.8 node_cpu_pct=0.7 softirq_pct=- gen_syscalls_per_req=1.75 window_s=30.0 nodes=3 backend=epoll
+IDLE server=nginx conns=100000 established=100000 pss0_kb=72471 pss_kb=124130 mem_kb=273404 per_conn_b=528
+VERSION server=h2o h2o version 2.3.0-DEV 
+SIZE server=h2o bytes=1535200 unstripped=10350784 path=/opt/bench/h2o/bin/h2o
+COLDSTART server=h2o min_ms=15.53 median_ms=16.92 max_ms=18.90 runs=10
+BASE server=h2o pss_kb=4974 mem_kb=2772
+PEAK server=h2o pss_kb=4978 mem_peak_kb=3920
+RESULT server=h2o scenario=S6 conns=10000 proto=h1 mode=idle depth=1 dist=fixed rate=0 achieved=225 conns=10000 connected=10000 received=6761 samples=0 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=0.0 p90_us=0.0 p99_us=0.0 p999_us=0.0 p9999_us=0.0 max_us=0.0 mean_us=0.0 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=1.1 gen_thread_max_pct=0.8 node_cpu_pct=1.4 softirq_pct=- gen_syscalls_per_req=59.13 window_s=30.0 nodes=3 backend=epoll
+IDLE server=h2o conns=10000 established=8070 pss0_kb=5089 pss_kb=21525 mem_kb=31852 per_conn_b=2085
+RESULT server=h2o scenario=S6 conns=100000 proto=h1 mode=idle depth=1 dist=fixed rate=0 achieved=898 conns=100000 connected=100000 received=26945 samples=0 errors=46706 non2xx=0 conn_errors=46706 incomplete=0 p50_us=0.0 p90_us=0.0 p99_us=0.0 p999_us=0.0 p9999_us=0.0 max_us=0.0 mean_us=0.0 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=13.2 gen_thread_max_pct=6.1 node_cpu_pct=16.4 softirq_pct=- gen_syscalls_per_req=116.61 window_s=30.0 nodes=3 backend=epoll
+IDLE server=h2o conns=100000 failed=1 established=2205

@@ -1,0 +1,19 @@
+# Cameleer `classic` (the thread-pool cameleer-http server): the S1 fixed reply and the S3 echo.
+- route:
+    id: fixed
+    from:
+      uri: "platform-http:/"
+      steps:
+        - setHeader:
+            name: Content-Type
+            constant: text/plain
+        - setBody:
+            constant: "Hello, World!"
+- route:
+    id: echo
+    from:
+      uri: "platform-http:/echo?httpMethodRestrict=POST"
+      steps:
+        - setHeader:
+            name: Content-Type
+            constant: application/json

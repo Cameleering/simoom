@@ -1,0 +1,64 @@
+srv cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv vcpus: 4
+srv ram: 7.8 GiB
+srv os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv governor: n/a
+srv sysctl net.core.somaxconn = 65535
+srv sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv sysctl net.core.busy_poll = 0
+srv sysctl net.core.busy_read = 0
+srv sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv sysctl net.core.netdev_max_backlog = 65536
+srv nic: lo 127.0.0.1/8 eth0 139.59.18.41/20 eth0 10.47.0.6/16 eth1 10.122.0.3/20 
+srv rust: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+srv io_uring_disabled: 0
+srv perf cycles: 958603
+load1 cpu: Intel(R) Xeon(R) Platinum 8168 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 nic: lo 127.0.0.1/8 eth0 206.189.143.7/20 eth0 10.47.0.7/16 eth1 10.122.0.4/20 
+load1 rust: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+load1 io_uring_disabled: 0
+load1 perf cycles: 1418109
+load2 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 nic: lo 127.0.0.1/8 eth0 167.71.238.231/20 eth0 10.47.0.8/16 eth1 10.122.0.5/20 
+load2 rust: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+load2 io_uring_disabled: 0
+load2 perf cycles: 1070906
+load3 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load3 vcpus: 4
+load3 ram: 7.8 GiB
+load3 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load3 governor: n/a
+load3 sysctl net.core.somaxconn = 65535
+load3 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load3 sysctl net.core.busy_poll = 0
+load3 sysctl net.core.busy_read = 0
+load3 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load3 sysctl net.core.netdev_max_backlog = 65536
+load3 nic: lo 127.0.0.1/8 eth0 165.232.185.44/20 eth0 10.47.0.9/16 eth1 10.122.0.6/20 
+load3 rust: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+load3 io_uring_disabled: 0
+load3 perf cycles: 1059555
+commit: +worktree
+date: 2026-11-07 06:01 UTC
+plan: servers [simoom nginx h2o], scenarios [S6], S1 conns [64 256 1024], S6 conns [10000 100000], sweep [--probe 4 --step-warmup 2 --step 8 --steps 7 --point-warmup 3 --point 10]
+simoom-bench: simoom-bench 0.1.0

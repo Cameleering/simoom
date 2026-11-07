@@ -1,0 +1,28 @@
+== machine:  Intel(R) Xeon(R) Platinum 8168 CPU @ 2.70GHz 4 vCPU, kernel 6.8.0-147-generic; target nginx 1.24 on another c-4 droplet (VPC)
+== closed 256 conns, round 1
+     50%  693.00us
+     99%  199.71ms
+Requests/sec: 168856.34
+RESULT proto=h1 mode=closed depth=1 dist=fixed rate=0 achieved=166304 conns=256 connected=256 received=2494561 samples=2494561 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=260.5 p90_us=2250.8 p99_us=6578.2 p999_us=209190.9 p9999_us=217710.6 max_us=426167.2 mean_us=1539.6 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=74.2 gen_thread_max_pct=94.1 node_cpu_pct=77.8 softirq_pct=23.1 gen_syscalls_per_req=2.81 window_s=15.0 nodes=1 backend=epoll load_node_over_60pct=1
+== closed 256 conns, round 2
+     50%  660.00us
+     99%  200.87ms
+Requests/sec: 168114.08
+RESULT proto=h1 mode=closed depth=1 dist=fixed rate=0 achieved=166374 conns=256 connected=256 received=2495608 samples=2495608 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=262.1 p90_us=2488.3 p99_us=7274.5 p999_us=208928.8 p9999_us=220987.4 max_us=421850.3 mean_us=1539.3 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=74.5 gen_thread_max_pct=92.5 node_cpu_pct=78.6 softirq_pct=23.5 gen_syscalls_per_req=2.78 window_s=15.0 nodes=1 backend=epoll load_node_over_60pct=1
+== pipelined 16 (batch), 64 conns
+Requests/sec: 393797.54
+RESULT proto=h1 mode=closed depth=16 batch=1 dist=fixed rate=0 achieved=396548 conns=64 connected=64 received=5948222 samples=5948256 errors=0 non2xx=0 conn_errors=0 incomplete=0 p50_us=529.9 p90_us=2156.5 p99_us=8634.4 p999_us=206045.2 p9999_us=213778.4 max_us=659155.8 mean_us=1404.8 lag_p99_us=0.0 lag_max_us=0.0 gen_cpu_pct=60.0 gen_thread_max_pct=92.3 node_cpu_pct=63.7 softirq_pct=23.7 gen_syscalls_per_req=0.59 window_s=15.0 nodes=1 backend=epoll load_node_over_60pct=1
+== open loop 50000 req/s, 1024 conns
+ 50.000%    1.76ms
+ 99.000%    4.95ms
+ 99.900%    5.84ms
+Requests/sec:  48179.87
+RESULT proto=h1 mode=open depth=1 dist=fixed rate=50000 achieved=49464 conns=1024 connected=1013 received=1483908 samples=1483900 errors=11 non2xx=0 conn_errors=0 incomplete=0 p50_us=359.4 p90_us=1121.3 p99_us=1423.4 p999_us=1714.2 p9999_us=2508.8 max_us=4064.7 mean_us=520.6 lag_p99_us=1051.6 lag_max_us=2740.5 gen_cpu_pct=- gen_thread_max_pct=- node_cpu_pct=- softirq_pct=- gen_syscalls_per_req=2.92 window_s=30.0 nodes=1 backend=epoll
+RESULT proto=h1 mode=open depth=1 dist=fixed rate=50000 achieved=49463 conns=1024 connected=1013 received=1483899 samples=1483900 errors=11 non2xx=0 conn_errors=0 incomplete=0 p50_us=357.9 p90_us=1111.0 p99_us=1418.2 p999_us=1863.7 p9999_us=16007.2 max_us=24371.2 mean_us=522.0 lag_p99_us=1055.7 lag_max_us=13479.3 gen_cpu_pct=- gen_thread_max_pct=- node_cpu_pct=- softirq_pct=- gen_syscalls_per_req=2.92 window_s=30.0 nodes=1 backend=epoll
+== open loop 100000 req/s, 1024 conns
+ 50.000%    3.58ms
+ 99.000%    9.03ms
+ 99.900%   11.69ms
+Requests/sec:  96343.08
+RESULT proto=h1 mode=open depth=1 dist=fixed rate=100000 achieved=98926 conns=1024 connected=1013 received=2967794 samples=2967796 errors=11 non2xx=0 conn_errors=0 incomplete=0 p50_us=332.0 p90_us=711.7 p99_us=1384.4 p999_us=3401.7 p9999_us=7106.6 max_us=9413.2 mean_us=420.6 lag_p99_us=798.2 lag_max_us=13028.2 gen_cpu_pct=- gen_thread_max_pct=- node_cpu_pct=- softirq_pct=- gen_syscalls_per_req=2.80 window_s=30.0 nodes=1 backend=epoll
+RESULT proto=h1 mode=open depth=1 dist=fixed rate=100000 achieved=98926 conns=1024 connected=1013 received=2967781 samples=2967796 errors=11 non2xx=0 conn_errors=0 incomplete=0 p50_us=335.9 p90_us=661.0 p99_us=1362.9 p999_us=3319.8 p9999_us=6348.8 max_us=7446.5 mean_us=411.9 lag_p99_us=672.3 lag_max_us=9648.8 gen_cpu_pct=- gen_thread_max_pct=- node_cpu_pct=- softirq_pct=- gen_syscalls_per_req=2.81 window_s=30.0 nodes=1 backend=epoll

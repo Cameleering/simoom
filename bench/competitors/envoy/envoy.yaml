@@ -1,0 +1,36 @@
+# Fixed 13-byte reply with direct_response. --concurrency is the CPU count (Envoy's default);
+# per Envoy's edge best practices the listener is not proxying, so no upstream clusters.
+# HTTP/1.1 and h2c (codec_type AUTO) on 8080.
+static_resources:
+  listeners:
+  - name: fixed
+    address: { socket_address: { address: 0.0.0.0, port_value: 8080 } }
+    enable_reuse_port: true
+    per_connection_buffer_limit_bytes: 32768
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: fixed
+          codec_type: AUTO
+          generate_request_id: false
+          common_http_protocol_options: { idle_timeout: 120s }
+          route_config:
+            virtual_hosts:
+            - name: all
+              domains: ["*"]
+              routes:
+              - match: { prefix: "/" }
+                direct_response: { status: 200, body: { inline_string: "Hello, World!" } }
+                response_headers_to_add:
+                - header: { key: content-type, value: text/plain }
+                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config: { "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router }
+layered_runtime:
+  layers:
+  - name: static
+    static_layer:
+      overload: { global_downstream_max_connections: 1048576 }

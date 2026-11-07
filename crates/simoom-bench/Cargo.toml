@@ -13,4 +13,6 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-simoom = { path = "../simoom" }
+simoom-rt = { path = "../simoom-rt" }
+simoom-sys = { path = "../simoom-sys" }
+simoom-h2 = { path = "../simoom-h2" }

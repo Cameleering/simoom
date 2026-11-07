@@ -1,0 +1,8 @@
+{
+  "name": "bench-uws",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#9ec36de7709996c58dce03d63796216c90a17136"
+  }
+}

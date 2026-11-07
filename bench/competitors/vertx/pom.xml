@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Vert.x 5 core with native epoll, one verticle instance per CPU. Built with the pinned JDK 21
+     and Maven 3.9.16 (bench/competitors/versions.env). -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>bench</groupId>
+  <artifactId>bench-vertx</artifactId>
+  <version>1</version>
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <vertx.version>5.2.3</vertx.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <dependencies>
+    <dependency><groupId>io.vertx</groupId><artifactId>vertx-core</artifactId><version>${vertx.version}</version></dependency>
+    <dependency><groupId>io.netty</groupId><artifactId>netty-transport-native-epoll</artifactId><version>4.2.20.Final</version><classifier>linux-x86_64</classifier></dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-dependency-plugin</artifactId><version>3.8.1</version>
+        <executions><execution><phase>package</phase><goals><goal>copy-dependencies</goal></goals>
+          <configuration><outputDirectory>${project.build.directory}/lib</outputDirectory></configuration></execution></executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

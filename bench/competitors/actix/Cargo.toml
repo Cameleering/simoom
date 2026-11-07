@@ -1,0 +1,17 @@
+[package]
+name = "bench-actix"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+actix-web = { version = "4", default-features = false, features = ["macros", "http2"] }
+
+[workspace]
+# a standalone project outside the simoom workspace, with its own Cargo.lock (CLAUDE.md rule 1 exception)
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"

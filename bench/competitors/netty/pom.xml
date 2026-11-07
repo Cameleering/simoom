@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Netty 4.2 with native epoll, as in Netty's TechEmpower entry. Built with the pinned JDK 21
+     and Maven 3.9.16 (bench/competitors/versions.env). -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>bench</groupId>
+  <artifactId>bench-netty</artifactId>
+  <version>1</version>
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <netty.version>4.2.20.Final</netty.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <dependencies>
+    <dependency><groupId>io.netty</groupId><artifactId>netty-codec-http</artifactId><version>${netty.version}</version></dependency>
+    <dependency><groupId>io.netty</groupId><artifactId>netty-transport-native-epoll</artifactId><version>${netty.version}</version><classifier>linux-x86_64</classifier></dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId><artifactId>maven-dependency-plugin</artifactId><version>3.8.1</version>
+        <executions><execution><phase>package</phase><goals><goal>copy-dependencies</goal></goals>
+          <configuration><outputDirectory>${project.build.directory}/lib</outputDirectory></configuration></execution></executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
