@@ -1,0 +1,15 @@
+[package]
+name = "simoom-http1"
+description = "Sans-io, strict HTTP/1.1 parser and serializer (RFC 9112) for simoom."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+simoom-sys = { path = "../simoom-sys" }

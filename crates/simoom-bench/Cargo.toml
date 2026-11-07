@@ -1,0 +1,16 @@
+[package]
+name = "simoom-bench"
+description = "Benchmarks, open-loop load generator and raw responders for simoom (not published)."
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+simoom = { path = "../simoom" }

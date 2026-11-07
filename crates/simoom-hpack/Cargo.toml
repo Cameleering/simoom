@@ -1,0 +1,14 @@
+[package]
+name = "simoom-hpack"
+description = "HPACK (RFC 7541) for simoom."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

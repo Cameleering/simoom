@@ -1,0 +1,15 @@
+[package]
+name = "simoom-rt"
+description = "simoom runtime: one event loop per core, timer wheel, buffer pools, cross-thread wakeups, offload pool."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+simoom-sys = { path = "../simoom-sys" }

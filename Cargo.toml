@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/pmsudhi/simoom"
+authors = ["Sudheesh PM <pmsudhi@gmail.com>"]
+rust-version = "1.85"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false
+
+# Smallest binaries, used by the size budget checks (docs/design/plan.md §0).
+[profile.dist]
+inherits = "release"
+strip = true
+panic = "abort"

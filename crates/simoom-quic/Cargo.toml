@@ -1,0 +1,15 @@
+[package]
+name = "simoom-quic"
+description = "Sans-io QUIC v1 transport (RFC 9000, 9002) for simoom."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+simoom-tls = { path = "../simoom-tls" }

@@ -1,0 +1,16 @@
+[package]
+name = "simoom"
+description = "simoom: a small, fast, secure embeddable HTTP/1.1, HTTP/2 and HTTP/3 server."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+simoom-rt = { path = "../simoom-rt" }
+simoom-http1 = { path = "../simoom-http1" }
