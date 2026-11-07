@@ -13,3 +13,17 @@ workspace = true
 
 [dependencies]
 simoom-sys = { path = "../simoom-sys" }
+
+[features]
+default = ["client"]
+# The TLS client (ClientConnection, ClientConfig, QuicConnection::new_client). A server-only
+# build can leave it out; the tests, the benchmark and the fuzzer need it.
+client = []
+
+[[example]]
+name = "bench_tls"
+required-features = ["client"]
+
+[[example]]
+name = "fuzz_tls"
+required-features = ["client"]

@@ -16,6 +16,9 @@ Read [docs/design/plan.md](docs/design/plan.md) (section 0 overrides the rest) a
    already links. SIMD goes through `core::arch` with runtime detection and a scalar fallback.
 2. **`unsafe` only in `simoom-sys`.** Every other crate starts with `#![forbid(unsafe_code)]`.
    Every `unsafe` block in `simoom-sys` has a `// SAFETY:` comment.
+   Exception to rule 1: competitor programs under `bench/competitors/` (axum, actix, hyper, ...) are
+   separate projects outside the workspace with their own pinned `Cargo.lock`; they exist only to be
+   benchmarked against and are never a dependency of any simoom crate.
 3. **Zero warnings** from `cargo build --workspace --all-targets`, and `cargo test --workspace`
    passes on Windows and on Linux (WSL2). Every feature and every bug fix gets a test. Tests are
    hermetic: loopback only, never the internet.

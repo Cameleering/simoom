@@ -14,3 +14,6 @@ workspace = true
 [dependencies]
 simoom-qpack = { path = "../simoom-qpack" }
 simoom-quic = { path = "../simoom-quic" }
+
+[dev-dependencies]
+simoom-tls = { path = "../simoom-tls" }

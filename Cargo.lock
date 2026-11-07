@@ -6,15 +6,21 @@ version = 4
 name = "simoom"
 version = "0.1.0"
 dependencies = [
+ "simoom-h2",
+ "simoom-h3",
  "simoom-http1",
+ "simoom-quic",
  "simoom-rt",
+ "simoom-tls",
 ]
 
 [[package]]
 name = "simoom-bench"
 version = "0.1.0"
 dependencies = [
- "simoom",
+ "simoom-h2",
+ "simoom-rt",
+ "simoom-sys",
 ]
 
 [[package]]
@@ -30,6 +36,7 @@ version = "0.1.0"
 dependencies = [
  "simoom-qpack",
  "simoom-quic",
+ "simoom-tls",
 ]
 
 [[package]]
