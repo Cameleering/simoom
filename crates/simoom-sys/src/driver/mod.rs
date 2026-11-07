@@ -1,0 +1,561 @@
+//! A completion-style I/O driver, one per event-loop thread.
+//!
+//! The model is the one io_uring and IOCP provide natively, and that epoll and kqueue emulate
+//! inside [`Driver::turn`] with readiness events plus non-blocking calls:
+//!
+//! - **Receive** into buffers the driver owns. The caller hands buffers to the driver with
+//!   [`Driver::provide`]; the driver takes one only when data has actually arrived (io_uring's
+//!   provided-buffer ring, a read after readiness on epoll and kqueue, a read after a zero-byte
+//!   `WSARecv` on IOCP). So **an idle connection holds no buffer**. Data comes back as
+//!   [`Event::Data`] carrying the filled `Vec<u8>`; the caller owns it from then on.
+//! - **Send** owned buffers with [`Driver::send`]. Sends on one connection go out in order and
+//!   are batched: everything queued during a turn is written at the start of the next
+//!   [`Driver::turn`], with one vectored call (or one submission) per connection. Each buffer
+//!   comes back as [`Event::Sent`] once written, so it can be reused.
+//! - **Accept** on listeners registered with [`Driver::listen`]: [`Event::Accepted`] carries the
+//!   new non-blocking socket, which the caller registers with [`Driver::stream`] (possibly on
+//!   another loop's driver).
+//! - **Close** with [`Driver::close`]: the driver cancels what is in flight, returns every
+//!   buffer, closes the socket and reports [`Event::Closed`]; only then may the caller reuse the
+//!   key.
+//! - **Wake** a driver blocked in [`Driver::turn`] from any thread with a [`Waker`].
+//!
+//! The driver never calls back into user code: [`Driver::turn`] appends [`Event`]s to a vector.
+
+use crate::net::Socket;
+use crate::udp::{RecvMeta, Transmit};
+use std::fmt;
+use std::io;
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+mod readiness;
+
+#[cfg(target_os = "linux")]
+mod epoll;
+#[cfg(target_os = "linux")]
+pub mod uring;
+
+#[cfg(windows)]
+mod iocp;
+
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+mod kqueue;
+
+/// Which I/O back end a driver uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Backend {
+    /// Pick for this OS: epoll on Linux (io_uring when `SIMOOM_BACKEND=io_uring` is set), IOCP
+    /// on Windows, kqueue on macOS and BSD.
+    Auto,
+    /// Linux epoll, edge-triggered.
+    Epoll,
+    /// Linux io_uring (6.1+). Falls back to epoll when the kernel refuses it.
+    IoUring,
+    /// Windows I/O completion ports.
+    Iocp,
+    /// macOS and BSD kqueue.
+    Kqueue,
+}
+
+impl Backend {
+    /// The back end `Auto` resolves to on this OS, honouring `SIMOOM_BACKEND`
+    /// (`epoll`, `io_uring`/`uring`, `iocp`, `kqueue`).
+    pub fn resolve(self) -> Backend {
+        if self != Backend::Auto {
+            return self;
+        }
+        match std::env::var("SIMOOM_BACKEND").ok().as_deref() {
+            Some("epoll") => return Backend::Epoll,
+            Some("io_uring") | Some("uring") => return Backend::IoUring,
+            Some("iocp") => return Backend::Iocp,
+            Some("kqueue") => return Backend::Kqueue,
+            _ => {}
+        }
+        if cfg!(windows) {
+            Backend::Iocp
+        } else if cfg!(target_os = "linux") {
+            Backend::Epoll
+        } else {
+            Backend::Kqueue
+        }
+    }
+
+    /// A short lower-case name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Backend::Auto => "auto",
+            Backend::Epoll => "epoll",
+            Backend::IoUring => "io_uring",
+            Backend::Iocp => "iocp",
+            Backend::Kqueue => "kqueue",
+        }
+    }
+}
+
+/// Driver settings. The defaults suit a server loop.
+#[derive(Clone, Debug)]
+pub struct DriverConfig {
+    /// Which back end to use.
+    pub backend: Backend,
+    /// Most OS events taken per wait (epoll and kqueue events, IOCP entries).
+    pub events: usize,
+    /// Most receives per connection per turn before others get a go (epoll, kqueue, IOCP).
+    pub recv_budget: usize,
+    /// io_uring: submission queue entries (the completion queue is four times larger).
+    pub uring_entries: u32,
+    /// io_uring: entries of the provided-buffer ring (a power of two, at most 32768).
+    pub uring_buffers: u16,
+    /// io_uring: use registered (fixed) file descriptors for connections.
+    pub uring_fixed_files: bool,
+    /// io_uring: size of the fixed file table (connections per loop that can use it; others
+    /// use plain descriptors).
+    pub uring_max_files: u32,
+    /// io_uring: pretend `io_uring_setup` failed with this errno, to test the fallback. The
+    /// environment variable `SIMOOM_IO_URING_FAIL=<errno>` does the same.
+    pub uring_simulate_failure: Option<i32>,
+    /// IOCP: post receives with a buffer instead of the zero-byte idiom: one system call per
+    /// receive instead of two, but every connection waiting for data holds a receive buffer.
+    /// Off by default.
+    pub iocp_eager_recv: bool,
+    /// IOCP: `AcceptEx` calls kept outstanding per listener.
+    pub accepts_outstanding: usize,
+    /// UDP: receives kept outstanding per socket on IOCP.
+    pub udp_recvs_outstanding: usize,
+}
+
+impl Default for DriverConfig {
+    fn default() -> Self {
+        DriverConfig {
+            backend: Backend::Auto,
+            events: 256,
+            recv_budget: 16,
+            uring_entries: 1024,
+            uring_buffers: 1024,
+            uring_fixed_files: true,
+            uring_max_files: 16384,
+            uring_simulate_failure: None,
+            iocp_eager_recv: false,
+            accepts_outstanding: 32,
+            udp_recvs_outstanding: 4,
+        }
+    }
+}
+
+/// A handle to a socket registered with a [`Driver`]. Stale handles (after the socket was
+/// closed) are detected by a generation count and ignored.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Id(pub(crate) u64);
+
+impl Id {
+    pub(crate) fn new(idx: u32, gen: u32) -> Id {
+        Id(idx as u64 | (gen as u64) << 32)
+    }
+    pub(crate) fn idx(self) -> u32 {
+        self.0 as u32
+    }
+    pub(crate) fn gen(self) -> u32 {
+        (self.0 >> 32) as u32
+    }
+    /// The raw value (for logging).
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Debug for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Id({}#{})", self.idx(), self.gen())
+    }
+}
+
+/// A buffer to send: owned (returned by [`Event::Sent`] for reuse) or static.
+#[derive(Debug)]
+pub enum OutBuf {
+    /// An owned buffer; all of `len()` bytes are sent.
+    Owned(Vec<u8>),
+    /// Static bytes, such as a fixed reply.
+    Static(&'static [u8]),
+}
+
+impl OutBuf {
+    /// The bytes to send.
+    #[inline]
+    pub fn as_slice(&self) -> &[u8] {
+        match self {
+            OutBuf::Owned(v) => v,
+            OutBuf::Static(s) => s,
+        }
+    }
+    /// Length in bytes.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+    /// Whether it is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Something that happened, reported by [`Driver::turn`].
+#[derive(Debug)]
+pub enum Event {
+    /// A listener accepted a connection. The socket is non-blocking and not yet registered.
+    Accepted { key: u64, socket: Socket, peer: Option<SocketAddr> },
+    /// Bytes arrived on a stream: `buf[..]` holds them (`buf.len()` > 0).
+    Data { key: u64, buf: Vec<u8> },
+    /// The peer closed its sending side. Receiving stops; sending may continue.
+    Eof { key: u64 },
+    /// A receive, send or accept failed. The connection should be closed.
+    Error { key: u64, error: io::Error },
+    /// A buffer was written completely (or discarded because the connection failed or closed).
+    Sent { key: u64, buf: OutBuf },
+    /// A datagram (or a GRO batch) arrived on a UDP socket.
+    Datagram { key: u64, buf: Vec<u8>, meta: RecvMeta },
+    /// A socket given to [`Driver::close`] is closed and the driver holds nothing of it.
+    Closed { key: u64 },
+    /// A [`Waker`] was triggered.
+    Wake,
+}
+
+/// System calls and events counted by a driver (plain counters; read them on the loop thread).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DriverStats {
+    /// Waits: `epoll_wait`, `kevent`, `io_uring_enter`, `GetQueuedCompletionStatusEx`.
+    pub waits: u64,
+    /// Receive calls: `recv`, `recvmmsg`, `WSARecv`/`WSARecvMsg` (io_uring: none, completions only).
+    pub recv_calls: u64,
+    /// Send calls: `sendmsg`/`send`, `WSASend` (io_uring: none, submissions only).
+    pub send_calls: u64,
+    /// Accept calls: `accept4`, `AcceptEx`.
+    pub accept_calls: u64,
+    /// Other system calls: registration, `epoll_ctl`, eventfd reads, `io_uring_register`, ...
+    pub other_calls: u64,
+    /// io_uring submission queue entries pushed.
+    pub sqes: u64,
+    /// Completions or readiness events taken from the OS.
+    pub os_events: u64,
+}
+
+impl DriverStats {
+    /// All counted system calls.
+    pub fn syscalls(&self) -> u64 {
+        self.waits + self.recv_calls + self.send_calls + self.accept_calls + self.other_calls
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Waker
+// ---------------------------------------------------------------------------------------------
+
+/// Wakes a driver blocked in [`Driver::turn`] from any thread. Cheap to clone; repeated wakes
+/// before the driver runs collapse into one OS signal.
+#[derive(Clone)]
+pub struct Waker {
+    pub(crate) inner: Arc<WakerInner>,
+}
+
+pub(crate) struct WakerInner {
+    pub(crate) pending: AtomicBool,
+    pub(crate) signal: Box<dyn Fn() + Send + Sync>,
+}
+
+impl Waker {
+    pub(crate) fn new(signal: Box<dyn Fn() + Send + Sync>) -> Waker {
+        Waker { inner: Arc::new(WakerInner { pending: AtomicBool::new(false), signal }) }
+    }
+
+    /// Makes the driver's current or next [`Driver::turn`] return [`Event::Wake`].
+    pub fn wake(&self) {
+        if !self.inner.pending.swap(true, Ordering::AcqRel) {
+            (self.inner.signal)();
+        }
+    }
+
+    /// Called by the driver when it reports the wake, before the caller looks at its queues.
+    pub(crate) fn clear(&self) {
+        self.inner.pending.store(false, Ordering::Release);
+    }
+}
+
+impl fmt::Debug for Waker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Waker").field("pending", &self.inner.pending.load(Ordering::Relaxed)).finish()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Slab with generations
+// ---------------------------------------------------------------------------------------------
+
+pub(crate) struct Slab<T> {
+    slots: Vec<(u32, Option<T>)>,
+    free: Vec<u32>,
+    len: usize,
+}
+
+impl<T> Slab<T> {
+    pub(crate) fn new() -> Slab<T> {
+        Slab { slots: Vec::new(), free: Vec::new(), len: 0 }
+    }
+    pub(crate) fn insert(&mut self, v: T) -> Id {
+        self.len += 1;
+        if let Some(i) = self.free.pop() {
+            let s = &mut self.slots[i as usize];
+            s.1 = Some(v);
+            Id::new(i, s.0)
+        } else {
+            self.slots.push((0, Some(v)));
+            Id::new(self.slots.len() as u32 - 1, 0)
+        }
+    }
+    pub(crate) fn get(&self, id: Id) -> Option<&T> {
+        match self.slots.get(id.idx() as usize) {
+            Some((g, Some(v))) if *g == id.gen() => Some(v),
+            _ => None,
+        }
+    }
+    pub(crate) fn get_mut(&mut self, id: Id) -> Option<&mut T> {
+        match self.slots.get_mut(id.idx() as usize) {
+            Some((g, Some(v))) if *g == id.gen() => Some(v),
+            _ => None,
+        }
+    }
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn id_at(&self, idx: u32) -> Option<Id> {
+        match self.slots.get(idx as usize) {
+            Some((g, Some(_))) => Some(Id::new(idx, *g)),
+            _ => None,
+        }
+    }
+    pub(crate) fn remove(&mut self, id: Id) -> Option<T> {
+        let s = self.slots.get_mut(id.idx() as usize)?;
+        if s.0 != id.gen() || s.1.is_none() {
+            return None;
+        }
+        s.0 = s.0.wrapping_add(1);
+        self.free.push(id.idx());
+        self.len -= 1;
+        s.1.take()
+    }
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+    #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
+    pub(crate) fn ids(&self) -> Vec<Id> {
+        self.slots.iter().enumerate().filter(|(_, s)| s.1.is_some()).map(|(i, s)| Id::new(i as u32, s.0)).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The driver
+// ---------------------------------------------------------------------------------------------
+
+enum Imp {
+    #[cfg(target_os = "linux")]
+    Epoll(readiness::Driver<epoll::Poller>),
+    #[cfg(target_os = "linux")]
+    Uring(uring::Driver),
+    #[cfg(windows)]
+    Iocp(iocp::Driver),
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+    Kqueue(readiness::Driver<kqueue::Poller>),
+}
+
+macro_rules! dispatch {
+    ($self:expr, $d:ident => $e:expr) => {
+        match &mut $self.imp {
+            #[cfg(target_os = "linux")]
+            Imp::Epoll($d) => $e,
+            #[cfg(target_os = "linux")]
+            Imp::Uring($d) => $e,
+            #[cfg(windows)]
+            Imp::Iocp($d) => $e,
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+            Imp::Kqueue($d) => $e,
+        }
+    };
+}
+
+macro_rules! dispatch_ref {
+    ($self:expr, $d:ident => $e:expr) => {
+        match &$self.imp {
+            #[cfg(target_os = "linux")]
+            Imp::Epoll($d) => $e,
+            #[cfg(target_os = "linux")]
+            Imp::Uring($d) => $e,
+            #[cfg(windows)]
+            Imp::Iocp($d) => $e,
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+            Imp::Kqueue($d) => $e,
+        }
+    };
+}
+
+/// A completion-style I/O driver for one thread. See the [module docs](self).
+///
+/// A driver is not `Send`: create it on the thread that runs it (io_uring's single-issuer mode
+/// requires that). Its [`Waker`] is `Send + Sync`.
+pub struct Driver {
+    imp: Imp,
+    kind: Backend,
+    fallback: Option<String>,
+    _not_send: core::marker::PhantomData<*const ()>,
+}
+
+impl fmt::Debug for Driver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Driver").field("backend", &self.kind).field("fallback", &self.fallback).finish()
+    }
+}
+
+impl Driver {
+    /// Creates a driver. With [`Backend::IoUring`] it probes the kernel and falls back to epoll
+    /// when io_uring is missing, disabled or too old ([`Driver::fallback_reason`] says why).
+    /// Asking for a back end this OS doesn't have is an `Unsupported` error.
+    pub fn new(cfg: &DriverConfig) -> io::Result<Driver> {
+        let want = cfg.backend.resolve();
+        #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+        let mut fallback = None;
+        let (imp, kind) = match want {
+            #[cfg(target_os = "linux")]
+            Backend::IoUring => match uring::Driver::new(cfg) {
+                Ok(d) => (Imp::Uring(d), Backend::IoUring),
+                Err(e) => {
+                    fallback = Some(format!("io_uring unavailable ({e}); using epoll"));
+                    (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll)
+                }
+            },
+            #[cfg(target_os = "linux")]
+            Backend::Epoll => (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll),
+            #[cfg(windows)]
+            Backend::Iocp => (Imp::Iocp(iocp::Driver::new(cfg)?), Backend::Iocp),
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+            Backend::Kqueue => (Imp::Kqueue(readiness::Driver::new(cfg)?), Backend::Kqueue),
+            other => return Err(io::Error::new(io::ErrorKind::Unsupported, format!("the {} back end is not available on this OS", other.name()))),
+        };
+        Ok(Driver { imp, kind, fallback, _not_send: core::marker::PhantomData })
+    }
+
+    /// The back end in use.
+    pub fn backend(&self) -> Backend {
+        self.kind
+    }
+
+    /// Why the requested back end was replaced, if it was.
+    pub fn fallback_reason(&self) -> Option<&str> {
+        self.fallback.as_deref()
+    }
+
+    /// A handle that wakes this driver from any thread.
+    pub fn waker(&self) -> Waker {
+        dispatch_ref!(self, d => d.waker())
+    }
+
+    /// Registers a listening socket and starts accepting on it. Accepted connections arrive as
+    /// [`Event::Accepted`] with `key`.
+    pub fn listen(&mut self, socket: Socket, key: u64) -> io::Result<Id> {
+        dispatch!(self, d => d.listen(socket, key))
+    }
+
+    /// Registers a connected, non-blocking stream socket. Nothing is received until
+    /// [`Driver::recv`] turns receiving on.
+    pub fn stream(&mut self, socket: Socket, key: u64) -> io::Result<Id> {
+        dispatch!(self, d => d.stream(socket, key))
+    }
+
+    /// Registers a bound UDP socket. Datagrams arrive as [`Event::Datagram`] once
+    /// [`Driver::recv`] turns receiving on.
+    pub fn udp(&mut self, socket: Socket, key: u64) -> io::Result<Id> {
+        dispatch!(self, d => d.udp(socket, key))
+    }
+
+    /// Turns receiving on or off for a stream or UDP socket. Turning it off is backpressure: the
+    /// driver stops taking data, so the kernel's receive window closes. A few `Data` events
+    /// already under way may still arrive after it is turned off.
+    pub fn recv(&mut self, id: Id, on: bool) {
+        dispatch!(self, d => d.recv(id, on))
+    }
+
+    /// Queues a buffer to send on a stream. It is written at the start of the next turn, after
+    /// everything queued before it.
+    pub fn send(&mut self, id: Id, buf: OutBuf) {
+        dispatch!(self, d => d.send(id, buf))
+    }
+
+    /// Sends datagrams on a UDP socket at once, without queueing. Returns how many were handed
+    /// to the kernel; `WouldBlock` means the socket buffer is full and nothing was sent.
+    pub fn send_to(&mut self, id: Id, msgs: &[Transmit<'_>]) -> io::Result<usize> {
+        dispatch!(self, d => d.send_to(id, msgs))
+    }
+
+    /// Closes a socket. Queued and in-flight sends are discarded (their buffers come back as
+    /// [`Event::Sent`]), then [`Event::Closed`] is reported. Flush first for a graceful close.
+    pub fn close(&mut self, id: Id) {
+        dispatch!(self, d => d.close(id))
+    }
+
+    /// The socket behind `id`, for addresses and options.
+    pub fn socket(&self, id: Id) -> Option<&Socket> {
+        dispatch_ref!(self, d => d.socket(id))
+    }
+
+    /// Gives the driver a receive buffer (an empty `Vec` with spare capacity). The driver keeps
+    /// it until data arrives and then hands it back in an event.
+    pub fn provide(&mut self, buf: Vec<u8>) {
+        dispatch!(self, d => d.provide(buf))
+    }
+
+    /// How many more receive buffers the driver would like (to reach its target stock).
+    pub fn buffers_wanted(&self) -> usize {
+        dispatch_ref!(self, d => d.buffers_wanted())
+    }
+
+    /// Sets how many receive buffers the driver keeps in stock (io_uring: at most the ring size).
+    pub fn set_buffer_target(&mut self, n: usize) {
+        dispatch!(self, d => d.set_buffer_target(n))
+    }
+
+    /// Flushes queued sends, waits for I/O up to `timeout` (`None` waits until something happens
+    /// or a [`Waker`] fires; zero only polls) and appends what happened to `out`. Returns at once
+    /// when events are already pending.
+    pub fn turn(&mut self, timeout: Option<Duration>, out: &mut Vec<Event>) -> io::Result<()> {
+        dispatch!(self, d => d.turn(timeout, out))
+    }
+
+    /// System call and event counters.
+    pub fn stats(&self) -> DriverStats {
+        dispatch_ref!(self, d => d.stats())
+    }
+
+    /// Registered sockets (listeners, streams and UDP sockets, including ones closing).
+    pub fn len(&self) -> usize {
+        dispatch_ref!(self, d => d.len())
+    }
+
+    /// Whether no socket is registered.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Converts an optional timeout to milliseconds for epoll and IOCP, rounding up so a timer
+/// never fires early (`-1` / `INFINITE` for none).
+#[allow(dead_code)]
+pub(crate) fn timeout_ms(t: Option<Duration>) -> i32 {
+    match t {
+        None => -1,
+        Some(d) => {
+            let ms = d.as_nanos().div_ceil(1_000_000);
+            ms.min(i32::MAX as u128) as i32
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
