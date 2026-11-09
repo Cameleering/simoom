@@ -23,8 +23,15 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
+/// The UDP service's endpoint for one loop: a [`LazyEp`] that builds the QUIC endpoint
+/// ([`H3Ep`]) on the loop's first datagram, so a loop that never sees HTTP/3 traffic holds
+/// only this small shell (bug 12).
 pub(crate) fn endpoint(sh: Arc<Shared>, cfg: Arc<simoom_quic::Config>, info: &UdpInfo) -> Box<dyn Endpoint> {
-    Box::new(H3Ep {
+    Box::new(LazyEp { sh, cfg, li: info.loop_index, ep: None, stopping: false })
+}
+
+fn build_endpoint(sh: Arc<Shared>, cfg: Arc<simoom_quic::Config>, li: usize) -> H3Ep {
+    H3Ep {
         h3cfg: simoom_h3::Config {
             max_field_section_size: u64::from(sh.limits.max_header_list),
             qpack_max_table_capacity: u64::from(sh.limits.header_table_size),
@@ -32,13 +39,13 @@ pub(crate) fn endpoint(sh: Arc<Shared>, cfg: Arc<simoom_quic::Config>, info: &Ud
             ..simoom_h3::Config::default()
         },
         sh,
-        li: info.loop_index,
+        li,
         ep: simoom_quic::Endpoint::new(cfg, true),
         conns: FastMap::default(),
         ids: FastMap::default(),
         next_id: 1,
         timer: None,
-        // Buffers grow on first use: a QUIC endpoint per loop costs nothing until traffic comes.
+        // Buffers grow on first use.
         rx: Vec::new(),
         resp: Vec::new(),
         tx: Vec::new(),
@@ -48,7 +55,71 @@ pub(crate) fn endpoint(sh: Arc<Shared>, cfg: Arc<simoom_quic::Config>, info: &Ud
         handle: None,
         pool: None,
         stopping: false,
-    })
+    }
+}
+
+/// A loop's HTTP/3 endpoint, built on first use. The runtime's contract still holds: before
+/// the first datagram there is no connection, so a stop has nothing to wind down
+/// ([`Endpoint::is_busy`] is false) and datagrams that arrive after it are dropped (no new
+/// connection starts during a stop); timers and messages can only exist once it is built.
+struct LazyEp {
+    sh: Arc<Shared>,
+    cfg: Arc<simoom_quic::Config>,
+    li: usize,
+    ep: Option<Box<H3Ep>>,
+    stopping: bool,
+}
+
+impl Endpoint for LazyEp {
+    fn on_datagram(&mut self, cx: &mut UdpCtx<'_>, data: &[u8], meta: &RecvMeta) {
+        if self.ep.is_none() {
+            if self.stopping {
+                return;
+            }
+            bump(&self.sh.counters(self.li).quic_endpoints);
+            self.ep = Some(Box::new(build_endpoint(self.sh.clone(), self.cfg.clone(), self.li)));
+        }
+        if let Some(ep) = &mut self.ep {
+            ep.on_datagram(cx, data, meta);
+        }
+    }
+
+    fn on_timer(&mut self, cx: &mut UdpCtx<'_>, token: u64) {
+        if let Some(ep) = &mut self.ep {
+            ep.on_timer(cx, token);
+        }
+    }
+
+    fn on_message(&mut self, cx: &mut UdpCtx<'_>, msg: Message) {
+        match &mut self.ep {
+            Some(ep) => ep.on_message(cx, msg),
+            None => {
+                // no connection exists yet: close a sink nobody will drain
+                if let Ok(env) = msg.downcast::<Envelope>() {
+                    if let Msg::Stream(_, sink) = env.msg {
+                        sink.close();
+                    }
+                }
+            }
+        }
+    }
+
+    fn on_stop(&mut self, cx: &mut UdpCtx<'_>) {
+        self.stopping = true;
+        if let Some(ep) = &mut self.ep {
+            ep.on_stop(cx);
+        }
+    }
+
+    fn is_busy(&self) -> bool {
+        self.ep.as_ref().is_some_and(|ep| ep.is_busy())
+    }
+
+    fn on_abort(&mut self, cx: &mut UdpCtx<'_>) {
+        if let Some(ep) = &mut self.ep {
+            ep.on_abort(cx);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -73,6 +144,8 @@ struct RespPart {
 struct St {
     head: OwnedHead,
     body: Vec<u8>,
+    /// The request's trailing HEADERS.
+    trailers: Option<OwnedHead>,
     resp: RespPart,
     end: bool,
     queued: bool,
@@ -216,13 +289,24 @@ impl H3Ep {
                     c.streams.insert(stream, st);
                 }
                 H3Event::Data { stream } => read_body(c, qc, now, stream, &mut self.tmp, buffer, max_body),
-                H3Event::Trailers { .. } | H3Event::GoAway { .. } | H3Event::Error(_) => {}
+                H3Event::Trailers { stream, fields } => {
+                    // validated by simoom-h3 (no pseudo-fields); the stream ends next
+                    if let Some(st) = c.streams.get_mut(&stream) {
+                        let mut t = OwnedHead::default();
+                        for f in &fields {
+                            t.add_field(&f.name, &f.value);
+                        }
+                        st.trailers = Some(t);
+                    }
+                }
+                H3Event::GoAway { .. } | H3Event::Error(_) => {}
                 H3Event::Finished { stream } => {
                     if let Some(st) = c.streams.get_mut(&stream) {
                         st.end = true;
                         if st.dispatched {
                             if let Some(src) = &st.src {
-                                src.finish();
+                                let t = st.trailers.take().map(|t| (0..t.fields.len()).map(|i| t.field(i)).map(|(n, v)| (n.to_vec(), v.to_vec())).collect());
+                                src.finish_with(t.unwrap_or_default());
                             }
                         } else if !st.queued {
                             st.queued = true;
@@ -316,11 +400,9 @@ fn read_body(c: &mut H3Conn, qc: &mut simoom_quic::Connection, now: Instant, str
         }
         if fin {
             st.end = true;
-            if st.dispatched {
-                if let Some(src) = &st.src {
-                    src.finish();
-                }
-            } else if !st.queued {
+            // a dispatched body's source is finished by the `Finished` event that recv_body
+            // queued, after the `Trailers` event (so the trailers come with the end)
+            if !st.dispatched && !st.queued {
                 st.queued = true;
                 c.ready.push(stream);
             }
@@ -363,10 +445,11 @@ fn dispatch(sh: &Shared, li: usize, hdrs: &mut HeaderBuf, c: &mut H3Conn, qc: &m
     if !st.end {
         st.src = Some(Arc::new(SrcShared::new(sh.limits.body_buffer, std::mem::take(&mut st.body))));
     }
-    let St { head, body, resp, src, .. } = &mut *st;
+    let St { head, body, trailers, resp, src, .. } = &mut *st;
     let mut r = Request::new(head.method(), head.target(), Version::H3, HeaderView::Owned(head));
     r.authority = head.authority();
     r.body = body;
+    r.trailers = trailers.as_ref();
     r.peer = Some(c.peer);
     r.secure = true;
     r.loop_index = li;

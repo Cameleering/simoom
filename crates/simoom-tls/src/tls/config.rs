@@ -31,6 +31,9 @@ impl TimeSource for SystemClock {
 pub struct CertifiedKey {
     pub chain: Vec<Vec<u8>>,
     pub key: PrivateKey,
+    /// The leaf's DNS names for SNI (its SAN entries, or else its common name), taken from
+    /// the one parse in [`CertifiedKey::new`].
+    names: Vec<String>,
 }
 
 impl CertifiedKey {
@@ -39,7 +42,10 @@ impl CertifiedKey {
         let leaf = chain.first().ok_or_else(|| Error::Config("empty certificate chain".into()))?;
         let cert = Certificate::from_der(leaf).map_err(|e| Error::Config(format!("bad certificate: {e}")))?;
         match &cert.public_key {
-            Some(pk) if pk.same_as(&key.public_key()) => Ok(CertifiedKey { chain, key }),
+            Some(pk) if pk.same_as(&key.public_key()) => {
+                let names = if cert.has_san { cert.dns_names } else { cert.subject.common_name().map(|s| vec![s.to_ascii_lowercase()]).unwrap_or_default() };
+                Ok(CertifiedKey { chain, key, names })
+            }
             Some(_) => Err(Error::Config("the private key does not match the certificate".into())),
             None => Err(Error::Config("unsupported certificate key type".into())),
         }
@@ -63,12 +69,9 @@ impl CertifiedKey {
         CertifiedKey::new(chain, key)
     }
 
-    fn names(&self) -> Vec<String> {
-        match Certificate::from_der(&self.chain[0]) {
-            Ok(c) if c.has_san => c.dns_names,
-            Ok(c) => c.subject.common_name().map(|s| vec![s.to_ascii_lowercase()]).unwrap_or_default(),
-            Err(_) => Vec::new(),
-        }
+    /// The leaf's DNS names used for SNI selection (SAN entries, or else the common name).
+    pub fn names(&self) -> &[String] {
+        &self.names
     }
 }
 
@@ -178,7 +181,10 @@ impl Ticketer {
     }
 }
 
-/// Server configuration.
+/// Server configuration. A clone shares the certificates and the session ticket keys
+/// (they sit behind `Arc`s), so a TCP listener and a QUIC listener can use one parsed
+/// certificate with their own ALPN lists.
+#[derive(Clone)]
 pub struct ServerConfig {
     pub(crate) default_cert: Option<Arc<CertifiedKey>>,
     pub(crate) sni_certs: Vec<(String, Arc<CertifiedKey>)>,
@@ -235,7 +241,7 @@ impl ServerConfig {
     pub fn add_sni_cert(&mut self, cert: CertifiedKey) {
         let cert = Arc::new(cert);
         for n in cert.names() {
-            self.sni_certs.push((n, cert.clone()));
+            self.sni_certs.push((n.clone(), cert.clone()));
         }
     }
 
@@ -368,5 +374,27 @@ impl ClientConfig {
     pub fn with_alpn(mut self, protocols: &[&[u8]]) -> ClientConfig {
         self.alpn = protocols.iter().map(|p| p.to_vec()).collect();
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Bug 13: the leaf is parsed once, in CertifiedKey::new; names() and SNI use the result,
+    // and a cloned ServerConfig shares the parsed certificate instead of copying it.
+    #[test]
+    fn certificate_parsed_once_and_shared_by_clones() {
+        let ss = crate::certgen::self_signed_with_sans(&["a.example", "*.b.example"], 30);
+        let ck = CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap();
+        assert_eq!(ck.names(), ["a.example".to_string(), "*.b.example".to_string()]);
+        let mut cfg = ServerConfig::new(ck.clone());
+        cfg.add_sni_cert(ck);
+        assert_eq!(cfg.sni_certs.len(), 2);
+        assert!(cfg.resolve(Some("x.b.example")).is_some());
+        let h3 = cfg.clone().with_alpn(&[b"h3"]);
+        assert!(Arc::ptr_eq(cfg.default_cert.as_ref().unwrap(), h3.default_cert.as_ref().unwrap()));
+        assert!(Arc::ptr_eq(cfg.ticketer.as_ref().unwrap(), h3.ticketer.as_ref().unwrap()));
+        assert!(cfg.alpn.is_empty() && h3.alpn == [b"h3".to_vec()]);
     }
 }

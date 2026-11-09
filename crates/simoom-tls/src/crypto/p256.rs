@@ -703,6 +703,23 @@ pub fn public_key(private: &[u8]) -> Option<[u8; 65]> {
     Some(encode(&x, &y))
 }
 
+/// [`public_key`] without the base-point table: one variable-base multiplication (constant
+/// time). For loading a key at start-up, which then neither spends about 0.3 ms building the
+/// 53 KB table nor keeps it (and its larger temporaries) in memory before the first handshake
+/// that signs or generates a P-256 key share needs it.
+pub fn public_key_untabled(private: &[u8]) -> Option<[u8; 65]> {
+    if private.len() != 32 {
+        return None;
+    }
+    let k = from_be(private);
+    if !scalar_valid(&k) {
+        return None;
+    }
+    let g = Jac { x: to_mont(&GX), y: to_mont(&GY), z: ONE_MONT };
+    let (x, y) = to_affine(&mul(&g, &k))?;
+    Some(encode(&x, &y))
+}
+
 /// ECDH: the x-coordinate of private * peer. Validates the peer point.
 pub fn ecdh(private: &[u8], peer: &[u8]) -> Option<[u8; 32]> {
     let q = decode(peer)?;
@@ -834,6 +851,23 @@ pub fn verify(public: &[u8], digest: &[u8], r: &[u8], s: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Bug 19: loading a key computes its public key without the base table, and gets the
+    // same point.
+    #[test]
+    fn public_key_untabled_matches_the_table() {
+        for i in 1..20u8 {
+            let mut d = [0u8; 32];
+            d[31] = i;
+            d[0] = i.wrapping_mul(37);
+            d[15] = 0xa5 ^ i;
+            assert_eq!(public_key_untabled(&d), public_key(&d), "{i}");
+        }
+        let d = generate_private();
+        assert_eq!(public_key_untabled(&d), public_key(&d));
+        assert!(public_key_untabled(&[0u8; 32]).is_none());
+        assert!(public_key_untabled(&[0xff; 32]).is_none());
+    }
     use crate::crypto::sha2::Sha256;
     use crate::util::{hex, unhex};
 

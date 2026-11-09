@@ -17,7 +17,7 @@ USAGE
   simoom-bench agent --listen ADDR:PORT
   simoom-bench raw [--addr 0.0.0.0:8080] [--threads N] [--backend B] [--cpus LIST]
                                                          the simoom-rt raw responder (GET: 13 bytes, POST: echo)
-  simoom-bench coldstart --addr HOST:PORT [--path /] [--repeat 10] [--timeout 30] -- CMD ARGS...
+  simoom-bench coldstart --addr HOST:PORT [--path /] [--repeat 10] [--timeout 30] [--ready LINE] -- CMD ARGS...
   simoom-bench hist print FILE.hlog [--scale 1e6]       merged percentile distribution of a log
   simoom-bench hist merge OUT.hlog IN.hlog...           merge interval logs (by interval index)
 
@@ -362,7 +362,7 @@ fn cmd_sweep(a: &Args) -> Result<(), String> {
 
 fn cmd_coldstart(a: &Args) -> Result<(), String> {
     let addr = load::resolve(a.get("--addr").ok_or("--addr is required")?)?;
-    let v = coldstart::measure(addr, a.get("--path").unwrap_or("/"), &a.tail, a.num("--repeat", 10)?, a.secs("--timeout", 30.0)?)?;
+    let v = coldstart::measure(addr, a.get("--path").unwrap_or("/"), &a.tail, a.num("--repeat", 10)?, a.secs("--timeout", 30.0)?, a.get("--ready"))?;
     let mut s = v.clone();
     s.sort_by(|x, y| x.partial_cmp(y).unwrap());
     println!(

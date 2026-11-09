@@ -121,9 +121,21 @@ back end.
     partitioned queues at 80% load, research.md §3). For blocking work: Cameleer routes with
     I/O, databases, `to("http:...")`. The reply comes back through a `Responder` and a wakeup
     across threads (eventfd, `PostQueuedCompletionStatus` or `EVFILT_USER`).
-- **Stall watchdog.** If an inline handler takes longer than `inline_budget` (default 1 ms),
-  count it and log once per route. After K stalls the route switches to offload. This protects
-  the tail from a handler that was wrongly marked inline.
+- **Stall watchdog.** An inline call over `inline_budget` (default 1 ms) on the wall clock makes
+  its route suspect; the route's next calls are timed with the thread's CPU clock, and a call is
+  a stall only if it used more CPU than the budget or blocked (a preempted loop thread is not a
+  slow handler). Stalls are logged once per route. `stalls_before_offload` (default 5) stalls
+  within `stall_window` (default 1 s) move the route, alone, to the offload pool; after
+  `stall_recovery` (default 64) consecutive fast calls there it comes back inline, and each
+  further move needs twice as many. This protects the tail from a handler that was wrongly
+  marked inline.
+- **Admission control.** `shed_lag`: when a loop reaches a connection's input this long after
+  the turn's events were ready, new requests and streams get a fast `503` with `retry-after`
+  without calling the service. Off by default (`None`): measured on 2026-11-09 (4 loops, open-loop HTTP/1.1 load from 8 other
+  cores, 256 connections), 1 ms already shed requests falsely at 50% load and 0.5 ms at 90%, while
+  under overload (120% and 150%) no value from 0.5 to 5 ms improved goodput or the p99, because
+  the queue builds in the client and the kernel, not in the loop. Lag also grows when a loop
+  thread is preempted. Opt in with a value that matches a latency SLO.
 
 ### 2.3 I/O back ends per operating system
 
@@ -486,7 +498,9 @@ Every limit is configurable. Exceeding one gives a specific status code and a co
 | HTTP/2 header list | 16 KB, CONTINUATION included |
 | HTTP/2 HPACK table | 4096 |
 | HTTP/2 RST_STREAM (received and sent) | 200 per 10 s window per connection; more gives GOAWAY |
-| HTTP/2 PING, SETTINGS, empty DATA, WINDOW_UPDATE | each with its own budget per window |
+| HTTP/2 PING, SETTINGS, empty DATA, WINDOW_UPDATE | each with its own budget per window (`Limits::h2_frame_budgets`) |
+| stall watchdog | `inline_budget` 1 ms of CPU; `stalls_before_offload` 5 within `stall_window` 1 s; back inline after `stall_recovery` 64 fast calls (doubling each time) |
+| admission control (`shed_lag`) | off (`None`; no value tried, 0.5 to 5 ms, avoided false sheds at normal load and helped under overload) |
 | connections | per loop, in total, and optionally per IP |
 
 ### 7.2 Unsafe budget and memory safety

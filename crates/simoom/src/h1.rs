@@ -6,7 +6,7 @@ use crate::handle::{BodySink, BodySource, Envelope, Msg, Pushed as SrcPushed, Re
 use crate::reply::{BodyRef, Target};
 use crate::request::{HeaderView, Request};
 use crate::server::{bump, Shared};
-use crate::types::{HeaderBuf, StaticReply, Version};
+use crate::types::{HeaderBuf, OwnedHead, StaticReply, Version};
 use crate::util::{content_length, date_line, has_body, status_line, with_date};
 use simoom_http1::write::{ChunkHeader, CONTINUE, LAST_CHUNK};
 use simoom_http1::{BodyDecoder, BodyEvent, Error as ParseError, Framing, RequestParser, Status, EMPTY_HEADER};
@@ -355,12 +355,12 @@ impl H1 {
         }
         match req.framing {
             Framing::None => {
-                self.dispatch(io, req, b"", None);
+                self.dispatch(io, req, b"", None, None);
                 hl
             }
             Framing::Length(n) if (rest.len() - hl) as u64 >= n => {
                 let end = hl + n as usize;
-                self.dispatch(io, req, &rest[hl..end], None);
+                self.dispatch(io, req, &rest[hl..end], None, None);
                 end
             }
             framing => {
@@ -373,7 +373,7 @@ impl H1 {
                     let src = Arc::new(SrcShared::new(buffer, Vec::new()));
                     b.src = Some(src.clone());
                     self.body = Some(b);
-                    self.dispatch(io, req, b"", Some(src.clone()));
+                    self.dispatch(io, req, b"", Some(src.clone()), None);
                     if req.wants_continue() && !self.done && Arc::strong_count(&src) > 1 && matches!(self.resp, Resp::Waiting) {
                         io.write(CONTINUE);
                     }
@@ -394,6 +394,7 @@ impl H1 {
         let Some(mut b) = self.body.take() else { return (0, true) };
         let buffer = io.sh.limits.body_buffer;
         let mut pos = 0;
+        let mut trailers: Option<OwnedHead> = None;
         loop {
             if b.dec.is_done() {
                 break;
@@ -429,7 +430,7 @@ impl H1 {
                                     b.src = Some(src.clone());
                                     let head = std::mem::take(&mut b.head);
                                     self.body = Some(b);
-                                    self.reparse(io, &head, b"", Some(src));
+                                    self.reparse(io, &head, b"", Some(src), None);
                                     match self.body.take() {
                                         Some(x) => b = x,
                                         None => return (data.len(), false),
@@ -441,7 +442,10 @@ impl H1 {
                                 }
                             }
                         }
-                        BodyEvent::End(_) => break,
+                        BodyEvent::End(section) => {
+                            trailers = parse_trailers(section, &io.sh.h1);
+                            break;
+                        }
                         BodyEvent::NeedMore => {
                             self.body = Some(b);
                             return (pos, false);
@@ -453,18 +457,18 @@ impl H1 {
         // The body is complete.
         self.reading_body = false;
         match &b.src {
-            Some(src) => src.finish(),
+            Some(src) => src.finish_with(trailers.map(|t| (0..t.fields.len()).map(|i| t.field(i)).map(|(n, v)| (n.to_vec(), v.to_vec())).collect()).unwrap_or_default()),
             None => {
                 let head = std::mem::take(&mut b.head);
                 let body = std::mem::take(&mut b.buf);
-                self.reparse(io, &head, &body, None);
+                self.reparse(io, &head, &body, None, trailers.as_ref());
             }
         }
         (pos, true)
     }
 
     /// Parses a copied head again and dispatches it.
-    fn reparse(&mut self, io: &mut Io<'_, '_>, head: &[u8], body: &[u8], src: Option<Arc<SrcShared>>) {
+    fn reparse(&mut self, io: &mut Io<'_, '_>, head: &[u8], body: &[u8], src: Option<Arc<SrcShared>>, trailers: Option<&OwnedHead>) {
         let lim = io.sh.h1;
         let mut hs = [EMPTY_HEADER; STACK_HEADERS];
         let mut big = Vec::new();
@@ -475,14 +479,14 @@ impl H1 {
             &mut hs
         };
         if let Ok(Status::Complete(req)) = simoom_http1::parse_request(head, slots, &lim) {
-            self.dispatch(io, &req, body, src);
+            self.dispatch(io, &req, body, src, trailers);
         } else {
             self.fail(io, 400);
         }
     }
 
     /// Calls the service for a parsed request.
-    fn dispatch(&mut self, io: &mut Io<'_, '_>, req: &simoom_http1::Request<'_, '_>, body: &[u8], src: Option<Arc<SrcShared>>) {
+    fn dispatch(&mut self, io: &mut Io<'_, '_>, req: &simoom_http1::Request<'_, '_>, body: &[u8], src: Option<Arc<SrcShared>>, trailers: Option<&OwnedHead>) {
         let sh = io.sh;
         let version = if self.http10 { Version::Http10 } else { Version::Http11 };
         let mut r = Request::new(req.method, req.target, version, HeaderView::H1(req.headers));
@@ -496,6 +500,7 @@ impl H1 {
             }
         }
         r.body = body;
+        r.trailers = trailers;
         r.peer = io.peer;
         r.secure = io.secure;
         r.loop_index = io.li;
@@ -547,11 +552,25 @@ impl H1 {
             return false;
         }
         let Some(v) = req.header(b"http2-settings") else { return false };
-        let mut head = crate::types::OwnedHead::default();
+        let mut head = OwnedHead::default();
         head.set_method(req.method);
-        head.set_target(req.target);
-        if let Some(h) = req.host {
-            head.set_authority(h);
+        match split_absolute(req.target).filter(|_| req.form == simoom_http1::TargetForm::Absolute) {
+            // RFC 9112 §3.2.2, as for HTTP/1.1 requests: an absolute-form target gives the
+            // authority (Host is ignored) and stream 1's :path is its path and query
+            Some((auth, rest)) => {
+                match rest.first() {
+                    None => head.set_target(b"/"),
+                    Some(b'/') => head.set_target(rest),
+                    Some(_) => head.set_target(&[&b"/"[..], rest].concat()),
+                }
+                head.set_authority(auth);
+            }
+            None => {
+                head.set_target(req.target);
+                if let Some(h) = req.host {
+                    head.set_authority(h);
+                }
+            }
         }
         for h in req.headers {
             let n = h.name;
@@ -845,6 +864,21 @@ fn looks_like_http(buf: &[u8]) -> bool {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
     let last = line.rsplit(|&b| b == b' ').next().unwrap_or(line);
     last.starts_with(b"HT") || last.contains(&b'/')
+}
+
+/// A chunked body's trailer section (already validated by the decoder) as owned fields; `None`
+/// when there is none.
+fn parse_trailers(section: &[u8], lim: &simoom_http1::Limits) -> Option<OwnedHead> {
+    if section.is_empty() {
+        return None;
+    }
+    let mut hs = vec![EMPTY_HEADER; lim.max_headers.max(1)];
+    let fields = simoom_http1::parse_trailers(section, &mut hs, lim).ok()?;
+    let mut t = OwnedHead::default();
+    for f in fields {
+        t.add_field(f.name, f.value);
+    }
+    (!t.fields.is_empty()).then_some(t)
 }
 
 /// `scheme://authority/path?query` to (authority, `/path?query`); `None` without `//`.

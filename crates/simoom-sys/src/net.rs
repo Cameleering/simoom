@@ -702,6 +702,42 @@ from_std!(std::net::TcpListener);
 from_std!(std::net::UdpSocket);
 
 /// The unspecified address of the same family as `addr` (port 0).
+/// Grows the process's file descriptor table to hold at least `n` descriptors (capped at the
+/// soft `RLIMIT_NOFILE`), by duplicating a descriptor to slot `n - 1` and closing it again.
+///
+/// Linux grows the table in steps (64, 128, 256...), and once the process has more than one
+/// thread each step waits for an RCU grace period (`synchronize_rcu` in `expand_fdtable`):
+/// 10-30 ms on a VM, on whichever thread opens the descriptor that crosses the step. Called
+/// before the loop threads exist, the growth is a plain reallocation. The table costs 8 bytes a
+/// slot of kernel memory (8 KiB for 1024). Returns the size reserved; elsewhere a no-op that
+/// returns 0.
+pub fn reserve_descriptors(n: usize) -> usize {
+    #[cfg(target_os = "linux")]
+    {
+        let mut lim = sys::rlimit::default();
+        // SAFETY: getrlimit writes one rlimit.
+        let soft = if unsafe { sys::getrlimit(sys::RLIMIT_NOFILE, &mut lim) } == 0 { lim.rlim_cur } else { 1024 };
+        let n = (n as u64).min(soft).min(i32::MAX as u64) as i32;
+        if n < 2 {
+            return 0;
+        }
+        // SAFETY: duplicates standard error (or, if it is closed, fails harmlessly) to the
+        // lowest free slot at or above n - 1; the result is a fresh descriptor we own.
+        let fd = unsafe { sys::fcntl(2, sys::F_DUPFD_CLOEXEC, n - 1) };
+        if fd < 0 {
+            return 0;
+        }
+        // SAFETY: `fd` is the fresh descriptor from above; nothing else owns it.
+        drop(unsafe { OwnedFd::from_raw_fd(fd) });
+        n as usize
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = n;
+        0
+    }
+}
+
 pub fn unspecified_like(addr: &SocketAddr) -> SocketAddr {
     match addr {
         SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
@@ -712,6 +748,18 @@ pub fn unspecified_like(addr: &SocketAddr) -> SocketAddr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Bug 19: the descriptor table is grown before the loop threads exist (no RCU stall on a
+    // loop thread later); the next descriptors still come from the bottom of the table.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reserve_descriptors_grows_the_table() {
+        let got = reserve_descriptors(512);
+        assert!(got == 0 || got >= 256, "{got}");
+        let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        assert!((s.as_raw_fd() as usize) < 256, "a fresh descriptor went to the top: {}", s.as_raw_fd());
+        assert_eq!(reserve_descriptors(0), 0);
+    }
     use std::io::{Read, Write};
 
     #[test]

@@ -20,20 +20,21 @@ Each item gets a regression test when it is fixed. Owner key: **C** is the confo
 | 5 | HTTP/1.1 | HTTP Garden: 53 stream discrepancies in 14,993 payloads, to triage; fix every one that can desync a front proxy | C | done: 0 desyncs in 709 forwarded fuzz streams and 39 curated vectors; all discrepancies benign (simoom stricter) |
 | 6 | HTTP/2 | h2spec §3.5/2 (invalid preface) needs re-verifying at 146/146 | C | fixed: 146/146 ×30 (h2 GOAWAY change lands with the bug-sweep commit) |
 | 7 | QUIC | the cap on out-of-order gaps is per stream, not per connection (many streams × gaps) | C | fixed (a266da1) |
-| 8 | HTTP/2 | `Upgrade: h2c` passes an absolute-form target through unchanged; it should use the target's authority, as HTTP/1.1 now does | S | open |
-| 9 | HTTP/2 | outgoing header blocks are not checked against the peer's `SETTINGS_MAX_HEADER_LIST_SIZE` | S | open |
-| 10 | HTTP/2 | only the last 16 reset or closed stream ids are remembered, so a late frame on an older stream gets a connection error instead of being ignored | S | open |
-| 11 | runtime | timers of a closed connection stay in the wheel until they fire | S | open |
-| 12 | facade | each loop's QUIC endpoint (`H3Ep`) is built eagerly: cold start and base memory | S | open |
-| 13 | TLS | the server certificate is parsed twice (`ServerConfig::new` → `names()`), and `simoom-server` builds two configs | S | open |
-| 14 | facade | request trailers are ignored on every protocol; they should reach the service | S | open |
-| 15 | facade | HTTP/2 frame budgets (RST/PING/SETTINGS/...) cannot be configured through `Limits` | S | open |
-| 16 | facade | admission control (`shed_lag`) is off by default and unvalidated; decide a safe default from measurement | S | open |
-| 17 | facade | slowloris: idle half-requests still hold a buffer; hold partial heads without one | S | open |
-| 19 | cold start | the full server with TLS and HTTP/3 measured 27–30 ms and 5.3 MB to its first response, against 2.5 ms without TLS. It must not slow Cameleer's start-up (Cameleer's HTTP route is ready in about 1–8 ms depending on build and OS). **Owner requirement (2026-11-09): start-up time and memory must be within 5% of Cameleer's current HTTP server (`cameleer-http`, plain and with `cameleer-tls`), measured the same way; anything above 5% needs a specific, measured advantage in real use cases.** Target: TLS + HTTP/3 ready in ≤ 3 ms and ≤ 3 MB; find out where the time goes (PEM/key parsing, `ServerConfig` set-up, ticket keys, P-256 comb table or other tables built on first use, the first handshake, QUIC endpoints) and fix it | S | open |
-| 20 | runtime | no lingering close: when simoom closes with unread input, the peer can get a TCP reset instead of the last response | S | open |
+| 8 | HTTP/2 | `Upgrade: h2c` passes an absolute-form target through unchanged; it should use the target's authority, as HTTP/1.1 now does | S | fixed: authority and :path from the target |
+| 9 | HTTP/2 | outgoing header blocks are not checked against the peer's `SETTINGS_MAX_HEADER_LIST_SIZE` | S | fixed: Error::HeaderListTooLarge, 500 in the facade |
+| 10 | HTTP/2 | only the last 16 reset or closed stream ids are remembered, so a late frame on an older stream gets a connection error instead of being ignored | S | fixed: forgotten ids at or below the highest seen are treated as reset |
+| 11 | runtime | timers of a closed connection stay in the wheel until they fire | S | fixed: timers cancelled on close |
+| 12 | facade | each loop's QUIC endpoint (`H3Ep`) is built eagerly: cold start and base memory | S | fixed: LazyEp built on first datagram |
+| 13 | TLS | the server certificate is parsed twice (`ServerConfig::new` → `names()`), and `simoom-server` builds two configs | S | fixed: leaf parsed once, ServerConfig Clone |
+| 14 | facade | request trailers are ignored on every protocol; they should reach the service | S | fixed: Request/BodySource trailers on h1, h2, h3 |
+| 15 | facade | HTTP/2 frame budgets (RST/PING/SETTINGS/...) cannot be configured through `Limits` | S | fixed: Limits::h2_frame_budgets |
+| 16 | facade | admission control (`shed_lag`) is off by default and unvalidated; decide a safe default from measurement | S | decided: kept None; every tested value shed falsely at normal load and none helped overload (measurements in limits.rs docs) |
+| 17 | facade | slowloris: idle half-requests still hold a buffer; hold partial heads without one | S | fixed: partial heads up to 512 B copied out, buffer returned |
+| 19 | cold start | the full server with TLS and HTTP/3 measured 27–30 ms and 5.3 MB to its first response, against 2.5 ms without TLS. It must not slow Cameleer's start-up (Cameleer's HTTP route is ready in about 1–8 ms depending on build and OS). **Owner requirement (2026-11-09): start-up time and memory must be within 5% of Cameleer's current HTTP server (`cameleer-http`, plain and with `cameleer-tls`), measured the same way; anything above 5% needs a specific, measured advantage in real use cases.** Target: TLS + HTTP/3 ready in ≤ 3 ms and ≤ 3 MB; find out where the time goes (PEM/key parsing, `ServerConfig` set-up, ticket keys, P-256 comb table or other tables built on first use, the first handshake, QUIC endpoints) and fix it | S | fixed: 26.9 → 2.4 ms with TLS + HTTP/3 (fd-table growth during start); within 5% of cameleer-http on start-up; TLS memory +8–9% documented with measured advantage in STATUS.md |
+| 20 | runtime | no lingering close: when simoom closes with unread input, the peer can get a TCP reset instead of the last response | S | fixed: lingering close (Config::linger) |
 | 21 | QUIC | after switching a connection to v2, the client's retransmitted v1 Initial packets are dropped | C | fixed: v1 Initial keys kept until Initial keys are discarded; ngtcp2 v2 3/3 |
-| 18 | docs | `SECURITY.md` and `plan.md` list the old watchdog defaults; `stall_window`, `stall_recovery` and `shed_lag` are missing | S | open |
+| 22 | size | size gate fails after the fixes: http1 271,488 B (budget 256,000), http1+http2+tls+io-uring 646,776 (614,400), full 1,077,616 (1,048,576) | size | open |
+| 18 | docs | `SECURITY.md` and `plan.md` list the old watchdog defaults; `stall_window`, `stall_recovery` and `shed_lag` are missing | S | fixed: SECURITY.md and plan.md updated |
 
 ## Known gaps (features not built; not bugs, listed so nothing is forgotten)
 

@@ -52,6 +52,10 @@ pub struct Limits {
     pub max_header_list: u32,
     /// HTTP/2 HPACK and HTTP/3 QPACK dynamic table size. Default 4096.
     pub header_table_size: u32,
+    /// HTTP/2 frame budgets per connection (RST_STREAM, PING, SETTINGS, empty frames,
+    /// PRIORITY, small WINDOW_UPDATE); exceeding one closes the connection with
+    /// `GOAWAY(ENHANCE_YOUR_CALM)`. Defaults in [`FrameBudgets`].
+    pub h2_frame_budgets: FrameBudgets,
     /// Streamed response bytes ([`crate::BodySink`]) handed to a connection and not yet written
     /// before writers wait (backpressure). Default 64 KiB.
     pub stream_buffer: usize,
@@ -77,9 +81,11 @@ pub struct Limits {
     /// streams on it get a fast `503` with `retry-after` without calling the service (the
     /// connection stays open when the whole request has arrived, else it closes); requests
     /// already admitted keep their latency. Counted in
-    /// [`crate::Stats::shed`]. `None` turns it off. Default `None`: lag also grows when the
-    /// loop thread itself is preempted (a busy VM), so shedding is opt-in; a latency SLO of a
-    /// millisecond or two under overload wants 1-2 ms here.
+    /// [`crate::Stats::shed`]. `None` turns it off. Default `None`, from measurement (2026-11-09,
+    /// 4 loops, open-loop HTTP/1.1 load): 1 ms shed requests falsely at 50% load and 0.5 ms at
+    /// 90%, and under 120-150% overload no value from 0.5 to 5 ms improved goodput or p99 (the
+    /// queue builds in the client and the kernel). Lag also grows when the loop thread itself
+    /// is preempted (a busy VM). Opt in with a value that matches a latency SLO.
     pub shed_lag: Option<Duration>,
     /// Offload pool threads; 0 means twice the CPU count, at least 4.
     pub offload_threads: usize,
@@ -112,6 +118,7 @@ impl Default for Limits {
             max_concurrent_streams: 100,
             max_header_list: 16 * 1024,
             header_table_size: 4096,
+            h2_frame_budgets: FrameBudgets::default(),
             stream_buffer: 64 * 1024,
             max_ws_message: 1 << 20,
             inline_budget: Some(Duration::from_millis(1)),
@@ -123,6 +130,62 @@ impl Default for Limits {
             offload_queue: 4096,
             offload_target: Duration::from_millis(5),
             offload_interval: Duration::from_millis(100),
+        }
+    }
+}
+
+/// HTTP/2 frame budgets ([`Limits::h2_frame_budgets`]): how many of each frame kind a peer may
+/// send (or make us send) within a sliding window before the connection is closed with
+/// `GOAWAY(ENHANCE_YOUR_CALM)`. `u32::MAX` turns one off. They defend against the HTTP/2 floods
+/// (CVE-2019-9511..9518, Rapid Reset CVE-2023-44487, MadeYouReset CVE-2025-8671); the defaults
+/// leave ordinary clients, browsers and gRPC far below them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameBudgets {
+    /// The sliding window. Default 10 s.
+    pub window: Duration,
+    /// RST_STREAM frames received. Default 200.
+    pub rst_received: u32,
+    /// RST_STREAM frames the peer made us send (stream errors, refused streams). Default 200.
+    pub rst_sent: u32,
+    /// PING frames received. Default 100.
+    pub ping: u32,
+    /// SETTINGS frames received. Default 100.
+    pub settings: u32,
+    /// Empty DATA, HEADERS and CONTINUATION frames that end nothing. Default 200.
+    pub empty_frames: u32,
+    /// PRIORITY frames received. Default 1000.
+    pub priority: u32,
+    /// WINDOW_UPDATE frames with an increment under 1024 bytes. Default 500.
+    pub small_window_updates: u32,
+}
+
+impl Default for FrameBudgets {
+    fn default() -> Self {
+        FrameBudgets {
+            window: Duration::from_secs(10),
+            rst_received: 200,
+            rst_sent: 200,
+            ping: 100,
+            settings: 100,
+            empty_frames: 200,
+            priority: 1000,
+            small_window_updates: 500,
+        }
+    }
+}
+
+#[cfg(feature = "http2")]
+impl FrameBudgets {
+    pub(crate) fn h2(&self) -> simoom_h2::Budgets {
+        simoom_h2::Budgets {
+            window_ms: (self.window.as_millis().min(u64::MAX as u128) as u64).max(1),
+            rst_received: self.rst_received,
+            rst_sent: self.rst_sent,
+            ping: self.ping,
+            settings: self.settings,
+            empty_frames: self.empty_frames,
+            priority: self.priority,
+            small_window_updates: self.small_window_updates,
         }
     }
 }
@@ -149,5 +212,14 @@ impl Limits {
             max_body: self.max_body,
             ..simoom_http1::Limits::default()
         }
+    }
+}
+
+#[cfg(all(test, feature = "http2"))]
+mod tests {
+    // Bug 15: the facade's defaults are the engine's.
+    #[test]
+    fn frame_budget_defaults_match_the_engine() {
+        assert_eq!(super::FrameBudgets::default().h2(), simoom_h2::Budgets::default());
     }
 }

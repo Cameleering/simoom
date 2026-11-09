@@ -31,6 +31,8 @@ enum Phase {
 struct ReqPart {
     head: OwnedHead,
     body: Vec<u8>,
+    /// The request's trailing HEADERS, when they came before the service was called.
+    trailers: Option<OwnedHead>,
 }
 
 #[derive(Default)]
@@ -196,6 +198,7 @@ impl H2Layer {
             let mut r = Request::new(req.head.method(), req.head.target(), Version::H2, HeaderView::Owned(&req.head));
             r.authority = req.head.authority();
             r.body = &req.body;
+            r.trailers = req.trailers.as_ref();
             r.peer = io.peer;
             r.secure = io.secure;
             r.loop_index = io.li;
@@ -351,16 +354,23 @@ impl H2Layer {
                     }
                 }
             }
-            Event::Trailers { stream, .. } => {
+            Event::Trailers { stream, trailers } => {
                 if let Some(st) = streams.get_mut(&stream) {
                     st.end = true;
                     if st.dispatched {
                         if let Some(src) = &st.src {
-                            src.finish();
+                            src.finish_with(trailers.iter().map(|(n, v)| (n.to_vec(), v.to_vec())).collect());
                         }
-                    } else if !st.queued {
-                        st.queued = true;
-                        ready.push(stream);
+                    } else {
+                        let mut t = OwnedHead::default();
+                        for (n, v) in trailers.iter() {
+                            t.add_field(n, v);
+                        }
+                        st.req.trailers = Some(t);
+                        if !st.queued {
+                            st.queued = true;
+                            ready.push(stream);
+                        }
                     }
                 }
             }
@@ -432,7 +442,15 @@ fn send_head(conn: &mut Connection, hdrs: &HeaderBuf, sh: &Shared, now: u64, id:
         fields[i] = (b"alt-svc", a);
         i += 1;
     }
-    conn.send_response(id, status, &fields[..i], end)
+    match conn.send_response(id, status, &fields[..i], end) {
+        Err(simoom_h2::Error::HeaderListTooLarge) => {
+            // larger than the client's SETTINGS_MAX_HEADER_LIST_SIZE: it would refuse it, so
+            // answer a bare 500 and drop the body (the callers see the error and stop)
+            let _ = conn.send_response(id, 500, &[(b"date", &date), (b"content-length", b"0")], true);
+            Err(simoom_h2::Error::HeaderListTooLarge)
+        }
+        r => r,
+    }
 }
 
 fn push_pending(conn: &mut Connection, id: u32, rs: &mut RespPart) {

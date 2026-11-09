@@ -69,7 +69,11 @@ pub(crate) struct Driver<P: Poller> {
     slab: Slab<Entry>,
     stash: Vec<Vec<u8>>,
     large: LargeBufs,
+    /// Receive buffers wanted in stock now: starts small and doubles, up to `max_target`, each
+    /// time a read finds the stock empty (a readiness driver reads one socket at a time, so a
+    /// few buffers serve light traffic; 64 would cost about 130 KiB per loop at once).
     target: usize,
+    max_target: usize,
     read_list: Vec<Id>,
     flush_list: Vec<Id>,
     accept_list: Vec<Id>,
@@ -85,6 +89,9 @@ pub(crate) struct Driver<P: Poller> {
     skips: u8,
 }
 
+/// Receive buffers a readiness driver starts with.
+const INITIAL_TARGET: usize = 8;
+
 impl<P: Poller> Driver<P> {
     pub(crate) fn new(cfg: &DriverConfig) -> io::Result<Self> {
         let (poller, waker) = P::new(cfg.events.max(16))?;
@@ -94,7 +101,8 @@ impl<P: Poller> Driver<P> {
             slab: Slab::new(),
             stash: Vec::new(),
             large: LargeBufs::default(),
-            target: 16,
+            target: INITIAL_TARGET,
+            max_target: INITIAL_TARGET,
             read_list: Vec::new(),
             flush_list: Vec::new(),
             accept_list: Vec::new(),
@@ -254,7 +262,8 @@ impl<P: Poller> Driver<P> {
     }
 
     pub(crate) fn set_buffer_target(&mut self, n: usize) {
-        self.target = n;
+        self.max_target = n.max(1);
+        self.target = self.target.min(self.max_target);
     }
 
     pub(crate) fn stats(&self) -> DriverStats {
@@ -385,6 +394,7 @@ impl<P: Poller> Driver<P> {
             return true;
         }
         if self.stash.is_empty() && !e.large {
+            self.target = (self.target * 2).min(self.max_target);
             return false; // starved: wait for buffers
         }
         let mut done = false;
@@ -395,6 +405,9 @@ impl<P: Poller> Driver<P> {
                     self.scratch.extend((0..LARGE_BATCH).map(|_| large.take()));
                     LARGE_BATCH
                 } else {
+                    if self.stash.len() < BATCH {
+                        self.target = (self.target * 2).min(self.max_target);
+                    }
                     let n = self.stash.len().min(BATCH);
                     if n == 0 {
                         break;
@@ -438,7 +451,10 @@ impl<P: Poller> Driver<P> {
                 }
                 continue;
             }
-            let Some(mut buf) = self.stash.pop() else { break };
+            let Some(mut buf) = self.stash.pop() else {
+                self.target = (self.target * 2).min(self.max_target);
+                break;
+            };
             self.stats.recv_calls += 1;
             match e.sock.recv_into(&mut buf) {
                 Ok(0) => {

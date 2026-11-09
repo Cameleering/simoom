@@ -78,8 +78,8 @@ fn transport(cfg: &mut Config, case: &Case) {
         // Prefer v2: a client that starts in v1 and lists v2 is moved to v2 (RFC 9368).
         cfg.versions = vec![VERSION_2, VERSION_1];
     }
-    // The default stream limit (100, raised with MAX_STREAMS as streams finish): a client
-    // that opens one file per allowed stream at once (quiche) runs out of descriptors at 1000.
+    // The default stream limit (100), raised with MAX_STREAMS as streams finish; the
+    // `multiplexing` case only requires the initial limit to be at most 1000.
     let t = &mut cfg.transport;
     t.max_data = 16 << 20;
     t.stream_window_bidi_remote = 4 << 20;

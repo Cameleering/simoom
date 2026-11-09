@@ -49,6 +49,15 @@ impl EcCurve {
             EcCurve::P384 => p384::public_key(private),
         }
     }
+    /// [`EcCurve::public_key`] for a key being loaded: P-256 skips building its base-point
+    /// table (start-up time and memory), which the first signature builds instead.
+    pub fn public_key_for_load(self, private: &[u8]) -> Option<Vec<u8>> {
+        match self {
+            EcCurve::P256 => p256::public_key_untabled(private).map(|p| p.to_vec()),
+            #[cfg(feature = "p384")]
+            EcCurve::P384 => p384::public_key(private),
+        }
+    }
     /// ECDSA over a digest; (r, s) big-endian, curve-sized.
     pub fn sign(self, private: &[u8], digest: &[u8], hash: HashAlg) -> Option<(Vec<u8>, Vec<u8>)> {
         match self {
@@ -286,7 +295,7 @@ impl PrivateKey {
         if dv.len() != curve.byte_len() {
             return derr("bad EC private key length");
         }
-        let public = curve.public_key(&dv).ok_or(DerError("invalid EC private scalar".into()))?;
+        let public = curve.public_key_for_load(&dv).ok_or(DerError("invalid EC private scalar".into()))?;
         Ok(PrivateKey::Ec { curve, d: dv, public })
     }
 

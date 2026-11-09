@@ -272,3 +272,64 @@ fn http3_graceful_stop_finishes_in_flight_streams() {
     assert!(took >= Duration::from_millis(300), "stopped after {took:?}, before the deferred reply");
     assert!(took < Duration::from_secs(8), "stop took {took:?}");
 }
+
+// Bug 12: a loop builds its QUIC endpoint on its first datagram; loops without HTTP/3 traffic
+// build none, and a stop before any traffic finishes at once.
+#[test]
+fn quic_endpoints_are_built_on_first_datagram() {
+    let h = start();
+    assert_eq!(h.stats().quic_endpoints, 0, "no endpoint before any datagram");
+    let mut c = H3Client::connect(h.quic_addrs()[0]);
+    let id = c.request("GET", "/lazy", b"");
+    assert_eq!(c.wait(id).body, b"H3 GET /lazy 0");
+    // one connection's datagrams all reach one socket (one loop)
+    assert_eq!(h.stats().quic_endpoints, 1);
+
+    let idle = start();
+    let t0 = Instant::now();
+    idle.stop(Duration::from_secs(10));
+    idle.join();
+    assert!(t0.elapsed() < Duration::from_secs(2), "an idle HTTP/3 listener delayed the stop");
+}
+
+/// Bug 14: request trailers reach the service over HTTP/3, buffered and streamed.
+#[test]
+fn http3_request_trailers_reach_the_service() {
+    use std::io::Read;
+    let h = Server::builder()
+        .listen_quic("127.0.0.1:0")
+        .quic_tls(server_config())
+        .threads(1)
+        .limits(simoom::Limits { body_buffer: 1024, ..simoom::Limits::default() })
+        .service(simoom::blocking(|mut req: simoom::OwnedRequest| {
+            let (len, trailers) = match req.take_body() {
+                Some(mut src) => {
+                    let mut v = Vec::new();
+                    src.read_to_end(&mut v).unwrap();
+                    (v.len(), src.trailers())
+                }
+                None => (req.body().len(), req.trailers().map(|(n, v)| (n.to_vec(), v.to_vec())).collect()),
+            };
+            let t: Vec<String> = trailers.iter().map(|(n, v)| format!("{}={}", String::from_utf8_lossy(n), String::from_utf8_lossy(v))).collect();
+            Response::text(format!("{len} {}", t.join(",")))
+        }))
+        .start()
+        .unwrap();
+    let mut c = H3Client::connect(h.quic_addrs()[0]);
+    for (body, want) in [(vec![b'a'; 7], "7 x-sum=7"), (vec![b'b'; 5000], "5000 x-sum=5000")] {
+        let fields: Vec<(&[u8], &[u8])> = vec![(b":method", b"POST"), (b":scheme", b"https"), (b":authority", b"localhost"), (b":path", b"/t")];
+        let q = c.ep.conn_mut(c.h).unwrap();
+        let id = c.h3.send_request(q, &fields, false).unwrap();
+        let mut sent = 0;
+        while sent < body.len() {
+            let q = c.ep.conn_mut(c.h).unwrap();
+            sent += c.h3.send_body(q, id, &body[sent..], false).unwrap();
+            c.step();
+        }
+        let sum = body.len().to_string();
+        let q = c.ep.conn_mut(c.h).unwrap();
+        c.h3.send_trailers(q, id, &[(b"x-sum", sum.as_bytes())]).unwrap();
+        c.send_all();
+        assert_eq!(String::from_utf8(c.wait(id).body).unwrap(), want);
+    }
+}

@@ -27,6 +27,8 @@ pub struct Request<'a> {
     pub(crate) authority: Option<&'a [u8]>,
     pub(crate) headers: HeaderView<'a>,
     pub(crate) body: &'a [u8],
+    /// Trailer fields of a buffered body (fields only).
+    pub(crate) trailers: Option<&'a OwnedHead>,
     pub(crate) source: Option<BodySource>,
     pub(crate) streamed: bool,
     pub(crate) peer: Option<SocketAddr>,
@@ -80,6 +82,7 @@ impl<'a> Request<'a> {
             authority: None,
             headers,
             body: b"",
+            trailers: None,
             source: None,
             streamed: false,
             peer: None,
@@ -167,6 +170,21 @@ impl<'a> Request<'a> {
         self.streamed
     }
 
+    /// The request's trailer fields, in order: the trailer section after a chunked HTTP/1.1
+    /// body, or the trailing HEADERS of an HTTP/2 or HTTP/3 request. Present with a buffered
+    /// body; a streamed body delivers them at its end ([`BodySource::trailers`]). Fields that
+    /// may not appear in trailers (framing, routing, authentication...) are refused by the
+    /// parsers, so the request never gets here with them.
+    pub fn trailers(&self) -> impl Iterator<Item = (&'a [u8], &'a [u8])> + 'a {
+        let t = self.trailers;
+        (0..t.map_or(0, |t| t.fields.len())).map(move |i| t.expect("counted").field(i))
+    }
+
+    /// The first trailer field named `name` (case-insensitive).
+    pub fn trailer(&self, name: &str) -> Option<&'a [u8]> {
+        self.trailers().find(|(n, _)| n.eq_ignore_ascii_case(name.as_bytes())).map(|(_, v)| v)
+    }
+
     /// The streaming body source, once. `None` when the body was buffered whole.
     pub fn take_body(&mut self) -> Option<BodySource> {
         self.source.take()
@@ -217,10 +235,12 @@ impl<'a> Request<'a> {
         for (n, v) in self.headers() {
             head.add_field(n, v);
         }
+        let trailers = self.trailers.cloned();
         OwnedRequest {
             head,
             version: self.version,
             body: self.body.to_vec(),
+            trailers,
             source: self.source.take(),
             streamed: self.streamed,
             peer: self.peer,
@@ -239,6 +259,7 @@ pub struct OwnedRequest {
     pub(crate) head: OwnedHead,
     pub(crate) version: Version,
     pub(crate) body: Vec<u8>,
+    pub(crate) trailers: Option<OwnedHead>,
     pub(crate) source: Option<BodySource>,
     pub(crate) streamed: bool,
     pub(crate) peer: Option<SocketAddr>,
@@ -318,6 +339,12 @@ impl OwnedRequest {
 
     /// The whole body: the buffered one, or the stream read to its end (blocking; up to
     /// [`crate::Limits::max_body`], which the connection enforces).
+    /// The trailer fields of a buffered body ([`Request::trailers`]).
+    pub fn trailers(&self) -> impl Iterator<Item = (&[u8], &[u8])> + '_ {
+        let t = self.trailers.as_ref();
+        (0..t.map_or(0, |t| t.fields.len())).map(move |i| t.expect("counted").field(i))
+    }
+
     pub fn read_body(&mut self) -> std::io::Result<Vec<u8>> {
         match self.source.take() {
             None => Ok(std::mem::take(&mut self.body)),
@@ -337,6 +364,7 @@ impl OwnedRequest {
             authority: self.head.authority(),
             headers: HeaderView::Owned(&self.head),
             body: &self.body,
+            trailers: self.trailers.as_ref(),
             source: self.source.take(),
             streamed: self.streamed,
             peer: self.peer,

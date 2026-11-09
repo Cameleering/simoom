@@ -21,6 +21,11 @@ use std::time::Duration;
 const LISTENER_BIT: u64 = 1 << 63;
 /// Receive buffers lent to the driver before the loop's first connection.
 const INITIAL_RECV_BUFFERS: usize = 8;
+/// Unconsumed input up to this size is kept in its own exact-size allocation rather than in a
+/// pooled receive buffer ([`Core::call_data`]).
+const COMPACT_INPUT: usize = 512;
+/// How long loop 0 balances its accepts after the lazy loops started.
+const BALANCE_AFTER_GROWTH_NS: u64 = 1_000_000_000;
 const UDP_BIT: u64 = 1 << 62;
 
 /// A task run on a loop thread.
@@ -199,6 +204,8 @@ impl<T> Slab<T> {
 pub(crate) enum TimerTarget {
     Conn(u64, u64),
     Udp(usize, u64),
+    /// The end of a connection's lingering close ([`Core::linger`]).
+    Linger(u64),
 }
 
 struct Conn {
@@ -212,6 +219,13 @@ struct Conn {
     want_drain: bool,
     closing: bool,
     closed: bool,
+    /// Timers this connection set that may still be pending: cancelled when it is removed, so
+    /// a closed connection leaves nothing in the wheel. Fired ones are pruned as it grows.
+    timers: Vec<TimerId>,
+    /// In a lingering close: the write side is shut down and input is read and dropped until
+    /// the peer closes, `linger_left` bytes were dropped, or the linger timer fires.
+    lingering: bool,
+    linger_left: usize,
 }
 
 pub(crate) struct ListenerSlot {
@@ -275,6 +289,16 @@ pub(crate) struct Core {
     redeliver: Vec<u64>,
     drains: Vec<u64>,
     rr: usize,
+    /// A third connection at once arrived this turn: start lazy loops after it.
+    want_grow: bool,
+    /// Start them after the next turn, which flushes this turn's output.
+    grow_next: bool,
+    grown: bool,
+    /// Connections accepted while the lazy loops start ([`Core::spread_parked`]).
+    parked: Vec<(Socket, Option<SocketAddr>, usize)>,
+    /// Until then (loop clock), connections accepted here are handed to the less busy of two
+    /// loops, as on a shared listener: set when the lazy loops are up.
+    handoff_until: u64,
     accepted: u64,
     rejected: u64,
     closed: u64,
@@ -347,6 +371,37 @@ impl Core {
         self.driver.close(id);
     }
 
+    /// A graceful close once the output is flushed: shut down the write side (the peer reads
+    /// our last bytes and a FIN), then read and drop input until the peer closes, the linger
+    /// time passes or `linger_bytes` were dropped, and only then close. Closing a socket with
+    /// unread input makes the kernel send a reset, which can destroy the response at the peer
+    /// before it reads it (RFC 9112 §9.6). Holds no buffer: what arrives goes straight back to
+    /// the pool.
+    fn linger(&mut self, key: u64) {
+        let linger = self.cfg.linger;
+        let id = match self.conns.get_mut(key) {
+            Some(c) if !c.closed && !c.lingering => c.id,
+            _ => return,
+        };
+        let shut = !linger.is_zero() && self.driver.socket(id).is_some_and(|s| s.shutdown(std::net::Shutdown::Write).is_ok());
+        if !shut {
+            self.close_now(key, CloseReason::Closed);
+            return;
+        }
+        let Some(c) = self.conns.get_mut(key) else { return };
+        c.lingering = true;
+        c.linger_left = self.cfg.linger_bytes;
+        if let Some(i) = c.input.take() {
+            self.pool.put(i);
+        }
+        let at = self.deadline_tick(linger);
+        let t = self.timers.insert(at, TimerTarget::Linger(key));
+        if let Some(c) = self.conns.get_mut(key) {
+            c.timers.push(t);
+        }
+        self.driver.recv(id, true);
+    }
+
     /// A connection accepted here or handed over by another loop.
     pub(crate) fn adopt(&mut self, socket: Socket, peer: Option<SocketAddr>, listener: usize) {
         let total = self.shared.active.fetch_add(1, Ordering::AcqRel) + 1;
@@ -372,6 +427,12 @@ impl Core {
         if self.accepted == 0 {
             self.driver.set_buffer_target(self.cfg.recv_buffers);
         }
+        // A third connection at once on loop 0: more loops can help now (lazy_loops). One
+        // connection at a time (a FaaS instance) never needs them; the threshold is three, not
+        // two, because a client's next connection often arrives before its last one is reaped.
+        if self.cfg.lazy_loops && self.index == 0 && self.conns.len >= 3 {
+            self.want_grow |= !self.grown;
+        }
         self.accepted += 1;
     }
 
@@ -389,6 +450,9 @@ impl Core {
             want_drain: false,
             closing: false,
             closed: false,
+            timers: Vec::new(),
+            lingering: false,
+            linger_left: 0,
         });
         debug_assert_eq!(k, key);
         self.driver.recv(id, true);
@@ -517,7 +581,7 @@ impl Ctx<'_> {
         }
         c.closing = true;
         if c.queued == 0 {
-            self.core.close_now(self.key, CloseReason::Closed);
+            self.core.linger(self.key);
         }
     }
 
@@ -533,14 +597,28 @@ impl Ctx<'_> {
     }
 
     /// Calls [`Connection::on_timer`] with `token` after `after` (rounded up to the loop's
-    /// timer tick). Timers of a closed connection are ignored when they fire.
+    /// timer tick). The timers of a connection are cancelled when it is closed.
     pub fn set_timer(&mut self, after: Duration, token: u64) -> TimerId {
         let at = self.core.deadline_tick(after);
-        self.core.timers.insert(at, TimerTarget::Conn(self.key, token))
+        let id = self.core.timers.insert(at, TimerTarget::Conn(self.key, token));
+        let core = &mut *self.core;
+        if let Some(c) = core.conns.get_mut(self.key) {
+            if c.timers.len() >= 4 {
+                let wheel = &core.timers;
+                c.timers.retain(|t| wheel.is_pending(*t));
+            }
+            c.timers.push(id);
+        }
+        id
     }
 
     /// Cancels a timer. Returns whether it was still pending.
     pub fn cancel_timer(&mut self, id: TimerId) -> bool {
+        if let Some(c) = self.core.conns.get_mut(self.key) {
+            if let Some(i) = c.timers.iter().position(|t| *t == id) {
+                c.timers.swap_remove(i);
+            }
+        }
         self.core.timers.cancel(id).is_some()
     }
 
@@ -764,6 +842,11 @@ pub(crate) fn build(mut setup: LoopSetup) -> io::Result<(Core, Arc<Queue>)> {
         redeliver: Vec::new(),
         drains: Vec::new(),
         rr: setup.index,
+        want_grow: false,
+        grow_next: false,
+        grown: false,
+        parked: Vec::new(),
+        handoff_until: 0,
         accepted: 0,
         rejected: 0,
         closed: 0,
@@ -803,46 +886,79 @@ impl Core {
         Ok(())
     }
 
+    /// Hands the connections accepted while the lazy loops started to every loop in turn.
+    fn spread_parked(&mut self) {
+        self.peers = self.shared.handles();
+        let n = self.peers.len().max(1);
+        for (j, (socket, peer, li)) in std::mem::take(&mut self.parked).into_iter().enumerate() {
+            let p = (self.rr + j) % n;
+            match self.peers.get(p) {
+                Some(h) if h.index != self.index => {
+                    if !h.run(move |lcx| lcx.core.adopt(socket, peer, li)) {
+                        self.rejected += 1;
+                    }
+                }
+                _ => self.adopt(socket, peer, li),
+            }
+        }
+    }
+
     /// Picks the loop for a connection accepted on a shared listener: the less busy of two
-    /// (power of two choices), starting from a rotating position.
-    fn pick_loop(&mut self) -> usize {
+    /// (power of two choices), starting from a rotating position. Returns a position in
+    /// `peers` (the running loops, by index), or `None` for this loop.
+    fn pick_loop(&mut self) -> Option<usize> {
+        if self.shared.started.load(Ordering::Acquire) != self.peers.len() {
+            // lazy loops started since: refresh the copy
+            self.peers = self.shared.handles();
+        }
         let n = self.peers.len();
         if n <= 1 {
-            return self.index;
+            return None;
         }
         self.rr = (self.rr + 1) % n;
         let a = self.rr;
         let b = (a + 1 + self.rr * 7 % (n - 1).max(1)) % n;
-        let la = self.shared.loop_active[a].load(Ordering::Relaxed);
-        let lb = self.shared.loop_active[b].load(Ordering::Relaxed);
-        if lb < la {
-            b
-        } else {
-            a
-        }
+        let la = self.shared.loop_active[self.peers[a].index].load(Ordering::Relaxed);
+        let lb = self.shared.loop_active[self.peers[b].index].load(Ordering::Relaxed);
+        let p = if lb < la { b } else { a };
+        (self.peers[p].index != self.index).then_some(p)
     }
 
     fn dispatch(&mut self, ev: Event) {
         match ev {
             Event::Accepted { key, socket, peer } => {
                 let li = (key & !LISTENER_BIT) as usize;
-                let handoff = self.listeners.get(li).is_some_and(|l| l.handoff);
-                let target = if handoff { self.pick_loop() } else { self.index };
-                if target == self.index {
-                    self.adopt(socket, peer, li);
-                } else {
-                    let ok = self.peers[target].run(move |lcx| lcx.core.adopt(socket, peer, li));
-                    if !ok {
-                        self.rejected += 1;
+                if self.want_grow || self.grow_next || (self.grown && self.shared.growing.load(Ordering::Acquire)) {
+                    // The other loops are about to start or starting: hold the connection until
+                    // they all run, then spread what arrived meanwhile over every loop (else a
+                    // burst of new connections, accepted in one batch, would all stay here).
+                    self.parked.push((socket, peer, li));
+                    return;
+                }
+                let handoff = self.listeners.get(li).is_some_and(|l| l.handoff) || self.now_ns < self.handoff_until;
+                match if handoff { self.pick_loop() } else { None } {
+                    None => self.adopt(socket, peer, li),
+                    Some(p) => {
+                        let ok = self.peers[p].run(move |lcx| lcx.core.adopt(socket, peer, li));
+                        if !ok {
+                            self.rejected += 1;
+                        }
                     }
                 }
             }
             Event::Data { key, buf } => self.on_data(key, buf),
-            Event::Eof { key } => self.with_conn(key, |h, cx| {
-                if !cx.is_closing() {
-                    h.on_eof(cx)
+            Event::Eof { key } => {
+                if self.conns.get_mut(key).is_some_and(|c| c.lingering) {
+                    // the peer closed its side: the lingering close is over
+                    self.close_now(key, CloseReason::Closed);
+                    return;
                 }
-            }),
+                self.with_conn(key, |h, cx| {
+                    if !cx.is_closing() {
+                        h.on_eof(cx)
+                    }
+                })
+            }
             Event::Error { key, error } => {
                 if key & (LISTENER_BIT | UDP_BIT) != 0 {
                     return; // accept errors (EMFILE...) and UDP noise: keep serving
@@ -875,7 +991,15 @@ impl Core {
             return;
         };
         if c.closed || c.closing {
+            let n = buf.len();
             self.pool.put(buf);
+            if c.lingering {
+                if n > c.linger_left {
+                    self.close_now(key, CloseReason::Closed);
+                } else {
+                    c.linger_left -= n;
+                }
+            }
             return;
         }
         match c.input.as_mut() {
@@ -892,7 +1016,10 @@ impl Core {
             }
         }
         let c = self.conns.get_mut(key).unwrap();
-        if c.input.as_ref().map_or(0, |i| i.len()) > max_input {
+        // While reading is paused the driver reads nothing more, so what arrives is the rest of
+        // the turn's reads (at most the receive budget) and is kept: the handler paused
+        // because it can't take more yet (a full body source), not because the peer misbehaves.
+        if !c.user_paused && c.input.as_ref().map_or(0, |i| i.len()) > max_input {
             self.close_now(key, CloseReason::InputLimit);
             return;
         }
@@ -926,6 +1053,18 @@ impl Core {
             // Everything consumed: the buffer goes back, the connection holds none.
             self.pool.put(input);
         } else {
+            let rest = input.len() - n;
+            if rest <= COMPACT_INPUT && input.capacity() >= 4 * rest {
+                // A small unconsumed tail (a partial head, as a slowloris client keeps sending):
+                // move it to an allocation of its own size and give the pooled buffer back, so
+                // an idle half-request holds tens of bytes instead of a receive buffer.
+                let tail = input[n..].to_vec();
+                self.pool.put(input);
+                if c.input.is_none() {
+                    c.input = Some(tail);
+                }
+                return;
+            }
             if n > 0 {
                 let len = input.len();
                 input.copy_within(n..len, 0);
@@ -952,7 +1091,7 @@ impl Core {
         }
         if c.closing {
             if c.queued == 0 {
-                self.close_now(key, CloseReason::Closed);
+                self.linger(key);
             }
             return;
         }
@@ -996,6 +1135,9 @@ impl Core {
             return;
         }
         let Some(mut c) = self.conns.remove(key) else { return };
+        for t in c.timers.drain(..) {
+            self.timers.cancel(t);
+        }
         if let Some(i) = c.input.take() {
             self.pool.put(i);
         }
@@ -1014,6 +1156,7 @@ impl Core {
             match t {
                 TimerTarget::Conn(key, token) => self.with_conn(key, |h, cx| h.on_timer(cx, token)),
                 TimerTarget::Udp(idx, token) => self.with_udp(idx, |h, cx| h.on_timer(cx, token)),
+                TimerTarget::Linger(key) => self.close_now(key, CloseReason::Closed),
             }
         }
     }
@@ -1033,6 +1176,7 @@ impl Core {
         let s = &self.shared.loops[self.index];
         let d = self.driver.stats();
         s.store(d, self.pool.stats(), self.accepted, self.rejected, self.closed, self.conns.len as u64);
+        s.timers.store(self.timers.len() as u64, Ordering::Relaxed);
         self.shared.loop_active[self.index].store(self.conns.len, Ordering::Relaxed);
     }
 
@@ -1093,6 +1237,9 @@ impl Core {
                     timeout = Some(timeout.unwrap().min(Duration::from_millis(10)));
                 }
             }
+            if self.grow_next {
+                timeout = Some(Duration::ZERO);
+            }
             self.driver.turn(timeout, &mut events)?;
             self.now_ns = simoom_sys::time::now_ns();
             let mut woke = false;
@@ -1108,6 +1255,23 @@ impl Core {
                     let mut lcx = LoopCtx { core: self };
                     t(&mut lcx);
                 }
+            }
+            if self.grown && self.handoff_until == 0 && !self.shared.growing.load(Ordering::Acquire) {
+                // The lazy loops run. Connections already queued on this loop's listener (a
+                // burst that arrived before theirs existed) are handed out for a while too.
+                self.handoff_until = self.now_ns.saturating_add(BALANCE_AFTER_GROWTH_NS).max(1);
+                self.spread_parked();
+            }
+            if self.grow_next {
+                // a third connection at once, served and flushed by the turn
+                // above: start the loops held back (lazy_loops)
+                self.grow_next = false;
+                self.grown = true;
+                self.shared.grow();
+            } else if self.want_grow {
+                // one more (non-blocking) turn first, which writes this turn's replies
+                self.want_grow = false;
+                self.grow_next = true;
             }
             self.after_callbacks();
             self.publish();

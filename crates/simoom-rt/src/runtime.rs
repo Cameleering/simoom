@@ -12,7 +12,7 @@ use simoom_sys::net::{ListenOptions, Socket, UdpOptions};
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -55,6 +55,32 @@ pub struct Config {
     pub listen: ListenOptions,
     /// Loop thread name prefix.
     pub thread_name: String,
+    /// Start only loop 0 at [`Builder::start`], without waiting for it (the listeners are bound
+    /// first, so connections wait in the backlog), and the other loops in the background when
+    /// loop 0 holds three connections at once. A server that is idle, or serves one connection
+    /// at a time (a FaaS instance), then pays for one loop thread in start-up time and memory
+    /// instead of one per core. Connections accepted while the other loops start (well under a
+    /// millisecond) are held, then spread over every loop, and loop 0 hands out its accepts for
+    /// a second after. A loop that fails to build its driver is logged on standard error
+    /// instead of failing `start` (binding errors still fail it). Ignored when the runtime has
+    /// UDP sockets ([`Builder::udp`]): every loop starts at once then, since a socket added
+    /// later to a `SO_REUSEPORT` group would take over some established QUIC connections.
+    /// Default `false` here (a load generator wants every loop at once); the `simoom` server
+    /// turns it on.
+    pub lazy_loops: bool,
+    /// Lingering close: after a graceful close ([`crate::Ctx::close`]) the write side is shut
+    /// down and input is read and dropped until the peer closes, for at most this long, before
+    /// the socket is closed (closing over unread input resets the connection, and a reset can
+    /// destroy the last response at the peer). `Duration::ZERO` closes at once. Default 2 s.
+    pub linger: Duration,
+    /// The most input a lingering close reads and drops before it closes anyway. Default
+    /// 256 KiB.
+    pub linger_bytes: usize,
+    /// Linux: descriptor table slots reserved at start, before the loop threads exist (capped
+    /// at the soft `RLIMIT_NOFILE`). Growing the table once threads run stalls the thread that
+    /// crosses each step (64, 128, 256...) for an RCU grace period, 10-30 ms on a VM. 0 skips
+    /// it. Default 1024 (8 KiB of kernel memory).
+    pub reserve_fds: usize,
     /// Stack size of the loop threads; `None` keeps std's default (2 MiB, or `RUST_MIN_STACK`).
     /// Only touched pages cost memory, so this mostly matters for address space.
     pub stack_size: Option<usize>,
@@ -80,6 +106,10 @@ impl Default for Config {
             listen: ListenOptions { defer_accept: Some(1), ..ListenOptions::default() },
             thread_name: "simoom-loop".into(),
             stack_size: None,
+            reserve_fds: 1024,
+            linger: Duration::from_secs(2),
+            linger_bytes: 256 * 1024,
+            lazy_loops: false,
         }
     }
 }
@@ -102,6 +132,7 @@ pub(crate) struct LoopStats {
     pool_allocated: AtomicU64,
     pool_reused: AtomicU64,
     pool_cached: AtomicU64,
+    pub(crate) timers: AtomicU64,
 }
 
 impl LoopStats {
@@ -146,9 +177,12 @@ impl LoopStats {
             pool_allocated: self.pool_allocated.load(r),
             pool_reused: self.pool_reused.load(r),
             pool_cached: self.pool_cached.load(r),
+            timers: self.timers.load(r),
         }
     }
 }
+
+type Grow = Box<dyn FnOnce() + Send>;
 
 pub(crate) struct Shared {
     pub(crate) stop: AtomicBool,
@@ -156,6 +190,81 @@ pub(crate) struct Shared {
     pub(crate) active: AtomicUsize,
     pub(crate) loop_active: Vec<AtomicUsize>,
     pub(crate) loops: Vec<LoopStats>,
+    /// The loops that run, by index.
+    handles: Mutex<Vec<LoopHandle>>,
+    /// `handles.len()`, read without the lock.
+    pub(crate) started: AtomicUsize,
+    /// Lazy loops that failed to start.
+    failed: AtomicUsize,
+    /// Every thread to join: the loops, and the one that starts lazy loops.
+    threads: Mutex<Vec<JoinHandle<()>>>,
+    /// Starts the loops not started yet ([`Config::lazy_loops`]); taken once.
+    grow: Mutex<Option<Grow>>,
+    /// The lazy loops are being started (connections accepted meanwhile are parked).
+    pub(crate) growing: AtomicBool,
+    /// Lazy start: loop 0's back end once it has built its driver (or failed to).
+    boot: Mutex<Option<(Backend, Option<String>)>>,
+    boot_cv: Condvar,
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Shared {
+    /// A loop runs: it can take tasks and handed-off connections. A loop that registers after
+    /// a stop began is woken, so it sees the stop at once.
+    pub(crate) fn register(&self, h: LoopHandle) {
+        let mut v = lock(&self.handles);
+        v.push(h.clone());
+        v.sort_by_key(|l| l.index);
+        self.started.store(v.len(), Ordering::Release);
+        if self.stop.load(Ordering::Acquire) {
+            h.queue.waker.wake();
+        }
+        drop(v);
+        // for the thread waiting until the lazy loops are up
+        drop(lock(&self.boot));
+        self.boot_cv.notify_all();
+    }
+
+    /// The running loops, by index.
+    pub(crate) fn handles(&self) -> Vec<LoopHandle> {
+        lock(&self.handles).clone()
+    }
+
+    fn booted(&self, b: (Backend, Option<String>)) {
+        *lock(&self.boot) = Some(b);
+        self.boot_cv.notify_all();
+    }
+
+    /// Lazy start: waits until loop 0 has built its driver.
+    fn boot(&self) -> (Backend, Option<String>) {
+        let mut g = lock(&self.boot);
+        loop {
+            if let Some(b) = &*g {
+                return b.clone();
+            }
+            g = self.boot_cv.wait(g).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    /// Starts the remaining loops if they were held back (first call only).
+    pub(crate) fn grow(&self) {
+        let f = lock(&self.grow).take();
+        if let Some(f) = f {
+            self.growing.store(true, Ordering::Release);
+            f();
+        }
+    }
+
+    /// The lazy loops are up (or failed): wake the loops so they spread parked connections.
+    fn grown(&self) {
+        self.growing.store(false, Ordering::Release);
+        for h in lock(&self.handles).iter() {
+            h.queue.waker.wake();
+        }
+    }
 }
 
 /// Counters of one loop, as last published by it (once per loop turn).
@@ -177,6 +286,8 @@ pub struct LoopSnapshot {
     pub pool_reused: u64,
     /// Buffers cached in the loop's pool now.
     pub pool_cached: u64,
+    /// Timers scheduled on the loop now (connections' and endpoints').
+    pub timers: u64,
 }
 
 /// Runtime counters.
@@ -209,6 +320,7 @@ impl Stats {
             t.pool_allocated += l.pool_allocated;
             t.pool_reused += l.pool_reused;
             t.pool_cached += l.pool_cached;
+            t.timers += l.timers;
         }
         t
     }
@@ -378,9 +490,17 @@ impl Builder {
     /// Binds every listener, starts the loops and returns once they all run.
     pub fn start(self) -> io::Result<RuntimeHandle> {
         let mut cfg = self.cfg;
+        // UDP sockets are not lazy: SO_REUSEPORT spreads datagrams by hash over the sockets
+        // bound, so adding one later would send an established QUIC connection's datagrams
+        // to a loop that does not know it.
+        cfg.lazy_loops &= self.udps.is_empty();
         let cpus = cfg.cpus.clone().unwrap_or_else(simoom_sys::cpu::allowed_cpus);
+        // Lazy loops with the default count: the affinity mask now, and the cgroup CPU quota
+        // (a few file reads, about 40 us) when the other loops start.
+        let quota_later = cfg.lazy_loops && cfg.threads == 0 && cfg.cpus.is_none();
         let n = match (cfg.threads, &cfg.cpus) {
             (0, Some(_)) => cpus.len().max(1),
+            (0, None) if quota_later => cpus.len().max(1),
             (0, None) => simoom_sys::cpu::cpu_count(),
             (t, _) => t,
         };
@@ -389,6 +509,10 @@ impl Builder {
             cfg.write_low_water = cfg.write_high_water;
         }
         let per_loop = cfg!(target_os = "linux");
+        // Grow the descriptor table now, while (usually) only this thread exists: growing it
+        // later stalls the loop thread that crosses a step for an RCU grace period (measured
+        // 18-28 ms on WSL2 at start with 12 loops and HTTP/3, and again at the first accepts).
+        simoom_sys::net::reserve_descriptors(cfg.reserve_fds);
 
         // Listener sockets per loop.
         let mut per_loop_listeners: Vec<Vec<ListenerSlot>> = (0..n).map(|_| Vec::new()).collect();
@@ -452,6 +576,14 @@ impl Builder {
             active: AtomicUsize::new(0),
             loop_active: (0..n).map(|_| AtomicUsize::new(0)).collect(),
             loops: (0..n).map(|_| LoopStats::default()).collect(),
+            handles: Mutex::new(Vec::with_capacity(n)),
+            started: AtomicUsize::new(0),
+            failed: AtomicUsize::new(0),
+            threads: Mutex::new(Vec::with_capacity(n + 1)),
+            grow: Mutex::new(None),
+            growing: AtomicBool::new(false),
+            boot: Mutex::new(None),
+            boot_cv: Condvar::new(),
         });
         let mut ocfg = cfg.offload.clone();
         if ocfg.name.is_empty() {
@@ -459,20 +591,85 @@ impl Builder {
         }
         let offload = OffloadPool::new(ocfg);
         let cfg = Arc::new(cfg);
+        let mut setups: Vec<LoopSetup> = per_loop_listeners
+            .into_iter()
+            .zip(per_loop_udps)
+            .enumerate()
+            .map(|(i, (listeners, udps))| LoopSetup { index: i, cfg: cfg.clone(), shared: shared.clone(), offload: offload.clone(), listeners, udps })
+            .collect();
+        let pin_of = {
+            let cpus = cpus.clone();
+            let pin = cfg.pin_threads;
+            move |i: usize| if pin && !cpus.is_empty() { Some(cpus[i % cpus.len()]) } else { None }
+        };
+        if cfg.lazy_loops {
+            // Loop 0 now, without waiting for it: its listeners are bound, so connections
+            // queue in the backlog until it runs (it reports its back end through `boot`). The
+            // other loops start when three connections are open at once.
+            let later = setups.split_off(1);
+            let setup = setups.pop().expect("loop 0");
+            let t = spawn_loop(&cfg, setup, pin_of(0), shared.clone())?;
+            lock(&shared.threads).push(t);
+            if !later.is_empty() {
+                let cfg = cfg.clone();
+                let weak = Arc::downgrade(&shared);
+                *lock(&shared.grow) = Some(Box::new(move || {
+                    // Called on the loop thread that saw the first connection: a helper creates
+                    // the threads, so that loop goes on serving.
+                    let w = weak.clone();
+                    let helper = std::thread::Builder::new().name(format!("{}-start", cfg.thread_name)).spawn(move || {
+                        let mut later = later;
+                        if quota_later {
+                            later.truncate(simoom_sys::cpu::cpu_count().saturating_sub(1));
+                        }
+                        let mut spawned = 0;
+                        for setup in later {
+                            let Some(shared) = w.upgrade() else { return };
+                            if shared.stop.load(Ordering::Acquire) {
+                                break;
+                            }
+                            let i = setup.index;
+                            match spawn_loop(&cfg, setup, pin_of(i), shared.clone()) {
+                                Ok(t) => {
+                                    lock(&shared.threads).push(t);
+                                    spawned += 1;
+                                }
+                                Err(e) => eprintln!("simoom loop {i} failed to start: {e}"),
+                            }
+                        }
+                        // every loop registered (or failed): parked connections can be spread
+                        if let Some(shared) = w.upgrade() {
+                            let mut g = lock(&shared.boot);
+                            while shared.started.load(Ordering::Acquire) + shared.failed.load(Ordering::Acquire) < 1 + spawned {
+                                g = shared.boot_cv.wait(g).unwrap_or_else(PoisonError::into_inner);
+                            }
+                            drop(g);
+                            shared.grown();
+                        }
+                    });
+                    match (helper, weak.upgrade()) {
+                        (Ok(t), Some(shared)) => lock(&shared.threads).push(t),
+                        (Err(e), Some(shared)) => {
+                            eprintln!("simoom: the loops could not be started: {e}");
+                            shared.grown();
+                        }
+                        _ => {}
+                    }
+                }));
+            }
+            return Ok(RuntimeHandle { shared, addrs, udp_addrs, offload, backend: OnceLock::new(), lazy: true });
+        }
+        let now = setups.len();
 
         // Start the loops: each creates its driver on its own thread, reports its handle, then
-        // waits for the handles of all loops before serving.
-        let gate = Arc::new(StartGate { st: Mutex::new(StartState { reports: (0..n).map(|_| None).collect(), reported: 0, peers: None }), cv: Condvar::new() });
+        // waits for the go of this thread before serving.
+        let gate = Arc::new(StartGate { st: Mutex::new(StartState { reports: (0..now).map(|_| None).collect(), reported: 0, peers: None }), cv: Condvar::new() });
         let mut threads = Vec::new();
-        for (i, (listeners, udps)) in per_loop_listeners.into_iter().zip(per_loop_udps).enumerate() {
-            let setup = LoopSetup { index: i, cfg: cfg.clone(), shared: shared.clone(), offload: offload.clone(), listeners, udps };
-            let pin = if cfg.pin_threads && !cpus.is_empty() { Some(cpus[i % cpus.len()]) } else { None };
+        for setup in setups {
+            let i = setup.index;
+            let pin = pin_of(i);
             let mut reporter = Reporter { gate: gate.clone(), index: i, done: false };
-            let mut tb = std::thread::Builder::new().name(format!("{}-{i}", cfg.thread_name));
-            if let Some(sz) = cfg.stack_size {
-                tb = tb.stack_size(sz);
-            }
-            let spawned = tb.spawn(move || {
+            let spawned = loop_thread(&cfg, i).spawn(move || {
                 if let Some(cpu) = pin {
                     let _ = simoom_sys::cpu::pin_current_thread(cpu);
                 }
@@ -502,10 +699,10 @@ impl Builder {
         }
         let mut backend = (Backend::Auto, None);
         let mut err = None;
-        let mut loops = Vec::with_capacity(n);
+        let mut loops = Vec::with_capacity(now);
         {
             let mut st = gate.lock();
-            while st.reported < n {
+            while st.reported < now {
                 st = gate.cv.wait(st).unwrap_or_else(PoisonError::into_inner);
             }
             for r in st.reports.iter_mut() {
@@ -526,27 +723,70 @@ impl Builder {
             }
             return Err(e);
         }
-        gate.release(Some(Arc::new(loops.clone())));
-        Ok(RuntimeHandle { loops, threads, shared, addrs, udp_addrs, offload, backend: backend.0, fallback: backend.1 })
+        for h in &loops {
+            shared.register(h.clone());
+        }
+        lock(&shared.threads).extend(threads);
+        gate.release(Some(Arc::new(loops)));
+        Ok(RuntimeHandle { shared, addrs, udp_addrs, offload, backend: OnceLock::from(backend), lazy: false })
+    }
+}
+
+/// Starts a loop that needs no start-up handshake (lazy start): it registers itself once its
+/// driver is built; a failure is logged.
+fn spawn_loop(cfg: &Config, setup: LoopSetup, pin: Option<usize>, shared: Arc<Shared>) -> io::Result<JoinHandle<()>> {
+    let i = setup.index;
+    loop_thread(cfg, i).spawn(move || {
+        if let Some(cpu) = pin {
+            let _ = simoom_sys::cpu::pin_current_thread(cpu);
+        }
+        let (mut core, queue) = match build(setup) {
+            Ok(x) => x,
+            Err(e) => {
+                eprintln!("simoom loop {i} failed to start: {e}");
+                if i == 0 {
+                    shared.booted((Backend::Auto, Some(format!("loop 0 failed to start: {e}"))));
+                }
+                shared.failed.fetch_add(1, Ordering::AcqRel);
+                drop(lock(&shared.boot));
+                shared.boot_cv.notify_all();
+                return;
+            }
+        };
+        if i == 0 {
+            shared.booted(core.backend());
+        }
+        shared.register(LoopHandle { index: i, queue });
+        drop(shared);
+        if let Err(e) = core.run() {
+            eprintln!("simoom loop {i} failed: {e}");
+        }
+    })
+}
+
+fn loop_thread(cfg: &Config, i: usize) -> std::thread::Builder {
+    let tb = std::thread::Builder::new().name(format!("{}-{i}", cfg.thread_name));
+    match cfg.stack_size {
+        Some(sz) => tb.stack_size(sz),
+        None => tb,
     }
 }
 
 /// A running runtime. Dropping it stops the runtime at once (no grace) and waits for its
 /// threads; call [`RuntimeHandle::stop`] and [`RuntimeHandle::join`] for a graceful stop.
 pub struct RuntimeHandle {
-    loops: Vec<LoopHandle>,
-    threads: Vec<JoinHandle<()>>,
     shared: Arc<Shared>,
     addrs: Vec<SocketAddr>,
     udp_addrs: Vec<SocketAddr>,
     offload: OffloadPool,
-    backend: Backend,
-    fallback: Option<String>,
+    /// The back end and the fallback reason; with a lazy start, filled on first ask.
+    backend: OnceLock<(Backend, Option<String>)>,
+    lazy: bool,
 }
 
 impl std::fmt::Debug for RuntimeHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RuntimeHandle").field("loops", &self.loops.len()).field("addrs", &self.addrs).field("backend", &self.backend).finish()
+        f.debug_struct("RuntimeHandle").field("loops", &self.shared.started.load(Ordering::Relaxed)).field("addrs", &self.addrs).field("lazy", &self.lazy).finish()
     }
 }
 
@@ -561,19 +801,25 @@ impl RuntimeHandle {
         &self.udp_addrs
     }
 
-    /// The loops, to run tasks on them.
-    pub fn loops(&self) -> &[LoopHandle] {
-        &self.loops
+    /// The loops that run, by index, to run tasks on them. With [`Config::lazy_loops`] that is
+    /// loop 0 until three connections were open at once, then each loop as it starts.
+    pub fn loops(&self) -> Vec<LoopHandle> {
+        self.shared.handles()
     }
 
-    /// The back end the loops use.
+    fn boot(&self) -> &(Backend, Option<String>) {
+        self.backend.get_or_init(|| self.shared.boot())
+    }
+
+    /// The back end the loops use. With [`Config::lazy_loops`] it waits until loop 0 has
+    /// built its driver (well under a millisecond after [`Builder::start`]).
     pub fn backend(&self) -> Backend {
-        self.backend
+        self.boot().0
     }
 
     /// Why the configured back end was replaced (io_uring falling back to epoll), if it was.
     pub fn fallback_reason(&self) -> Option<&str> {
-        self.fallback.as_deref()
+        self.boot().1.as_deref()
     }
 
     /// The shared offload pool.
@@ -588,10 +834,13 @@ impl RuntimeHandle {
 
     /// Starts a graceful stop: listeners close, every connection gets
     /// [`crate::Connection::on_stop`], and connections still open after `grace` are aborted.
+    /// Loops held back by [`Config::lazy_loops`] are not started any more.
     pub fn stop(&self, grace: Duration) {
         self.shared.grace_ns.store(grace.as_nanos().min(u64::MAX as u128) as u64, Ordering::Release);
         self.shared.stop.store(true, Ordering::Release);
-        for l in &self.loops {
+        // closes the sockets of loops never started
+        drop(lock(&self.shared.grow).take());
+        for l in lock(&self.shared.handles).iter() {
             l.queue.waker.wake();
         }
     }
@@ -603,8 +852,15 @@ impl RuntimeHandle {
     }
 
     fn join_threads(&mut self) {
-        for t in self.threads.drain(..) {
-            let _ = t.join();
+        // The helper that starts lazy loops adds their threads while it runs: pop until empty.
+        loop {
+            let t = lock(&self.shared.threads).pop();
+            match t {
+                Some(t) => {
+                    let _ = t.join();
+                }
+                None => break,
+            }
         }
         self.offload.shutdown(Duration::from_secs(5));
     }
@@ -612,7 +868,8 @@ impl RuntimeHandle {
 
 impl Drop for RuntimeHandle {
     fn drop(&mut self) {
-        if !self.threads.is_empty() {
+        let running = !lock(&self.shared.threads).is_empty();
+        if running {
             if !self.shared.stop.load(Ordering::Acquire) {
                 self.stop(Duration::ZERO);
             }

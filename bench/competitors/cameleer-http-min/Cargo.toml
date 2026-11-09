@@ -1,0 +1,23 @@
+[package]
+name = "cameleer-http-min"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Cameleer's thread-pool HTTP/1.1 server (cameleer-http) with a fixed 13-byte reply, plain and
+# with TLS: the like-for-like start-up and memory baseline for simoom (docs/STATUS.md,
+# "Start-up and memory against cameleer-http"). Path dependencies on the Cameleer checkout,
+# which is read, never edited.
+[dependencies]
+cameleer-http = { path = "../../../../Rust-camel/crates/cameleer-http", default-features = false }
+cameleer-tls = { path = "../../../../Rust-camel/crates/cameleer-tls" }
+
+[workspace]
+# a standalone project outside the simoom workspace, with its own Cargo.lock (CLAUDE.md rule 1 exception)
+
+# The same release settings as simoom's workspace (and Cameleer's: fat LTO, one codegen unit).
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false

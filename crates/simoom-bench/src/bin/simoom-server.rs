@@ -106,11 +106,13 @@ fn main() {
     if let (true, Some(c), Some(k)) = (tls, &cert, &key) {
         let cp = std::fs::read(c).expect("--cert");
         let kp = std::fs::read(k).expect("--key");
-        let ck = CertifiedKey::from_pem(&cp, &kp).expect("certificate and key");
-        b = b.listen_tls(tls_addr.as_str()).tls(ServerConfig::new(ck.clone()).with_alpn(&[b"h2", b"http/1.1"]));
+        // One parsed certificate and one set of ticket keys for both listeners (clones share
+        // them); the builder sets each listener's ALPN.
+        let cfg = ServerConfig::new(CertifiedKey::from_pem(&cp, &kp).expect("certificate and key"));
         if quic {
-            b = b.listen_quic(quic_addr.as_str()).quic_tls(ServerConfig::new(ck).with_alpn(&[b"h3"]));
+            b = b.listen_quic(quic_addr.as_str()).quic_tls(cfg.clone());
         }
+        b = b.listen_tls(tls_addr.as_str()).tls(cfg);
     }
     let server = b.start().expect("start");
     eprintln!(

@@ -161,6 +161,11 @@ impl<T> TimerWheel<T> {
         TimerId { idx, gen: self.nodes[idx as usize].gen }
     }
 
+    /// Whether a timer is still scheduled (not expired and popped, not cancelled).
+    pub fn is_pending(&self, id: TimerId) -> bool {
+        self.nodes.get(id.idx as usize).is_some_and(|n| n.gen == id.gen && n.payload.is_some())
+    }
+
     /// Cancels a timer and returns its payload, or `None` if it already expired or was
     /// cancelled.
     pub fn cancel(&mut self, id: TimerId) -> Option<T> {

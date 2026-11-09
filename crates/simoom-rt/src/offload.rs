@@ -102,7 +102,9 @@ struct State {
 
 struct Inner {
     cfg: OffloadConfig,
-    max_threads: usize,
+    /// `cfg.max_threads`, or twice the CPU count resolved on the first job (reading the
+    /// cgroup quota costs file reads that start-up need not pay).
+    max_threads: std::sync::OnceLock<usize>,
     state: Mutex<State>,
     cv: Condvar,
     overloaded: AtomicBool,
@@ -129,7 +131,10 @@ impl std::fmt::Debug for OffloadPool {
 impl OffloadPool {
     /// Creates a pool. No thread starts until the first job.
     pub fn new(cfg: OffloadConfig) -> OffloadPool {
-        let max_threads = if cfg.max_threads == 0 { (simoom_sys::cpu::cpu_count() * 2).max(4) } else { cfg.max_threads };
+        let max_threads = std::sync::OnceLock::new();
+        if cfg.max_threads != 0 {
+            let _ = max_threads.set(cfg.max_threads);
+        }
         OffloadPool {
             inner: Arc::new(Inner {
                 max_threads,
@@ -167,7 +172,7 @@ impl OffloadPool {
         if st.idle > 0 {
             drop(st);
             inner.cv.notify_one();
-        } else if st.threads < inner.max_threads {
+        } else if st.threads < *inner.max_threads.get_or_init(|| (simoom_sys::cpu::cpu_count() * 2).max(4)) {
             st.threads += 1;
             drop(st);
             let inner2 = self.inner.clone();

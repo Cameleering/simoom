@@ -110,6 +110,7 @@ fn main() {
         }
         reply.header("content-type", "text/plain").body(line)
     };
+    #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
     let mut b = Server::builder().listen(addr.as_str()).threads(2);
     #[cfg(feature = "tls")]
     if let Some(t) = &tls_addr {

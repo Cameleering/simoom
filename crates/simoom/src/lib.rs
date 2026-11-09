@@ -83,7 +83,7 @@ mod watchdog;
 mod ws;
 
 pub use handle::{BodySink, BodySource, Ready, Responder};
-pub use limits::Limits;
+pub use limits::{FrameBudgets, Limits};
 pub use reply::Reply;
 pub use request::{OwnedRequest, Request};
 pub use router::Router;

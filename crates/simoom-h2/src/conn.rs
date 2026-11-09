@@ -102,6 +102,10 @@ fn calm(msg: &'static str) -> R {
 }
 
 const BDP_PING: [u8; 8] = *b"simoomBD";
+/// Streams remembered as closed by the peer or normally (for the STREAM_CLOSED errors).
+const CLOSED_WINDOW: usize = 32;
+/// Peer stream ids tracked as used or skipped below the highest one (256 bytes).
+const SEEN_WINDOW: usize = 2048;
 const SHUTDOWN_PING: [u8; 8] = *b"simoomGA";
 /// At most one window-tuning PING per this many milliseconds.
 const BDP_INTERVAL_MS: u64 = 500;
@@ -166,6 +170,8 @@ pub struct Connection {
     peer_initial_window: u32,
     peer_max_frame: usize,
     peer_max_concurrent: u32,
+    /// The peer's SETTINGS_MAX_HEADER_LIST_SIZE (unlimited until it sends one).
+    peer_max_header_list: u32,
     // flow control
     send_window: i64,
     recv_window: i64,
@@ -193,10 +199,15 @@ pub struct Connection {
     bdp_bytes: u64,
     bdp_last: Option<u64>,
     meter: Meter,
-    recent_resets: [u32; 16],
-    recent_pos: usize,
-    recent_closed: [u32; 16],
+    /// The last streams that closed normally or were reset by the peer: a frame on one of them
+    /// is the peer's error (STREAM_CLOSED). Every other forgotten stream id at or below the
+    /// highest seen counts as closed by our RST_STREAM, so late frames on it are ignored (RFC
+    /// 9113 §5.4.2), however long ago that was; this window only decides which error to send.
+    recent_closed: [u32; CLOSED_WINDOW],
     closed_pos: usize,
+    /// Which of the peer's last `SEEN_WINDOW` stream ids (odd for a client) were used, so a
+    /// frame on an id that never was a stream stays a PROTOCOL_ERROR.
+    seen: [u64; SEEN_WINDOW / 64],
     blocked: Vec<u32>,
 }
 
@@ -230,6 +241,7 @@ impl Connection {
             peer_initial_window: DEFAULT_WINDOW,
             peer_max_frame: frame::MIN_FRAME_SIZE as usize,
             peer_max_concurrent: u32::MAX,
+            peer_max_header_list: u32::MAX,
             send_window: DEFAULT_WINDOW as i64,
             recv_window: cfg.connection_window_size as i64,
             conn_target: cfg.connection_window_size,
@@ -251,10 +263,9 @@ impl Connection {
             bdp_bytes: 0,
             bdp_last: None,
             meter: Meter::new(&cfg.budgets),
-            recent_resets: [0; 16],
-            recent_pos: 0,
-            recent_closed: [0; 16],
+            recent_closed: [0; CLOSED_WINDOW],
             closed_pos: 0,
+            seen: [0; SEEN_WINDOW / 64],
             blocked: Vec::new(),
             cfg,
         };
@@ -307,7 +318,7 @@ impl Connection {
         c.streams.insert(1, s);
         c.open_count = 1;
         c.handlers = 1;
-        c.last_peer_stream = 1;
+        c.mark_seen(1);
         Ok(c)
     }
 
@@ -380,7 +391,12 @@ impl Connection {
     /// True when the transport should be closed once [`Connection::output`] is flushed: after a
     /// connection error, or after a GOAWAY (sent or received) once every stream is done.
     pub fn wants_close(&self) -> bool {
-        self.phase == Phase::Closed || ((self.goaway_sent.is_some() || self.goaway_recv.is_some()) && self.streams.is_empty())
+        // A server that received GOAWAY answers with its own graceful shutdown (see
+        // `on_goaway`) and closes once that is done, not at once: frames the peer sent after
+        // its GOAWAY (a PING, say) still get answered, and the socket is not closed under
+        // bytes still arriving, which would make the kernel reset the connection.
+        let goaway_done = self.goaway_sent.is_some() || (self.goaway_recv.is_some() && self.role == Role::Client);
+        self.phase == Phase::Closed || (goaway_done && self.streams.is_empty())
     }
 
     /// The error code of the GOAWAY we closed the connection with.
@@ -540,17 +556,49 @@ impl Connection {
         }
     }
 
-    fn remember_reset(&mut self, id: u32) {
-        self.recent_resets[self.recent_pos] = id;
-        self.recent_pos = (self.recent_pos + 1) % self.recent_resets.len();
-    }
-
-    fn recently_reset(&self, id: u32) -> bool {
-        self.recent_resets.contains(&id)
-    }
-
     fn recently_closed(&self, id: u32) -> bool {
         self.recent_closed.contains(&id)
+    }
+
+    /// An untracked, non-idle stream id that did not close normally: we reset or refused it.
+    fn refused_or_reset(&self, id: u32) -> bool {
+        !self.is_idle(id) && !self.streams.contains_key(&id) && !self.recently_closed(id) && self.existed(id)
+    }
+
+    /// Whether a non-idle stream id was ever used: always for ours (we open them in order);
+    /// for the peer's, the bit in `seen` while the id is within the window below the highest
+    /// one, and yes beyond it (an old id there is treated as reset by us: ignored).
+    fn existed(&self, id: u32) -> bool {
+        let ours = (id & 1 == 1) == (self.role == Role::Client);
+        if ours || id > self.last_peer_stream {
+            return ours;
+        }
+        let back = (self.last_peer_stream - id) / 2;
+        if back as usize >= SEEN_WINDOW {
+            return true;
+        }
+        let slot = (id / 2) as usize % SEEN_WINDOW;
+        self.seen[slot / 64] & (1 << (slot % 64)) != 0
+    }
+
+    /// The peer opened (or tried to open) stream `id`, its highest so far: ids skipped since
+    /// the previous one never existed (they are implicitly closed, RFC 9113 §5.1.1).
+    fn mark_seen(&mut self, id: u32) {
+        let prev = self.last_peer_stream;
+        let gap = if prev == 0 { SEEN_WINDOW as u32 } else { (id - prev) / 2 };
+        if gap as usize >= SEEN_WINDOW {
+            self.seen = [0; SEEN_WINDOW / 64];
+        } else {
+            let mut k = prev + 2;
+            while k < id {
+                let slot = (k / 2) as usize % SEEN_WINDOW;
+                self.seen[slot / 64] &= !(1 << (slot % 64));
+                k += 2;
+            }
+        }
+        let slot = (id / 2) as usize % SEEN_WINDOW;
+        self.seen[slot / 64] |= 1 << (slot % 64);
+        self.last_peer_stream = id;
     }
 
     fn on_frame(&mut self, h: FrameHeader, p: &[u8], sink: &mut dyn FnMut(Event<'_>)) -> R {
@@ -646,8 +694,10 @@ impl Connection {
         match next {
             Next::Closed => {
                 self.release_conn(flen);
-                if !self.recently_reset(id) {
-                    // a stream that closed normally: not remembered as one we reset
+                if self.recently_closed(id) || !self.existed(id) {
+                    // a stream that closed normally (or the peer reset), or never existed: the
+                    // peer's error; any other forgotten stream was reset by us and late DATA is
+                    // ignored
                     frame::write_rst(&mut self.out, id, ErrorCode::STREAM_CLOSED);
                     if self.hit(Budget::RstSent) {
                         return calm("too many stream errors");
@@ -781,7 +831,6 @@ impl Connection {
     /// rst_sent budget.
     fn send_rst(&mut self, id: u32, code: ErrorCode, caused: bool) -> R {
         frame::write_rst(&mut self.out, id, code);
-        self.remember_reset(id);
         if caused && self.hit(Budget::RstSent) {
             return calm("too many stream errors");
         }
@@ -827,9 +876,13 @@ impl Connection {
         }
         if !s.handler {
             let credit = s.unreleased;
+            // a stream we reset is not remembered: late frames on it are ignored
+            let reset_by_us = s.reset && !s.peer_reset;
             self.streams.remove(&id);
-            self.recent_closed[self.closed_pos] = id;
-            self.closed_pos = (self.closed_pos + 1) % self.recent_closed.len();
+            if !reset_by_us {
+                self.recent_closed[self.closed_pos] = id;
+                self.closed_pos = (self.closed_pos + 1) % self.recent_closed.len();
+            }
             self.release_conn(credit);
         }
     }
@@ -973,15 +1026,17 @@ impl Connection {
             }
             None if server => {
                 if id <= self.last_peer_stream {
-                    if self.recently_reset(id) {
-                        return Ok(());
-                    }
                     if self.recently_closed(id) {
                         return Err((ErrorCode::STREAM_CLOSED, "HEADERS on a closed stream"));
                     }
+                    if self.refused_or_reset(id) {
+                        // a stream we refused or reset, however long ago: a late header block
+                        // (trailers, say) is ignored; it was decoded above for the HPACK state
+                        return Ok(());
+                    }
                     return perr("stream id lower than a previous one");
                 }
-                self.last_peer_stream = id;
+                self.mark_seen(id);
                 self.new_request(id, end, self_dep, too_large, sink)
             }
             None => {
@@ -995,7 +1050,6 @@ impl Connection {
 
     fn new_request(&mut self, id: u32, end: bool, self_dep: bool, too_large: bool, sink: &mut dyn FnMut(Event<'_>)) -> R {
         if self.goaway_sent.is_some_and(|last| id > last) {
-            self.remember_reset(id);
             return Ok(()); // after our final GOAWAY: ignored (RFC 9113 §6.8)
         }
         if self_dep {
@@ -1007,7 +1061,6 @@ impl Connection {
             if !end {
                 return self.send_rst(id, ErrorCode::NO_ERROR, true);
             }
-            self.remember_reset(id);
             if self.hit(Budget::RstSent) {
                 return calm("too many refused requests");
             }
@@ -1112,7 +1165,8 @@ impl Connection {
                     }
                     self.peer_max_frame = v as usize;
                 }
-                _ => {} // MAX_HEADER_LIST_SIZE is advisory; unknown settings are ignored
+                setting::MAX_HEADER_LIST_SIZE => self.peer_max_header_list = v,
+                _ => {} // unknown settings are ignored
             }
         }
         Ok(())
@@ -1209,6 +1263,10 @@ impl Connection {
             }
             self.update(id);
         }
+        if self.role == Role::Server {
+            // GOAWAY, then a PING round trip, then the final GOAWAY (or the graceful timeout).
+            self.shutdown(self.now);
+        }
         Ok(())
     }
 
@@ -1270,6 +1328,22 @@ impl Connection {
         }
     }
 
+    /// Refuses a header block larger than the peer's SETTINGS_MAX_HEADER_LIST_SIZE (RFC 9113
+    /// §6.5.2: names and values uncompressed, plus 32 bytes a field, pseudo-fields included),
+    /// before any state changes: the peer would refuse it (431, or a reset) anyway.
+    fn check_list_size(&self, pseudo: &[(&[u8], &[u8])], fields: &[(&[u8], &[u8])]) -> Result<(), Error> {
+        let size: u64 = pseudo.iter().chain(fields).map(|(n, v)| n.len() as u64 + v.len() as u64 + 32).sum();
+        if size > u64::from(self.peer_max_header_list) {
+            return Err(Error::HeaderListTooLarge);
+        }
+        Ok(())
+    }
+
+    /// The peer's SETTINGS_MAX_HEADER_LIST_SIZE (`u32::MAX` until it announces one).
+    pub fn peer_max_header_list_size(&self) -> u32 {
+        self.peer_max_header_list
+    }
+
     fn check_fields(fields: &[(&[u8], &[u8])]) -> Result<(), Error> {
         for (n, v) in fields {
             if !valid_name(n) || connection_specific(n) || (*n == b"te" && *v != b"trailers") || !valid_value(v) {
@@ -1302,6 +1376,8 @@ impl Connection {
         }
         Self::check_fields(fields)?;
         self.sendable(stream)?;
+        let digits = [b'0' + (status / 100) as u8, b'0' + (status / 10 % 10) as u8, b'0' + (status % 10) as u8];
+        self.check_list_size(&[(b":status", &digits)], fields)?;
         let s = self.streams.get_mut(&stream).expect("checked");
         if s.final_sent {
             return Err(Error::HeadersAlreadySent);
@@ -1312,7 +1388,6 @@ impl Connection {
         if end_stream {
             s.local_end = true;
         }
-        let digits = [b'0' + (status / 100) as u8, b'0' + (status / 10 % 10) as u8, b'0' + (status % 10) as u8];
         self.write_block(stream, end_stream, |enc, out| {
             enc.field(b":status", &digits, out);
             for (n, v) in fields {
@@ -1362,6 +1437,10 @@ impl Connection {
             return Err(Error::InvalidHeader);
         }
         Self::check_fields(fields)?;
+        // the pseudo-fields actually sent (CONNECT has no scheme or path; no empty authority)
+        let pseudo: [(&[u8], &[u8]); 4] = [(b":method", method), (b":scheme", scheme), (b":authority", authority), (b":path", path)];
+        let sent: Vec<(&[u8], &[u8])> = pseudo.into_iter().filter(|(n, v)| !(connect && (*n == b":scheme" || *n == b":path")) && !(*n == b":authority" && v.is_empty())).collect();
+        self.check_list_size(&sent, fields)?;
         let id = self.next_stream_id;
         self.next_stream_id += 2;
         let s = Stream {
@@ -1397,6 +1476,7 @@ impl Connection {
     pub fn send_trailers(&mut self, stream: u32, fields: &[(&[u8], &[u8])]) -> Result<(), Error> {
         Self::check_fields(fields)?;
         self.sendable(stream)?;
+        self.check_list_size(&[], fields)?;
         let s = self.streams.get_mut(&stream).expect("checked");
         if !s.final_sent {
             return Err(Error::HeadersNotSent);

@@ -443,14 +443,34 @@ fn s6_8_goaway() {
     let (mut srv, mut raw) = server(quiet());
     raw.raw(kind::GOAWAY, 0, 0, &[0, 0, 0, 0, 0, 0, 0]);
     conn_err(&mut srv, &raw.take(), ErrorCode::FRAME_SIZE_ERROR);
-    // a client GOAWAY with an unknown code: in-flight streams finish, then the server closes
+    // a client GOAWAY with an unknown code: in-flight streams finish, and the server closes
+    // after its own graceful shutdown (GOAWAY, PING round trip or timeout, final GOAWAY)
     let (mut srv, mut raw) = server(quiet());
     raw.get(1).raw(kind::GOAWAY, 0, 0, &[0, 0, 0, 0, 0, 0, 0x12, 0x34]);
-    let (evs, _) = feed(&mut srv, &raw.take(), 1);
+    let (evs, frames) = feed(&mut srv, &raw.take(), 1);
     assert!(evs.contains(&Ev::GoAway { last: 0, code: ErrorCode(0x1234) }));
+    assert!(frames.iter().any(|f| f.h.kind == kind::GOAWAY), "the server answers with its own GOAWAY");
     assert!(!srv.wants_close());
     srv.send_response(1, 204, &[], true).unwrap();
     srv.stream_finished(1);
+    assert!(!srv.wants_close(), "not before the graceful shutdown is done");
+    srv.handle_timeout(1 + quiet().graceful_timeout_ms, &mut |_| {});
+    assert!(srv.wants_close());
+}
+
+/// h2spec generic 3.8/1: GOAWAY then PING, possibly in separate reads. The server must still
+/// answer the PING; before, it closed as soon as the GOAWAY was read (no streams open), so a
+/// PING that arrived in the next read hit a closed socket and the peer saw a TCP reset.
+#[test]
+fn s6_8_ping_after_goaway_is_answered() {
+    let (mut srv, mut raw) = server(quiet());
+    raw.raw(kind::GOAWAY, 0, 0, &[0, 0, 0, 0, 0, 0, 0, 0]);
+    let _ = feed(&mut srv, &raw.take(), 1);
+    assert!(!srv.wants_close(), "the server does not close at once after the peer's GOAWAY");
+    raw.ping(*b"h2spec!!");
+    let (_, frames) = feed(&mut srv, &raw.take(), 2);
+    assert!(frames.iter().any(|f| f.h.kind == kind::PING && f.h.has(flag::ACK) && f.p == b"h2spec!!"), "PING answered: {frames:?}");
+    srv.handle_timeout(2 + quiet().graceful_timeout_ms, &mut |_| {});
     assert!(srv.wants_close());
 }
 

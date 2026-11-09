@@ -174,6 +174,9 @@ pub enum Error {
     WrongRole,
     /// An `HTTP2-Settings` value that is not valid base64url SETTINGS.
     InvalidUpgradeSettings,
+    /// The header block is larger than the peer's SETTINGS_MAX_HEADER_LIST_SIZE; nothing was
+    /// sent.
+    HeaderListTooLarge,
 }
 
 impl fmt::Display for Error {

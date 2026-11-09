@@ -3,7 +3,8 @@
 This page covers simoom's security model, its limits and defaults, what was tested and with
 what results, the known gaps, and how to report a vulnerability.
 
-_Last hardening pass: 2026-11-07, against head `33ee716` plus the fixes listed below._
+_Last hardening pass: 2026-11-07, against head `33ee716` plus the fixes listed below. Third-party
+suites: 2026-11-09, against head `bf24f89` plus bugs 16 to 22 below._
 
 ## Reporting a vulnerability
 
@@ -89,10 +90,14 @@ checks the defaults.
 | `header_table_size` (HPACK, QPACK) | 4096 | COMPRESSION_ERROR |
 | `stream_buffer` | 64 KiB of streamed response output pending | writers wait (`WouldBlock`) |
 | `max_ws_message` | 1 MiB | close 1009 |
-| `inline_budget` / `stalls_before_offload` | 1 ms / 3 | handler moves to the offload pool |
+| `inline_budget` | 1 ms; a call over it on the wall clock makes its route suspect, and the route's next calls are timed with the thread's CPU clock: a stall is a call over the budget in CPU time, or one that blocked | stall counted, logged once per route |
+| `stalls_before_offload` / `stall_window` | 5 stalls within 1 s | the route (alone) moves to the offload pool |
+| `stall_recovery` | 64 consecutive fast calls on the pool (twice as many after each further move) | the route comes back inline |
+| `shed_lag` | off; measured 2026-11-09: 1 ms shed falsely at 50% load and no value from 0.5 to 5 ms improved goodput or p99 under 120-150% overload, so it stays opt-in | fast `503` with `retry-after` for new requests and streams |
+| `h2_frame_budgets` (HTTP/2) | the budgets below (`simoom::FrameBudgets`) | GOAWAY(ENHANCE_YOUR_CALM) |
 | `offload_queue` | 4096 jobs (CoDel 5 ms / 100 ms) | 503 |
 
-HTTP/2 frame budgets (`simoom_h2::Budgets`, per 10 s sliding window per connection; GOAWAY
+HTTP/2 frame budgets (`Limits::h2_frame_budgets`, per 10 s sliding window per connection; GOAWAY
 ENHANCE_YOUR_CALM beyond them):
 
 - RST_STREAM received 200 and caused 200 (Rapid Reset, MadeYouReset);
@@ -103,7 +108,7 @@ ENHANCE_YOUR_CALM beyond them):
 - WINDOW_UPDATE frames under 1 KiB;
 - at most `max_continuation_frames` CONTINUATION frames per block.
 
-These budgets aren't exposed through `Limits` yet (see the gaps).
+Each is configurable (`u32::MAX` turns one off).
 
 TLS: TLS 1.3 only. Groups X25519 and P-256. Suites AES-128-GCM, AES-256-GCM and
 ChaCha20-Poly1305. More than 32 records in a row that carry no application data (empty
@@ -190,6 +195,158 @@ edges** (the remainder is mostly response parsing, WebSocket and the serializer,
 driver doesn't exercise). No split-invariance or differential failure, no panic. Coverage
 plateaus after about 5 minutes, so longer runs need new targets more than more time.
 
+## Third-party suites (2026-11-09)
+
+Approved by the owner on 2026-11-08 ("Yes, allow them"). Every suite ran in WSL2 (Ubuntu 24.04)
+or in Docker (Docker Desktop 29.9.2 through the WSL integration), from scratch directories
+under `~/simoom-sec-tools/` outside the repository, at pinned versions. None is a dependency of
+any simoom crate. The simoom servers were built from the working tree in pinned images:
+`rust:1.99.1-slim-trixie@sha256:7eab7ce1…3cd5` for the build, `debian:trixie-slim@sha256:a72b4433…b6b2`
+(HTTP Garden) and the runner's endpoint image (QUIC) for the run.
+
+| suite | version | target | result |
+|---|---|---|---|
+| h2spec | 2.6.0 (release tarball, sha256 `157ee0de…9318`) | `conformance_server`, h2c on the shared HTTP/1.1 + h2c port | **146/146 in 30 consecutive runs** on the final tree (was 145/146: §3.5/2, fixed as bug 16; then generic §3.8/1 flaked about 1 run in 5, fixed as bug 22; §3.8/1 alone then passed 50/50). TLS mode can't run: h2spec offers only TLS 1.2 and simoom is TLS 1.3-only |
+| testssl.sh | v3.2.1 (commit `b6a951d4`) | `conformance_server --tls-addr` | TLS 1.3 only, no vulnerabilities found. Notes only: the certificate is from a private test CA, and it has no CRL or OCSP URI |
+| HTTP Garden | commit `b417e806c1b15e8ea0b9312f81a91fbdcbc7a83e` | `conformance_server --garden` as an origin, next to nginx, apache_httpd, h2o, hyper, gunicorn and go_stdlib; transducers haproxy, nginx_proxy, apache_httpd_proxy, h2o_proxy | **0 desyncs, 0 dangerous discrepancies**: see below |
+| QUIC Interop Runner | commit `19016767e70789d70416442a1118ad82b5b5fc2e` | `interop_server` (server role) against the ngtcp2, quiche and quic-go clients | see the matrix below; engine bugs found and fixed: 17, 18, 20 and 21, and compatible version negotiation added (19) |
+
+### h2spec
+
+h2spec §3.5/2 sends `INVALID CONNECTION PREFACE\r\n\r\n` and expects a connection close
+(GOAWAY allowed). On the shared HTTP/1.1 + h2c port simoom read it as an HTTP/1 request and
+answered `400`, which h2spec reads as a malformed frame. Now (bug 16), on an h2c-enabled
+listener, the first bytes of a connection go to the HTTP/2 codec, which answers SETTINGS and
+GOAWAY(PROTOCOL_ERROR) and closes (RFC 9113 §3.4), when either:
+
+- they start with the preface's request line `PRI * HTTP/2.0` but the rest of the preface is
+  wrong; or
+- the first request line fails with an invalid version and its last word has no `HT` prefix and
+  no `/`: nothing in it is HTTP/1 in any form.
+
+HTTP/1 clients with a damaged version (`HTTP/1.x`, `HT?P/1.1`, `XTTP/1.1`, HTTP/0.9's `GET /`)
+still get a 400, and later requests on a connection are never treated as a preface. The HTTP
+Garden's mutator found the first, too broad version of the rule (any line without `HTTP/`), which
+answered `HT\xbcP/1.1` with GOAWAY, and the narrower rule replaced it.
+
+Repeated runs then showed generic §3.8/1 ("Sends a GOAWAY frame", GOAWAY then PING) failing
+with "connection reset by peer" in about 1 run in 5: the server closed as soon as it read the
+peer's GOAWAY, and when the PING came in a later read it hit a closed socket. Fixed as bug 22
+(the server answers a GOAWAY with its own graceful shutdown); results after it are in the
+matrix section below.
+
+### HTTP Garden
+
+simoom joined the Garden as an origin (`conformance_server --garden` answers with the Garden's
+echo format: base64 JSON of the method, version, target, headers and body; image
+`images/simoom/Dockerfile` in the Garden checkout). Its probed quirk is `allows-http-2: true`.
+The Garden removed its fuzzing driver upstream (commit `5e260b6`), so a small driver
+(`tools/simoom_fuzz.py`, adapted from the removed `fuzz.py`) runs the Garden's own mutator
+(`mutations.py`) and classifier (`diff.categorize_discrepancy`), fans every mutated stream out to
+all origins, and replays every kept result through each transducer.
+
+- **Differential fuzzing:** two complete runs of 40 minutes (seed 2: 16,354 mutated streams, 42
+  kept results; seed 3: 14,993 streams, 53 results), after a shorter first run that a WSL
+  restart cut off (13 results). Every kept result was then replayed 3 times through each
+  transducer, comparing the proxy's own view of what it forwarded with simoom's reading
+  (`tools/simoom_recheck.py`): **709 forwarded streams (321 and 388), 0 flagged**. Results that involve simoom, triaged
+  by hand:
+  - **simoom stricter** (simoom refuses or closes, another origin accepts): bare LF in the head
+    or in chunked framing, whitespace or a high byte in `Host`, `Host` with a bad port, a
+    duplicate `Transfer-Encoding: chunked`, `Content-Length` with `Transfer-Encoding`, a non-ASCII
+    byte in the target, `Connection: close` plus `keep-alive` with a body and no length. Benign:
+    simoom answers 400 and closes, so a proxy's next request goes on a new connection.
+  - **simoom accepts with the same boundaries but a different header set** (13 in run 2, 20 in
+    run 3): apache,
+    gunicorn and nginx drop or rewrite headers with `_` or odd names (CGI environments), nginx adds
+    empty `content-length`/`content-type`, apache's CGI echo loses chunked bodies split across
+    reads. Every one of these is a difference between the other origins and simoom's reading,
+    which matches the majority. Benign.
+  - **Stream discrepancies after a transducer** (run 3: a payload split into pieces, sent
+    through apache_httpd_proxy or nginx_proxy): another origin returned nothing within the
+    Garden's 50 ms origin timeout while simoom answered, or the proxy forwarded nothing on a
+    retry. None reproduced in the replay above. Timing, benign.
+  - **Garbage first lines** (`os t: whatever`) get GOAWAY instead of 400 because of bug 16; the
+    Garden counts that as no response, which it treats as agreeing with a rejection. Benign.
+  - **No result where simoom read a different number of requests, a different body, or a
+    different method or target than a proxy forwarded.**
+- **Curated smuggling vectors** (`tools/simoom_curated.py`, 39 streams: CL.TE, TE.CL, TE
+  obfuscations, duplicate or listed `Content-Length`, chunk-size overflow and `0x`, chunk
+  extensions with LF or quoted CRLF, trailers that smuggle `Content-Length`, bare CR and LF, NUL,
+  HTTP/1.0 with TE, `GET` with a body, `Expect`, `CONNECT`, `Upgrade: h2c` with a body,
+  absolute-form, pipelining). Each was sent through haproxy, nginx_proxy, apache_httpd_proxy and
+  h2o_proxy, and the proxy's own view of what it forwarded was compared with simoom's reading of
+  the forwarded bytes: **0 of 156 proxy paths flagged**. simoom refused 28 of the 39 directly.
+
+### QUIC Interop Runner
+
+`crates/simoom/examples/interop_server.rs` follows the runner's endpoint contract: `TESTCASE`
+selects the case (unknown cases exit 127), files come from `/www`, the key and chain from
+`/certs/priv.key` and `/certs/cert.pem`, port 443 on `[::]` (IPv4 and IPv6). `http3` goes through
+the `simoom` facade (`Server::listen_quic`, the production HTTP/3 path); every other case speaks
+`hq-interop` over a `simoom_quic::Endpoint` on a std UDP socket. The image builds it on the
+runner's endpoint image (`martenseemann/quic-network-simulator-endpoint@sha256:3b2b9e6f…71a`).
+Clients, pinned by digest: ngtcp2 `ghcr.io/ngtcp2/ngtcp2-interop@sha256:4333a236…37e0`, quiche
+`cloudflare/quiche-qns@sha256:d8480e44…3f63df`, quic-go
+`martenseemann/quic-go-interop@sha256:fc8fc56c…4ea4e`; simulator
+`martenseemann/quic-network-simulator@sha256:c23d82a5…b6c9`. The runner itself ran in a
+container with Python 3.12.12 and tshark 4.6.9, one runner call per case, a case retried only
+when tshark crashed.
+
+Final full run (on the final tree, after bugs 17 to 21; ✓ passed, ✕ failed, – the client doesn't support the case
+or the server exits 127):
+
+| case | ngtcp2 | quiche | quic-go |
+|---|---|---|---|
+| handshake | ✓ | ✓ | ✓ |
+| transfer | ✓ | ✓ | ✓ |
+| longrtt | ✓ | ✓ | ✓ |
+| chacha20 | ✓ | – | ✓ |
+| multiplexing | ✓ | ✓ | ✓ |
+| retry | ✓ | ✓ | ✓ |
+| resumption | ✓ | ✓ | ✓ |
+| zerortt | ✕ (0-RTT refused by design) | ✕ (same) | ✕ (same) |
+| http3 | ✓ | ✓ | ✓ |
+| blackhole | ✓ | ✓ | ✓ |
+| keyupdate | ✓ | – | ✓ |
+| ecn | ✕ (no ECN) | – | – |
+| amplificationlimit | ✓ | ✓ | ✓ |
+| handshakeloss | ✓ | ✓ | ✓ |
+| transferloss | ✓ | ✓ | ✓ |
+| handshakecorruption | ✓ | ✓ | ✓ |
+| transfercorruption | ✓ | ✓ | ✓ |
+| ipv6 | ✓ | ✓ | ✓ |
+| v2 | ✓ | – | – |
+| rebind-port | ✓ | ✓ | ✓ |
+| rebind-addr | ✓ | ✓ | ✓ |
+| connectionmigration | – (no preferred address) | – | – |
+
+**Totals:** 54 of the 58 supported pairs pass. The 4 failures are `zerortt` against every client
+(0-RTT is refused by design, so the client's 0-RTT data is never accepted) and `ecn` against
+ngtcp2 (not implemented). The runner crashed in tshark on a few cases (it reads its pcaps
+through pyshark); those were run again and passed.
+
+How it got there (earlier full runs on the same day):
+
+- The first run had `blackhole` failing (bug 17: the send buffer stuck after a blackout),
+  `rebind-port` and `rebind-addr` failing against quic-go (bug 18: no PATH_CHALLENGE in the first
+  packet on the new path) and `v2` failing against ngtcp2 (bug 19).
+- quiche `multiplexing` failed with "Too many open files" in the quiche client: it keeps one
+  file open per request and Docker Desktop's default soft limit is 1024 descriptors. An
+  environment limit, not a simoom bug: the runner's compose file now gives the endpoints a
+  `nofile` limit of 65536, and it passes 3 out of 3.
+- `handshakeloss` and `handshakecorruption` failed now and then (quic-go: "handshake did not
+  complete in time"; quiche: one of the 50 connections timed out). The traces showed the server
+  resending a lost flight only on its own PTO, which heavy handshake loss had stretched to
+  seconds. Bug 20 resends it as soon as the client's ClientHello comes again.
+- `blackhole` against quic-go once ran past the runner's time limit before bug 20 and the final
+  image; it passes in the final run and in the reruns below.
+
+Reruns of the cases that had been intermittent, on the final image, 3 times each: quic-go
+`handshakeloss` 3/3, quic-go `handshakecorruption` 3/3, quic-go `blackhole` 3/3, quiche
+`handshakeloss` 3/3; quiche `multiplexing` 3/3 with the raised descriptor limit; ngtcp2
+`handshakeloss` 3/3 (on the image before bug 21).
+
 ## Bugs found and fixed in this pass
 
 | # | area | bug | fix | regression test |
@@ -209,6 +366,13 @@ plateaus after about 5 minutes, so longer runs need new targets more than more t
 | 13 | TLS | No bound on records that deliver nothing (empty records, warning alerts, KeyUpdate floods) | `tls/conn.rs` `idle_record` (32 in a row) | `empty_record_flood_is_bounded`, `warning_alert_flood_is_bounded`, `key_update_flood_is_bounded` |
 | 14 | TLS | The client ignored the downgrade sentinels (it refused with `protocol_version` rather than `illegal_parameter`) | `tls/client.rs` | `client_rejects_the_downgrade_sentinels` |
 | 15 | fuzz harness | `simd_and_scalar_agree_on_fuzz_inputs` collected every input, so a long run aborted out of memory | `simoom-http1/tests/fuzz.rs`: compare in batches | (the harness itself) |
+| 16 | HTTP/2 | An invalid connection preface on the shared HTTP/1.1 + h2c port got an HTTP/1 `400` instead of GOAWAY(PROTOCOL_ERROR) and a close (RFC 9113 §3.4; h2spec §3.5/2) | `crates/simoom-http1/src/h2c.rs` `Preface::Invalid`; `crates/simoom/src/h1.rs` (first request only, `looks_like_http`) | `simoom/tests/http2.rs` `invalid_preface_gets_goaway_protocol_error_and_close`; `simoom-http1/tests/response.rs` `h2_preface_detection` |
+| 17 | QUIC | A stalled transfer after packet loss: an acknowledgement of bytes already released (the original packet and its retransmission both acknowledged) was recorded below the send buffer's base, stayed first in the acknowledged set forever, and blocked every later release, so the 1 MiB send buffer stayed full and the stream never sent again (found by the interop runner's `blackhole` case) | `crates/simoom-quic/src/stream.rs` `on_stream_acked`: record only the part above `base` | `simoom-quic/tests/transport.rs` `transfer_survives_repeated_blackouts`; `stream::tests::send_side_credit_and_limits` |
+| 18 | QUIC | After a NAT rebinding the PATH_CHALLENGE waited for congestion window: the bytes in flight on the old path filled the reset window, so the first packet on the new path was ACK-only (interop `rebind-port`, `rebind-addr`) | `crates/simoom-quic/src/connection.rs`: the challenge is written first and is not held back by congestion control | `connection::tests::first_packet_on_a_new_path_carries_the_challenge_when_cwnd_is_full` |
+| 19 | QUIC | No compatible version negotiation (RFC 9368): a client that started in v1 and offered v2 stayed in v1 (interop `v2`) | `crates/simoom-quic/src/vn.rs` (new), `params.rs` (`version_information`), `connection.rs`: a server with more than one version starts TLS after the whole ClientHello, picks its preferred version from the client's list and switches its Initial keys; a client follows a server Initial in another compatible version | `simoom-quic/tests/tls.rs` `compatible_version_negotiation_v1_to_v2` (with Retry and with loss); `vn::tests`; `params::tests` |
+| 20 | QUIC | Under heavy handshake loss the server waited for its own PTO, backed off to seconds by RTT samples it can't correct in the handshake spaces, before resending a lost flight; clients gave up (interop `handshakeloss`, `handshakecorruption`, intermittent) | `connection.rs` `on_crypto`, `resend_handshake_flight`: a repeated ClientHello means the client's PTO fired, so the server queues its unacknowledged Initial and Handshake data again at once (still under the anti-amplification limit and congestion control) | `connection::tests::duplicate_client_hello_resends_the_server_flight` |
+| 21 | QUIC | The cap on out-of-order STREAM fragments (1024) applied per stream, so a peer could hold streams × 1024 fragments per connection | `crates/simoom-quic/src/stream.rs`: `recv_gaps` counts holes over all streams; a reset or stopped stream gives its holes back | `stream::tests::out_of_order_gap_cap_is_per_connection`, `too_many_out_of_order_gaps_is_an_error` |
+| 22 | HTTP/2 | After the peer's GOAWAY with no streams open the server closed at once, so a frame the peer sent after its GOAWAY (h2spec generic 3.8/1 sends a PING) hit a closed socket and the peer saw a TCP reset instead of the PING ACK (h2spec flaked about 1 run in 5) | `crates/simoom-h2/src/conn.rs`: a server answers the peer's GOAWAY with its own graceful shutdown (GOAWAY, PING round trip or timeout, final GOAWAY) and closes after it | `simoom-h2/tests/conformance.rs` `s6_8_ping_after_goaway_is_answered`, `s6_8_goaway` |
 
 Smuggling divergences reviewed and judged benign:
 
@@ -227,24 +391,25 @@ Smuggling divergences reviewed and judged benign:
 
 ## Known gaps
 
-- **Third-party suites weren't run.** These are HTTP Garden, h2spec, the QUIC Interop Runner
-  and testssl.sh. They need code from GitHub or container images. The owner approved them during
-  this pass, but the agent permission system blocked running external code, so they are still
-  open. Run them in WSL or Docker from a pinned release, outside the repository. The hand-written
-  runners here (the h2spec list, the desync harness, the TLS and QUIC adversarial tests) are a
-  substitute, not an equivalent.
+- **QUIC:** no ECN (packets are not marked ECT and ACK frames carry no ECN counts: interop
+  `ecn` fails), no preferred address and so no server-side active migration (`connectionmigration`
+  unsupported), and 0-RTT is refused by design (`zerortt` fails). Handshake-space RTT samples
+  can't be corrected by the peer's ACK delay (RFC 9002 §5.3), so heavy handshake loss inflates
+  the RTT estimate and the PTO; bug 20 resends the flight when the client's ClientHello comes
+  again, but a lost server flight with a client that probes only with PING still waits for the
+  server's PTO.
 - No external audit yet (plan §7.5). No Miri, ASan or TSan runs were part of this pass.
-- HTTP/3 was tested only with simoom's own QUIC client and simulator. No curl/ngtcp2, quiche or
-  quic-go client has been run against it.
+- HTTP/2 over TLS has not been run through h2spec (h2spec offers only TLS 1.2); the in-repo
+  h2spec list (`h2_live.rs`) covers it.
+- HTTP Garden ran only its HTTP/1.1 paths against simoom; its HTTP/2 fan-out (`h2fanout`) was not
+  run.
 - TLS groups are X25519 and P-256 only (no P-384, no ML-KEM hybrid), and there is no TLS 1.2.
   Clients that offer only those get `handshake_failure`, by design.
-- The HTTP/2 frame budgets are fixed defaults and aren't configurable through `Limits`.
-- The QUIC out-of-order gap cap applies per stream, so the worst case per connection is
-  streams × 1024 chunks. Compatible version negotiation (RFC 9368) isn't implemented.
+- Compatible version negotiation (RFC 9368) covers v1 and v2 only. After a switch to v2 the
+  server keeps processing the client's v1 Initial packets until the Initial keys are discarded
+  (fixed 2026-11-09, BUGS.md item 21).
 - The coverage-guided fuzzer runs on Linux only, covers only the HTTP/1 target, and has no corpus
   minimisation.
-- The `h2c` upgrade path (`Upgrade: h2c`) passes an absolute-form target through unchanged.
-  simoom only serves it, and the upgraded stream has the `:authority` from `Host`.
 
 ## Reproducing
 
@@ -264,4 +429,16 @@ python3 scripts/desync/desync.py --server target/release/examples/conformance_se
 
 # long fuzzing, per harness
 SIMOOM_FUZZ_ITERS=20000000 SIMOOM_FUZZ_SEED=7 cargo test --release -p simoom-h2 --test fuzz
+
+# third-party suites (WSL, outside the repository; versions in the table above)
+h2spec -h 127.0.0.1 -p 18080 -o 3                    # against conformance_server --addr
+conformance_server --garden --addr 0.0.0.0:80        # the HTTP Garden origin (in its Docker image)
+TESTCASE=transfer interop_server --addr [::]:443 --www /www --certs /certs   # QUIC Interop Runner endpoint
+python3 run.py -s simoom -c ngtcp2,quiche,quic-go    # in the runner checkout, simoom added to implementations_quic.json
 ```
+
+Notes for the QUIC Interop Runner on Docker 28 or later: the runner's two bridge networks need
+`com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected` (and `_ipv6`), otherwise Docker's
+direct-routing protection (raw-table `PREROUTING` drops) discards the bridged frames between the
+client and the simulator and every test fails, the runner's reference pairs included. The runner
+needs Python 3.12 (pyshark fails on 3.14) and tshark 4.5 or later.

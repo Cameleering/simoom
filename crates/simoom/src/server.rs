@@ -32,6 +32,7 @@ pub(crate) struct Counters {
     pub(crate) upgrades: AtomicU64,
     pub(crate) h2_connections: AtomicU64,
     pub(crate) h3_connections: AtomicU64,
+    pub(crate) quic_endpoints: AtomicU64,
     pub(crate) tls_errors: AtomicU64,
 }
 
@@ -262,6 +263,9 @@ pub struct Stats {
     pub h2_connections: u64,
     /// HTTP/3 connections.
     pub h3_connections: u64,
+    /// QUIC endpoints built: one per loop, on that loop's first HTTP/3 datagram (a loop that
+    /// never sees HTTP/3 traffic builds none).
+    pub quic_endpoints: u64,
     /// Failed TLS handshakes.
     pub tls_errors: u64,
     /// The offload pool.
@@ -503,6 +507,7 @@ impl Builder {
             max_concurrent_streams: limits.max_concurrent_streams,
             max_header_list_size: limits.max_header_list,
             header_table_size: limits.header_table_size,
+            budgets: limits.h2_frame_budgets.h2(),
             ..simoom_h2::Config::default()
         };
         let slots_active = Arc::new(AtomicU32::new(0));
@@ -535,6 +540,10 @@ impl Builder {
             c.max_connections_per_loop = lim.max_connections_per_loop;
             c.max_input = (lim.max_head * 2 + 16 * 1024).max(64 * 1024);
             c.thread_name = "simoom".into();
+            // One loop until three connections are open at once: an idle server, or one that
+            // serves a connection at a time (FaaS), costs one loop thread in start-up time and
+            // memory. Servers with HTTP/3 start every loop (see simoom_rt::Config::lazy_loops).
+            c.lazy_loops = true;
             c.offload = OffloadConfig {
                 max_threads: lim.offload_threads,
                 max_queue: lim.offload_queue,
@@ -654,6 +663,7 @@ impl ServerHandle {
             s.upgrades += c.upgrades.load(r);
             s.h2_connections += c.h2_connections.load(r);
             s.h3_connections += c.h3_connections.load(r);
+            s.quic_endpoints += c.quic_endpoints.load(r);
             s.tls_errors += c.tls_errors.load(r);
         }
         s.runtime = rt;

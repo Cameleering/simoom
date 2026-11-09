@@ -587,3 +587,115 @@ fn listen_on_an_existing_listener() {
         assert_eq!(&g, b"abc");
     }
 }
+
+fn ping(c: &mut TcpStream) {
+    c.write_all(b"x").unwrap();
+    let mut g = [0u8; 1];
+    c.read_exact(&mut g).unwrap();
+}
+
+// Lazy loops: one loop until three connections are open at once; connections accepted while the
+// others start are spread over every loop; a stop before any traffic is prompt.
+#[test]
+fn lazy_loops_start_on_concurrency_and_spread_the_burst() {
+    for b in backends() {
+        let rt = builder(b, 4).configure(|c| c.lazy_loops = true).listen("127.0.0.1:0", echo()).start().unwrap();
+        assert_eq!(rt.backend(), b);
+        let addr = rt.local_addrs()[0];
+        assert!(wait_until(5, || rt.loops().len() == 1));
+        // one connection at a time: still one loop
+        for _ in 0..3 {
+            let mut c = TcpStream::connect(addr).unwrap();
+            ping(&mut c);
+            drop(c);
+            assert!(wait_until(5, || rt.stats().active == 0));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(rt.loops().len(), 1, "{b:?}: sequential connections started loops");
+        // several at once: every loop starts; a burst opened meanwhile reaches every loop
+        let mut a = TcpStream::connect(addr).unwrap();
+        ping(&mut a);
+        let mut burst: Vec<TcpStream> = (0..64).map(|_| TcpStream::connect(addr).unwrap()).collect();
+        for c in burst.iter_mut() {
+            ping(c);
+        }
+        assert!(wait_until(5, || rt.loops().len() == 4), "{b:?}: {} loops", rt.loops().len());
+        let per_loop: Vec<u64> = rt.stats().loops.iter().map(|l| l.accepted).collect();
+        assert!(per_loop.iter().all(|&n| n > 0), "{b:?}: connections per loop {per_loop:?}");
+        drop(burst);
+        rt.stop(Duration::from_secs(5));
+        rt.join();
+
+        let idle = builder(b, 4).configure(|c| c.lazy_loops = true).listen("127.0.0.1:0", echo()).start().unwrap();
+        let t0 = Instant::now();
+        idle.stop(Duration::from_secs(5));
+        idle.join();
+        assert!(t0.elapsed() < Duration::from_secs(2), "{b:?}: stop of an idle lazy runtime took {:?}", t0.elapsed());
+    }
+}
+
+// Bug 11: a closed connection's timers leave the wheel at once instead of waiting to fire.
+#[test]
+fn closed_connections_cancel_their_timers() {
+    struct Sleepy;
+    impl Connection for Sleepy {
+        fn on_open(&mut self, cx: &mut Ctx<'_>) {
+            for t in 0..6 {
+                cx.set_timer(Duration::from_secs(3600), t);
+            }
+        }
+        fn on_data(&mut self, cx: &mut Ctx<'_>, data: &[u8]) -> usize {
+            cx.send_static(b"k");
+            data.len()
+        }
+    }
+    for b in backends() {
+        let rt = builder(b, 1).listen("127.0.0.1:0", |_: &ConnInfo| Some(Box::new(Sleepy) as Box<dyn Connection>)).start().unwrap();
+        let addr = rt.local_addrs()[0];
+        let mut cs: Vec<TcpStream> = (0..10).map(|_| TcpStream::connect(addr).unwrap()).collect();
+        for c in cs.iter_mut() {
+            ping(c);
+        }
+        assert!(wait_until(5, || rt.stats().total().timers == 60), "{b:?}: {}", rt.stats().total().timers);
+        drop(cs);
+        assert!(wait_until(5, || rt.stats().active == 0));
+        assert!(wait_until(5, || rt.stats().total().timers == 0), "{b:?}: {} timers left", rt.stats().total().timers);
+    }
+}
+
+// Bug 20: a graceful close lingers: the client that sends more after its request still reads
+// the whole response (no reset from closing over unread input), on every back end.
+#[test]
+fn lingering_close_delivers_the_last_response() {
+    const RESP: usize = 300_000;
+    struct CloseAfterReply;
+    impl Connection for CloseAfterReply {
+        fn on_data(&mut self, cx: &mut Ctx<'_>, data: &[u8]) -> usize {
+            if data.windows(4).any(|w| w == b"END\n") {
+                let mut out = cx.buffer(RESP);
+                out.resize(RESP, b'r');
+                cx.send(out);
+                cx.close();
+            }
+            data.len()
+        }
+    }
+    for b in backends() {
+        let rt = builder(b, 1).listen("127.0.0.1:0", |_: &ConnInfo| Some(Box::new(CloseAfterReply) as Box<dyn Connection>)).start().unwrap();
+        let addr = rt.local_addrs()[0];
+        for _ in 0..5 {
+            let mut c = TcpStream::connect(addr).unwrap();
+            c.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            c.write_all(b"request END\n").unwrap();
+            // more bytes the server will never read, arriving after it decided to close
+            std::thread::sleep(Duration::from_millis(20));
+            let _ = c.write_all(&[b'x'; 64 * 1024]);
+            let mut got = Vec::new();
+            let r = c.read_to_end(&mut got);
+            assert!(r.is_ok(), "{b:?}: {r:?} after {} bytes", got.len());
+            assert_eq!(got.len(), RESP, "{b:?}");
+        }
+        // the lingering connections close once the clients close (or the linger time passes)
+        assert!(wait_until(5, || rt.stats().active == 0), "{b:?}");
+    }
+}

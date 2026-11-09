@@ -69,3 +69,40 @@ fn idle_connections_hold_less_than_a_kilobyte() {
         assert!(per_used <= 1024.0, "{b:?}: {per_used} B per used idle connection");
     }
 }
+
+/// Consumes only whole lines, like an HTTP head parser waiting for the rest of a head.
+struct Lines;
+impl Connection for Lines {
+    fn on_data(&mut self, _cx: &mut Ctx<'_>, data: &[u8]) -> usize {
+        data.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1)
+    }
+}
+
+// Bug 17: an idle half-request (a slowloris client) holds its few bytes, not a receive buffer.
+#[test]
+fn partial_input_does_not_hold_a_receive_buffer() {
+    const N: usize = 1000;
+    for b in backends() {
+        let rt = builder(b, 1).listen("127.0.0.1:0", |_: &ConnInfo| Some(Box::new(Lines) as Box<dyn Connection>)).start().unwrap();
+        let addr = rt.local_addrs()[0];
+        {
+            let mut c = TcpStream::connect(addr).unwrap();
+            c.write_all(b"warm up\n").unwrap();
+        }
+        assert!(wait_until(5, || rt.stats().total().accepted >= 1 && rt.stats().active == 0));
+        let before = loop_bytes(&rt);
+        let mut clients = Vec::with_capacity(N);
+        for _ in 0..N {
+            let mut c = TcpStream::connect(addr).unwrap();
+            c.write_all(b"GET / HTTP/1.1\r\nHost: t\r\nX-Slow: ").unwrap();
+            clients.push(c);
+        }
+        assert!(wait_until(20, || rt.stats().active == N), "{b:?}: {}", rt.stats().active);
+        std::thread::sleep(Duration::from_millis(100));
+        let held = loop_bytes(&rt);
+        let per = (held - before) as f64 / N as f64;
+        eprintln!("{b:?}: {per:.0} B per connection holding a 37-byte partial head");
+        assert!(per <= 1024.0, "{b:?}: {per} B per half-request (a receive buffer is 2048)");
+        drop(clients);
+    }
+}

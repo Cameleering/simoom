@@ -310,6 +310,8 @@ struct SrcState {
     loop_paused: bool,
     /// The [`BodySource`] was dropped: the connection discards the rest.
     abandoned: bool,
+    /// Trailer fields, set with the end of the body.
+    trailers: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 /// State shared between a [`BodySource`] and its connection.
@@ -368,9 +370,16 @@ impl SrcShared {
         }
     }
 
+    #[cfg(feature = "http2")]
     pub(crate) fn finish(&self) {
+        self.finish_with(Vec::new());
+    }
+
+    /// The end of the body, with its trailer fields.
+    pub(crate) fn finish_with(&self, trailers: Vec<(Vec<u8>, Vec<u8>)>) {
         let mut st = self.st.lock().unwrap();
         st.done = true;
+        st.trailers = trailers;
         self.wake(st);
     }
 
@@ -455,6 +464,18 @@ impl BodySource {
     /// True once the whole body was received (it may still be buffered here).
     pub fn is_complete(&self) -> bool {
         self.shared.st.lock().unwrap().done
+    }
+
+    /// The request's trailer fields (see [`crate::Request::trailers`]), once the whole body was
+    /// received ([`BodySource::is_complete`]; reading to the end guarantees it); empty before,
+    /// and when the request has none.
+    pub fn trailers(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let st = self.shared.st.lock().unwrap();
+        if st.done {
+            st.trailers.clone()
+        } else {
+            Vec::new()
+        }
     }
 }
 

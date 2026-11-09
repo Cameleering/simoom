@@ -40,6 +40,12 @@ pub fn allowed_cpus() -> Vec<usize> {
 /// a cgroup v2 CPU quota (`cpu.max`, as containers set it), like
 /// `std::thread::available_parallelism` but without its cgroup v1 code.
 pub fn cpu_count() -> usize {
+    // The affinity mask and the cgroup quota (a few file reads) are read once per process.
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(cpu_count_now)
+}
+
+fn cpu_count_now() -> usize {
     #[cfg(any(target_os = "linux", windows))]
     {
         let n = allowed_cpus().len().max(1);

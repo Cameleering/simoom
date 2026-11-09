@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use simoom::{blocking, Limits, Outcome, Reply, Request, Response};
+use simoom::{blocking, Limits, Outcome, OwnedRequest, Reply, Request, Response};
 use simoom_h2::{Config, Connection, Event};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -370,4 +370,116 @@ fn invalid_preface_gets_goaway_protocol_error_and_close() {
     assert!(out.starts_with(b"HTTP/1.1 200"), "{:?}", String::from_utf8_lossy(&out));
     assert!(out.windows(12).any(|w| w == b"HTTP/1.1 400"), "{:?}", String::from_utf8_lossy(&out));
     h.stop(Duration::from_secs(1));
+}
+
+// ---------------------------------------------------------------- 2026-11-09 bug sweep
+
+/// Echoes the body length and the trailers, from a buffered or a streamed body (bug 14).
+fn trailer_echo(mut req: OwnedRequest) -> Response {
+    // on the offload pool (blocking): a streamed body is read with blocking reads
+    let (len, trailers) = match req.take_body() {
+        Some(mut src) => {
+            let mut v = Vec::new();
+            src.read_to_end(&mut v).unwrap();
+            (v.len(), src.trailers())
+        }
+        None => (req.body().len(), req.trailers().map(|(n, v)| (n.to_vec(), v.to_vec())).collect()),
+    };
+    let t: Vec<String> = trailers.iter().map(|(n, v)| format!("{}={}", String::from_utf8_lossy(n), String::from_utf8_lossy(v))).collect();
+    Response::text(format!("{len} {}", t.join(",")))
+}
+
+fn post_with_trailers(c: &mut H2Client, body: &[u8], trailers: &[(&[u8], &[u8])]) -> u32 {
+    let id = c.conn.send_request(b"POST", b"http", b"t", b"/t", &[], false).unwrap();
+    let mut sent = 0;
+    while sent < body.len() {
+        sent += c.conn.send_data(id, &body[sent..], false).unwrap();
+        c.flush();
+        if sent < body.len() {
+            c.step();
+        }
+    }
+    c.conn.send_trailers(id, trailers).unwrap();
+    c.flush();
+    id
+}
+
+#[test]
+fn request_trailers_reach_the_service() {
+    let h = serve_with(Limits { body_buffer: 1024, ..Limits::default() }, blocking(trailer_echo));
+    let mut c = H2Client::prior(&h);
+    let id = post_with_trailers(&mut c, b"hello", &[(b"x-sum", b"5"), (b"x-other", b"o")]);
+    assert_eq!(c.wait(id).body, b"5 x-sum=5,x-other=o");
+    // streamed: larger than body_buffer
+    let id = post_with_trailers(&mut c, &vec![b'q'; 5000], &[(b"x-sum", b"5000")]);
+    assert_eq!(c.wait(id).body, b"5000 x-sum=5000");
+    // trailers on an empty body (HEADERS, then trailing HEADERS)
+    let id = post_with_trailers(&mut c, b"", &[(b"x-only", b"1")]);
+    assert_eq!(c.wait(id).body, b"0 x-only=1");
+}
+
+/// Bug 8: `Upgrade: h2c` with an absolute-form target takes the authority (and :path) from
+/// the target, as HTTP/1.1 requests do; Host is ignored.
+#[test]
+fn h2c_upgrade_with_absolute_form_uses_the_target_authority() {
+    let h = serve(echo);
+    let cfg = Config::default();
+    let mut s = connect(&h);
+    let settings = simoom_h2::http2_settings_header(&cfg);
+    s.write_all(format!("GET http://real.example:8080/up?q=1 HTTP/1.1\r\nHost: wrong\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: {settings}\r\n\r\n").as_bytes()).unwrap();
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 4096];
+    let head_end = loop {
+        let n = s.read(&mut tmp).unwrap();
+        assert!(n > 0);
+        buf.extend_from_slice(&tmp[..n]);
+        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break i + 4;
+        }
+    };
+    assert!(buf.starts_with(b"HTTP/1.1 101 "), "{}", String::from_utf8_lossy(&buf));
+    let rest = buf[head_end..].to_vec();
+    let mut c = H2Client::with(s, Connection::client_upgrade(cfg, false), rest);
+    let r = c.wait(1);
+    assert_eq!(r.body, b"GET /up H2 ");
+    assert_eq!(r.header("x-host"), Some(&b"real.example:8080"[..]));
+}
+
+/// Bug 9: a response header block larger than the client's SETTINGS_MAX_HEADER_LIST_SIZE
+/// becomes a bare 500 instead of a block the client would refuse.
+#[test]
+fn response_headers_over_the_client_limit_become_a_500() {
+    let h = serve(|req: &mut Request<'_>, reply: Reply<'_>| -> Outcome {
+        let big = "v".repeat(if req.path() == b"/big" { 600 } else { 10 });
+        reply.header("x-big", &big).body_static(b"body")
+    });
+    let cfg = Config { max_header_list_size: 400, ..Config::default() };
+    let mut c = H2Client::with(connect(&h), Connection::client(cfg), Vec::new());
+    let id = c.request("GET", "/small", b"");
+    let r = c.wait(id);
+    assert_eq!((r.status, &r.body[..]), (200, &b"body"[..]));
+    let id = c.request("GET", "/big", b"");
+    let r = c.wait(id);
+    assert_eq!(r.status, 500);
+    assert!(r.body.is_empty() && r.header("x-big").is_none());
+    // the connection carries on
+    let id = c.request("GET", "/small", b"");
+    assert_eq!(c.wait(id).status, 200);
+}
+
+/// Bug 15: the HTTP/2 frame budgets come from `Limits::h2_frame_budgets`.
+#[test]
+fn frame_budgets_come_from_limits() {
+    let limits = Limits { h2_frame_budgets: simoom::FrameBudgets { ping: 3, ..simoom::FrameBudgets::default() }, ..Limits::default() };
+    let h = serve_with(limits, echo);
+    let mut c = H2Client::prior(&h);
+    for i in 0..5u8 {
+        c.conn.ping([i; 8]);
+    }
+    c.flush();
+    let end = Instant::now() + Duration::from_secs(5);
+    while !c.goaway && Instant::now() < end {
+        c.step();
+    }
+    assert!(c.goaway, "no GOAWAY after 5 PINGs with a budget of 3");
 }

@@ -185,6 +185,7 @@ pub struct timespec {
 }
 
 pub const RLIMIT_NOFILE: c_int = 7;
+pub const F_DUPFD_CLOEXEC: c_int = 1030;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -195,6 +196,7 @@ pub struct rlimit {
 
 extern "C" {
     pub fn getrlimit(resource: c_int, rlim: *mut rlimit) -> c_int;
+    pub fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
     pub fn socket(domain: c_int, ty: c_int, protocol: c_int) -> c_int;
     pub fn bind(fd: c_int, addr: *const c_void, len: socklen_t) -> c_int;
     pub fn listen(fd: c_int, backlog: c_int) -> c_int;
