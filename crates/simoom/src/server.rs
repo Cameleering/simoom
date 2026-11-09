@@ -39,6 +39,12 @@ pub(crate) struct Counters {
 /// Counter slots, indexed by loop number modulo this (loops beyond it share slots).
 const COUNTER_SLOTS: usize = 64;
 
+fn new_counters() -> Box<[Counters; COUNTER_SLOTS]> {
+    // An opaque trip count keeps the loop rolled (unrolled, it costs about 5 KB of code).
+    let v: Box<[Counters]> = (0..std::hint::black_box(COUNTER_SLOTS)).map(|_| Counters::default()).collect();
+    v.try_into().unwrap_or_else(|_| unreachable!())
+}
+
 pub(crate) fn bump(c: &AtomicU64) {
     c.fetch_add(1, Ordering::Relaxed);
 }
@@ -55,7 +61,7 @@ pub(crate) struct Shared {
     pub(crate) h2: simoom_h2::Config,
     /// `alt-svc: ...\r\n`, set once the UDP port is known.
     pub(crate) alt_svc: OnceLock<(Vec<u8>, Vec<u8>)>,
-    counters: Box<[Counters]>,
+    counters: Box<[Counters; COUNTER_SLOTS]>,
     pub(crate) watchdog: crate::watchdog::Policy,
     /// [`Limits::shed_lag`] in ns (0: off).
     pub(crate) shed_ns: u64,
@@ -67,7 +73,7 @@ pub(crate) struct Shared {
     #[cfg(feature = "tls")]
     pub(crate) tls: Option<Arc<simoom_tls::ServerConfig>>,
     /// Open connections per client IP, kept only when [`Limits::max_connections_per_ip`] is set.
-    per_ip: std::sync::Mutex<std::collections::HashMap<std::net::IpAddr, u32>>,
+    per_ip: std::sync::Mutex<crate::util::IpCounts>,
 }
 
 /// A connection's place in the per-IP count; released when the connection is dropped.
@@ -78,13 +84,7 @@ pub(crate) struct IpSlot {
 
 impl Drop for IpSlot {
     fn drop(&mut self) {
-        let mut m = self.sh.per_ip.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(n) = m.get_mut(&self.ip) {
-            *n -= 1;
-            if *n == 0 {
-                m.remove(&self.ip);
-            }
-        }
+        self.sh.per_ip.lock().unwrap_or_else(|e| e.into_inner()).release(self.ip);
     }
 }
 
@@ -94,19 +94,16 @@ impl Shared {
         let cap = self.limits.max_connections_per_ip;
         let Some(peer) = peer.filter(|_| cap != 0) else { return Ok(None) };
         let ip = peer.ip();
-        let mut m = self.per_ip.lock().unwrap_or_else(|e| e.into_inner());
-        let n = m.entry(ip).or_insert(0);
-        if *n as usize >= cap {
+        if !self.per_ip.lock().unwrap_or_else(|e| e.into_inner()).take(ip, cap) {
             return Err(());
         }
-        *n += 1;
         Ok(Some(IpSlot { sh: self.clone(), ip }))
     }
 }
 
 impl Shared {
     pub(crate) fn counters(&self, loop_index: usize) -> &Counters {
-        &self.counters[loop_index % self.counters.len()]
+        &self.counters[loop_index % COUNTER_SLOTS]
     }
 
     /// The `alt-svc` line for HTTP/1.1 responses.
@@ -134,6 +131,8 @@ impl Shared {
     }
 
     /// The watchdog's part after a call that overran the budget or was measured.
+    #[cold]
+    #[inline(never)]
     fn after_call(&self, req: &Request<'_>, took_ns: u64) {
         let p = &self.watchdog;
         let (w, k, name) = match self.service.watch(req) {
@@ -176,43 +175,44 @@ impl Shared {
 /// requests cost one clock read each instead of two.
 pub(crate) fn call(sh: &Shared, req: &mut Request<'_>, t: &mut dyn Target, clock: &mut Option<Instant>) -> bool {
     let budget = sh.watchdog.budget_ns;
-    if budget == 0 {
-        let r = catch_unwind(AssertUnwindSafe(|| {
-            let _ = sh.service.call(req, Reply::new(t));
-        }));
-        return finish_call(sh, req, r);
-    }
+    let watched = budget != 0 && cfg!(feature = "watchdog");
     let mut measure = false;
-    if sh.slots_active.load(Ordering::Relaxed) != 0 {
-        let w = sh.slot(req);
-        if w.offloaded() {
-            let w = w.clone();
-            let _ = Reply::new(t).offload_watched(req, sh.service.clone(), w);
-            return false;
+    let mut t0 = None;
+    if watched {
+        if sh.slots_active.load(Ordering::Relaxed) != 0 {
+            let w = sh.slot(req);
+            if w.offloaded() {
+                offload_slot(sh, req, t, w);
+                return false;
+            }
+            measure = w.suspect();
         }
-        measure = w.suspect();
+        t0 = Some(clock.take().unwrap_or_else(Instant::now));
     }
-    let t0 = clock.take().unwrap_or_else(Instant::now);
-    let r = if measure {
-        let (r, s) = crate::watchdog::measured(|| {
-            catch_unwind(AssertUnwindSafe(|| {
-                let _ = sh.service.call(req, Reply::new(t));
-            }))
-        });
-        req.sample = s;
-        r
-    } else {
-        catch_unwind(AssertUnwindSafe(|| {
-            let _ = sh.service.call(req, Reply::new(t));
-        }))
-    };
-    let t1 = Instant::now();
-    *clock = Some(t1);
-    let took = (t1 - t0).as_nanos() as u64;
-    if took > budget || req.sample.is_some() {
-        sh.after_call(req, took);
+    // One call site for the service (each one inlines the reply set-up).
+    let mark = if measure { Some(crate::watchdog::mark()) } else { None };
+    let r = catch_unwind(AssertUnwindSafe(|| {
+        let _ = sh.service.call(req, Reply::new(t));
+    }));
+    if let Some(t0) = t0 {
+        if let Some(m) = mark {
+            req.sample = crate::watchdog::since(m);
+        }
+        let t1 = Instant::now();
+        *clock = Some(t1);
+        let took = (t1 - t0).as_nanos() as u64;
+        if took > budget || req.sample.is_some() {
+            sh.after_call(req, took);
+        }
     }
     finish_call(sh, req, r)
+}
+
+/// A request whose path slot the watchdog moved to the offload pool (rare: out of line).
+#[cold]
+#[inline(never)]
+fn offload_slot(sh: &Shared, req: &mut Request<'_>, t: &mut dyn Target, w: &Arc<Watch>) {
+    let _ = Reply::new(t).offload_watched(req, sh.service.clone(), w.clone());
 }
 
 /// Path slots of the watchdog for services without routes.
@@ -519,13 +519,13 @@ impl Builder {
             #[cfg(feature = "http2")]
             h2,
             alt_svc: OnceLock::new(),
-            counters: (0..COUNTER_SLOTS).map(|_| Counters::default()).collect(),
+            counters: new_counters(),
             watchdog: limits.watchdog(),
             shed_ns: limits.shed_lag.map_or(0, |d| (d.as_nanos() as u64).max(1)),
-            slots: (0..WATCH_SLOTS).map(|_| Arc::new(Watch::new(Some(slots_active.clone())))).collect(),
+            slots: (0..if cfg!(feature = "watchdog") { WATCH_SLOTS } else { 0 }).map(|_| Arc::new(Watch::new(Some(slots_active.clone())))).collect(),
             slots_active,
             log: self.log,
-            per_ip: std::sync::Mutex::new(std::collections::HashMap::new()),
+            per_ip: std::sync::Mutex::new(crate::util::IpCounts::default()),
             #[cfg(feature = "tls")]
             tls,
             limits,

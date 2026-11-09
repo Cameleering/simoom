@@ -24,7 +24,7 @@ simoom-quic = { path = "../simoom-quic", optional = true }
 simoom-h3 = { path = "../simoom-h3", optional = true }
 
 [features]
-default = ["http1", "http2", "websocket", "io-uring"]
+default = ["http1", "http2", "websocket", "io-uring", "watchdog"]
 # HTTP/1.1 over TCP: keep-alive, pipelining, chunked bodies, 100-continue.
 http1 = []
 # HTTP/2: h2c with prior knowledge and `Upgrade: h2c`, and h2 over TLS through ALPN.
@@ -39,9 +39,13 @@ tls-extra = ["tls", "simoom-tls/p384", "simoom-tls/ed25519", "simoom-tls/chacha2
 http3 = ["tls", "dep:simoom-quic", "dep:simoom-h3", "simoom-rt/udp"]
 # WebSocket upgrades (RFC 6455) on HTTP/1.1.
 websocket = ["http1", "simoom-http1/websocket"]
+# The stall watchdog (`Limits::inline_budget`): finds inline handlers that hold a loop thread
+# and moves their route to the offload pool. On by default; an edge build that leaves it out
+# saves its code, and `inline_budget` and the stall limits are then ignored.
+watchdog = []
 # Alias of `websocket`.
 ws = ["websocket"]
-full = ["http1", "http2", "http3", "tls", "tls-extra", "tls-client", "websocket", "io-uring"]
+full = ["http1", "http2", "http3", "tls", "tls-extra", "tls-client", "websocket", "io-uring", "watchdog"]
 # simoom-tls's TLS client. The server never needs it; HTTP/3 pulls it in through simoom-quic
 # (its QUIC client), and the TLS tests use it.
 tls-client = ["tls", "simoom-tls/client"]
@@ -56,3 +60,7 @@ required-features = ["http3"]
 [[example]]
 name = "interop_server"
 required-features = ["http3"]
+
+[[test]]
+name = "watchdog"
+required-features = ["watchdog"]

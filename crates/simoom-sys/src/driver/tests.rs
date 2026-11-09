@@ -2,8 +2,9 @@
 //! Windows, kqueue on macOS and BSD).
 
 use super::*;
-use crate::net::{ListenOptions, Socket, UdpOptions};
-use crate::udp::Transmit;
+use crate::net::{ListenOptions, Socket};
+#[cfg(feature = "udp")]
+use crate::{net::UdpOptions, udp::Transmit};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
@@ -155,6 +156,7 @@ fn many_queued_sends_are_coalesced() {
 }
 
 #[test]
+#[cfg(feature = "udp")]
 fn udp_echo_on_every_backend() {
     for b in backends() {
         let mut d = driver(b);
@@ -197,6 +199,7 @@ fn udp_echo_on_every_backend() {
 }
 
 #[test]
+#[cfg(feature = "udp")]
 fn udp_gro_batches_land_in_large_buffers() {
     const SEG: usize = 1200;
     const N: usize = 40;

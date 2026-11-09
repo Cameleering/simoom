@@ -399,7 +399,8 @@ impl<P: Poller> Driver<P> {
         }
         let mut done = false;
         for _ in 0..self.budget {
-            if e.kind == Kind::Udp {
+            // Without the `udp` feature no UDP socket is ever added: leave the code out.
+            if cfg!(feature = "udp") && e.kind == Kind::Udp {
                 let n = if e.large {
                     let large = &mut self.large;
                     self.scratch.extend((0..LARGE_BATCH).map(|_| large.take()));

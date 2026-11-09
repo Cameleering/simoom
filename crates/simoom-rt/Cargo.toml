@@ -20,4 +20,4 @@ default = ["io-uring", "udp"]
 io-uring = ["simoom-sys/io-uring"]
 # UDP endpoints (`Builder::udp`, for QUIC). A build without it carries none of the UDP receive
 # and send code.
-udp = []
+udp = ["simoom-sys/udp"]

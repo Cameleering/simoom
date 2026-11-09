@@ -856,10 +856,6 @@ pub(crate) fn build(mut setup: LoopSetup) -> io::Result<(Core, Arc<Queue>)> {
 }
 
 impl Core {
-    pub(crate) fn set_peers(&mut self, peers: Vec<LoopHandle>) {
-        self.peers = peers;
-    }
-
     pub(crate) fn backend(&self) -> (simoom_sys::driver::Backend, Option<String>) {
         (self.driver.backend(), self.driver.fallback_reason().map(str::to_string))
     }

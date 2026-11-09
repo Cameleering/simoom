@@ -55,15 +55,26 @@ impl Sample {
     }
 }
 
-/// Runs `f` between two reads of the thread clocks.
-pub(crate) fn measured<T>(f: impl FnOnce() -> T) -> (T, Option<Sample>) {
-    let a = thread_times();
-    let r = f();
-    let s = match (a, thread_times()) {
+/// A first read of the thread clocks ([`since`] takes the second).
+pub(crate) type Mark = Option<ThreadTimes>;
+
+pub(crate) fn mark() -> Mark {
+    thread_times()
+}
+
+/// What the thread spent since `a`.
+pub(crate) fn since(a: Mark) -> Option<Sample> {
+    match (a, thread_times()) {
         (Some(a), Some(b)) => Some(Sample::between(a, b)),
         _ => None,
-    };
-    (r, s)
+    }
+}
+
+/// Runs `f` between two reads of the thread clocks.
+pub(crate) fn measured<T>(f: impl FnOnce() -> T) -> (T, Option<Sample>) {
+    let a = mark();
+    let r = f();
+    (r, since(a))
 }
 
 /// Whether a call that took `wall_ns` and cost `s` held its thread past the budget.

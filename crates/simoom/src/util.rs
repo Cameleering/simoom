@@ -93,23 +93,31 @@ fn wall_ns() -> u64 {
 fn date_state<R>(now_ns: u64, f: impl FnOnce(&DateState) -> R) -> R {
     DATE.with(|d| {
         let mut d = d.borrow_mut();
-        let st = match d.as_mut() {
-            Some(st) if now_ns.wrapping_sub(st.mono_base) < 60_000_000_000 => st,
-            _ => {
-                let wall = wall_ns();
-                d.insert(DateState { mono_base: now_ns, wall_base: wall, secs: u64::MAX, bytes: [b' '; 29], line: [b' '; 37] })
-            }
-        };
-        let secs = (st.wall_base + now_ns.saturating_sub(st.mono_base)) / 1_000_000_000;
-        if secs != st.secs {
-            st.secs = secs;
-            st.bytes = simoom_http1::write::http_date(secs);
-            st.line[..6].copy_from_slice(b"date: ");
-            st.line[6..35].copy_from_slice(&st.bytes);
-            st.line[35..].copy_from_slice(b"\r\n");
+        match d.as_ref() {
+            Some(st) if now_ns.wrapping_sub(st.mono_base) < 60_000_000_000 && (st.wall_base + now_ns.saturating_sub(st.mono_base)) / 1_000_000_000 == st.secs => f(st),
+            _ => f(date_refresh(&mut d, now_ns)),
         }
-        f(st)
     })
+}
+
+/// A new second (or minute, for the wall clock): reformat. Out of line, as it runs once a second
+/// and its code is inlined into every response writer otherwise.
+#[cold]
+#[inline(never)]
+fn date_refresh(d: &mut Option<DateState>, now_ns: u64) -> &DateState {
+    if !d.as_ref().is_some_and(|st| now_ns.wrapping_sub(st.mono_base) < 60_000_000_000) {
+        *d = None;
+    }
+    let st = d.get_or_insert_with(|| DateState { mono_base: now_ns, wall_base: wall_ns(), secs: u64::MAX, bytes: [b' '; 29], line: [b' '; 37] });
+    let secs = (st.wall_base + now_ns.saturating_sub(st.mono_base)) / 1_000_000_000;
+    if secs != st.secs {
+        st.secs = secs;
+        st.bytes = simoom_http1::write::http_date(secs);
+        st.line[..6].copy_from_slice(b"date: ");
+        st.line[6..35].copy_from_slice(&st.bytes);
+        st.line[35..].copy_from_slice(b"\r\n");
+    }
+    st
 }
 
 /// Calls `f` with the IMF-fixdate for the loop clock `now_ns` (monotonic). The wall clock is
@@ -208,6 +216,122 @@ impl Hasher for Fnv {
     }
 }
 
+/// Open connections per client IP ([`crate::Limits::max_connections_per_ip`]): an
+/// open-addressing table (linear probing, backward-shift deletion) with a hash keyed by OS
+/// randomness, so clients can't aim addresses at one bucket. std's `HashMap` costs about 4 KB
+/// more code here (SipHash, its random keys, and hashbrown's growth path). IPv4 addresses are
+/// stored in their IPv4-mapped IPv6 form.
+#[derive(Default)]
+pub(crate) struct IpCounts {
+    /// `(address, open connections)`; a count of 0 marks a free slot. Empty or a power of two.
+    slots: Vec<(u128, u32)>,
+    len: usize,
+    seed: [u64; 2],
+}
+
+impl IpCounts {
+    fn key(ip: std::net::IpAddr) -> u128 {
+        match ip {
+            std::net::IpAddr::V4(a) => a.to_ipv6_mapped().to_bits(),
+            std::net::IpAddr::V6(a) => a.to_bits(),
+        }
+    }
+
+    fn home(&self, k: u128) -> usize {
+        const M: u64 = 0x9E37_79B9_7F4A_7C15;
+        let a = ((k as u64) ^ self.seed[0]).wrapping_mul(M);
+        let b = ((a ^ (a >> 29)) ^ ((k >> 64) as u64) ^ self.seed[1]).wrapping_mul(M);
+        let h = (b ^ (b >> 32)).wrapping_mul(M);
+        (h >> (64 - self.slots.len().trailing_zeros())) as usize
+    }
+
+    fn find(&self, k: u128) -> Result<usize, usize> {
+        let mask = self.slots.len() - 1;
+        let mut i = self.home(k);
+        loop {
+            match self.slots[i] {
+                (_, 0) => return Err(i),
+                (x, _) if x == k => return Ok(i),
+                _ => i = (i + 1) & mask,
+            }
+        }
+    }
+
+    /// Counts one more connection from `ip`; `false` (and no change) when it has `cap` open.
+    pub(crate) fn take(&mut self, ip: std::net::IpAddr, cap: usize) -> bool {
+        if self.slots.is_empty() {
+            let mut b = [0u8; 16];
+            if !simoom_sys::arch::os_random(&mut b) {
+                // No OS randomness: the table still works, with a less secret hash.
+                b = (std::time::Instant::now().elapsed().as_nanos() ^ (&b as *const _ as usize as u128)).to_le_bytes();
+            }
+            let [s0, s1] = [&b[..8], &b[8..]].map(|h| h.iter().fold(0u64, |a, &x| a << 8 | u64::from(x)));
+            self.seed = [s0, s1];
+            self.slots = vec![(0, 0); 16];
+        } else if (self.len + 1) * 2 > self.slots.len() {
+            let grown = vec![(0, 0); self.slots.len() * 2];
+            let old = std::mem::replace(&mut self.slots, grown);
+            for e in old.into_iter().filter(|e| e.1 != 0) {
+                if let Err(i) = self.find(e.0) {
+                    self.slots[i] = e;
+                }
+            }
+        }
+        let k = Self::key(ip);
+        match self.find(k) {
+            Ok(i) if self.slots[i].1 as usize >= cap => false,
+            Ok(i) => {
+                self.slots[i].1 += 1;
+                true
+            }
+            Err(_) if cap == 0 => false,
+            Err(i) => {
+                self.slots[i] = (k, 1);
+                self.len += 1;
+                true
+            }
+        }
+    }
+
+    /// Counts one connection from `ip` fewer.
+    pub(crate) fn release(&mut self, ip: std::net::IpAddr) {
+        if self.slots.is_empty() {
+            return;
+        }
+        let Ok(mut i) = self.find(Self::key(ip)) else { return };
+        self.slots[i].1 -= 1;
+        if self.slots[i].1 != 0 {
+            return;
+        }
+        // Backward-shift deletion: pull later entries of the probe run into the hole.
+        self.len -= 1;
+        let mask = self.slots.len() - 1;
+        let mut j = i;
+        loop {
+            j = (j + 1) & mask;
+            let e = self.slots[j];
+            if e.1 == 0 {
+                break;
+            }
+            // `e` may move back to `i` unless its home lies cyclically in (i, j].
+            let h = self.home(e.0);
+            if (j.wrapping_sub(h) & mask) >= (j.wrapping_sub(i) & mask) {
+                self.slots[i] = e;
+                i = j;
+            }
+        }
+        self.slots[i] = (0, 0);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn count(&self, ip: std::net::IpAddr) -> u32 {
+        if self.slots.is_empty() {
+            return 0;
+        }
+        self.find(Self::key(ip)).map_or(0, |i| self.slots[i].1)
+    }
+}
+
 pub(crate) type FastMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<Fnv>>;
 
 /// Decodes `%XX` escapes; `None` for a malformed escape.
@@ -241,6 +365,54 @@ mod tests {
         assert_eq!(decimal(1234567890, &mut b), b"1234567890");
         assert_eq!(percent_decode(b"a%20b%2F"), Some(b"a b/".to_vec()));
         assert_eq!(percent_decode(b"%2"), None);
+    }
+
+    #[test]
+    fn ip_counts_match_a_hash_map_model() {
+        use std::collections::HashMap;
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+        let mut t = IpCounts::default();
+        let mut model: HashMap<IpAddr, u32> = HashMap::new();
+        let mut x: u64 = 0x1234_5678;
+        let mut live: Vec<IpAddr> = Vec::new();
+        for step in 0..20_000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let ip = if x % 3 == 0 { IpAddr::V4(Ipv4Addr::from((x >> 8) as u32 % 700)) } else { IpAddr::V6(Ipv6Addr::from(u128::from((x >> 8) % 900) << 64 | 1)) };
+            if x % 5 < 3 || live.is_empty() {
+                let n = model.entry(ip).or_insert(0);
+                let ok = t.take(ip, 3);
+                assert_eq!(ok, *n < 3, "step {step}");
+                if ok {
+                    *n += 1;
+                    live.push(ip);
+                }
+            } else {
+                let ip = live.swap_remove((x >> 20) as usize % live.len());
+                t.release(ip);
+                let n = model.get_mut(&ip).unwrap();
+                *n -= 1;
+                if *n == 0 {
+                    model.remove(&ip);
+                }
+            }
+            if step % 997 == 0 {
+                for (ip, n) in &model {
+                    assert_eq!(t.count(*ip), *n);
+                }
+                assert_eq!(t.len, model.len());
+            }
+        }
+        for ip in live {
+            t.release(ip);
+        }
+        assert_eq!(t.len, 0);
+        assert!(t.slots.iter().all(|e| e.1 == 0));
+        // A cap of 1 refuses the second; another address is unaffected.
+        let a = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let b = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        assert!(t.take(a, 1) && !t.take(a, 1) && t.take(b, 1));
     }
 
     #[test]

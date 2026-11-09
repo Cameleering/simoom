@@ -731,7 +731,7 @@ impl Driver {
 
     #[inline(never)]
     pub(crate) fn new(cfg: &DriverConfig) -> io::Result<Driver> {
-        let fail = cfg.uring_simulate_failure.or_else(|| std::env::var("SIMOOM_IO_URING_FAIL").ok().and_then(|v| v.parse().ok()));
+        let fail = cfg.uring_simulate_failure.or_else(|| super::env_u64("SIMOOM_IO_URING_FAIL").map(|v| v.min(i32::MAX as u64) as i32));
         if let Some(errno) = fail {
             return Err(io::Error::from_raw_os_error(errno));
         }
@@ -1467,7 +1467,10 @@ impl Driver {
         }
         self.cqes = cqes;
         self.cqes.clear();
-        self.read_udp(out);
+        // Without the `udp` feature no UDP socket is ever added: leave the code out.
+        if cfg!(feature = "udp") {
+            self.read_udp(out);
+        }
         self.finish_closing();
         if self.ring.pending() == 0 {
             out.append(&mut self.pending);

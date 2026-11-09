@@ -307,6 +307,7 @@ pub enum Hasher {
 }
 
 impl Hasher {
+    #[inline(never)]
     pub fn new(alg: HashAlg) -> Hasher {
         match alg {
             HashAlg::Sha256 => Hasher::Sha256(Sha256::new()),
@@ -314,12 +315,14 @@ impl Hasher {
             HashAlg::Sha512 => Hasher::Sha512(Sha512::new()),
         }
     }
+    #[inline(never)]
     pub fn update(&mut self, data: &[u8]) {
         match self {
             Hasher::Sha256(h) => h.update(data),
             Hasher::Sha512(h) => h.update(data),
         }
     }
+    #[inline(never)]
     pub fn finish(self) -> Output {
         match self {
             Hasher::Sha256(h) => Output::new(&h.finish()),

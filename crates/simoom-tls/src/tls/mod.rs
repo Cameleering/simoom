@@ -130,9 +130,13 @@ impl Error {
     pub(crate) fn proto(alert: u8, reason: impl Into<std::borrow::Cow<'static, str>>) -> Error {
         Error::Protocol { alert, reason: reason.into() }
     }
+    #[cold]
+    #[inline(never)]
     pub(crate) fn decode(what: &str) -> Error {
         Error::proto(alert::DECODE_ERROR, format!("malformed {what}"))
     }
+    #[cold]
+    #[inline(never)]
     pub(crate) fn unexpected(what: &str) -> Error {
         Error::proto(alert::UNEXPECTED_MESSAGE, format!("unexpected {what}"))
     }

@@ -4,6 +4,7 @@ use super::{codec, hs, CipherSuite};
 use crate::crypto::sha2::{HashAlg, Output};
 
 /// HKDF-Expand-Label with the given label prefix ("tls13 " for TLS, the same for QUIC).
+#[inline(never)]
 pub(crate) fn expand_label(h: HashAlg, secret: &[u8], label: &[u8], context: &[u8], out: &mut [u8]) {
     let mut info = Vec::with_capacity(4 + 6 + label.len() + context.len());
     codec::put_u16(&mut info, out.len() as u16);
@@ -14,12 +15,14 @@ pub(crate) fn expand_label(h: HashAlg, secret: &[u8], label: &[u8], context: &[u
     h.hkdf_expand(secret, &[&info], out);
 }
 
+#[inline(never)]
 pub(crate) fn expand_label_vec(h: HashAlg, secret: &[u8], label: &[u8], context: &[u8], len: usize) -> Vec<u8> {
     let mut out = vec![0u8; len];
     expand_label(h, secret, label, context, &mut out);
     out
 }
 
+#[inline(never)]
 pub(crate) fn derive_secret(h: HashAlg, secret: &[u8], label: &[u8], transcript_hash: &[u8]) -> Vec<u8> {
     expand_label_vec(h, secret, label, transcript_hash, h.output_len())
 }

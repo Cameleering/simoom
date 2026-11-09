@@ -65,7 +65,8 @@ pub struct Limits {
     /// A call over it on the wall clock makes its route suspect; the route's next calls are
     /// measured with the thread's CPU clock, and a call is a stall only if it used more CPU than
     /// this or blocked (so a loop thread preempted on a busy machine is not mistaken for a slow
-    /// handler). Stalls are logged once per route. Default 1 ms.
+    /// handler). Stalls are logged once per route. Default 1 ms. Needs the `watchdog` cargo
+    /// feature (on by default); without it this and the stall limits below are ignored.
     pub inline_budget: Option<Duration>,
     /// Stalls within [`Limits::stall_window`] after which a route (of a [`crate::Router`]; for
     /// another service, the requests with its path) moves to the offload pool. Other routes stay

@@ -74,6 +74,13 @@ pub mod pool;
 mod runtime;
 pub mod timer;
 
+/// Spawns a thread. Every thread of the runtime starts here, so std's spawn code is
+/// instantiated once instead of once per closure type (1-3 KB each).
+#[inline(never)]
+pub(crate) fn spawn(tb: std::thread::Builder, f: Box<dyn FnOnce() + Send>) -> std::io::Result<std::thread::JoinHandle<()>> {
+    tb.spawn(f)
+}
+
 pub use event_loop::{ConnHandle, Ctx, EndpointHandle, LoopCtx, LoopHandle, UdpCtx};
 pub use handler::{Acceptor, CloseReason, ConnInfo, Connection, Endpoint, Message, UdpInfo, UdpService};
 pub use runtime::{Builder, Config, LoopSnapshot, RuntimeHandle, Stats};

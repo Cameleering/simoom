@@ -75,7 +75,13 @@ pub fn default_backlog() -> i32 {
         if c > 0 {
             return c;
         }
-        let v = std::fs::read_to_string("/proc/sys/net/core/somaxconn").ok().and_then(|s| s.trim().parse::<i64>().ok()).filter(|&v| v > 0).map_or(4096, |v| v.min(65535) as i32);
+        // A plain read and digit loop: `read_to_string` and `str::parse` cost about 2.5 KB.
+        let mut b = [0u8; 24];
+        let mut v: i64 = 0;
+        for &c in crate::cpu::read_small_bytes("/proc/sys/net/core/somaxconn", &mut b).iter().take_while(|c| c.is_ascii_digit()) {
+            v = (v * 10 + i64::from(c - b'0')).min(1 << 20);
+        }
+        let v = if v > 0 { v.min(65535) as i32 } else { 4096 };
         CACHED.store(v, Ordering::Relaxed);
         v
     }

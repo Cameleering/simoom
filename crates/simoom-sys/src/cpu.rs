@@ -88,9 +88,15 @@ fn cgroup_quota() -> Option<usize> {
 /// Reads a small file into `buf` (one read: these kernel files are produced whole).
 #[cfg(target_os = "linux")]
 fn read_small<'b>(path: &str, buf: &'b mut [u8]) -> Option<&'b str> {
+    std::str::from_utf8(read_small_bytes(path, buf)).ok()
+}
+
+/// [`read_small`] as bytes; empty when the file can't be read.
+#[cfg(target_os = "linux")]
+pub(crate) fn read_small_bytes<'b>(path: &str, buf: &'b mut [u8]) -> &'b [u8] {
     use std::io::Read;
-    let n = std::fs::File::open(path).ok()?.read(buf).ok()?;
-    std::str::from_utf8(&buf[..n]).ok()
+    let n = std::fs::File::open(path).and_then(|mut f| f.read(buf)).unwrap_or(0);
+    &buf[..n]
 }
 
 /// Parses a cgroup v2 `cpu.max` (`"max 100000"` or `"<quota> <period>"`) into whole CPUs.

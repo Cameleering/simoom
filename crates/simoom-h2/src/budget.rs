@@ -79,6 +79,7 @@ impl Meter {
     }
 
     /// Counts one event at `now`; true when the budget is exceeded.
+    #[inline(never)]
     pub(crate) fn hit(&mut self, kind: Kind, now: u64) -> bool {
         let limit = self.limits[kind as usize];
         if limit == u32::MAX {

@@ -16,6 +16,7 @@ impl<'a> Reader<'a> {
     pub fn is_empty(&self) -> bool {
         self.pos >= self.data.len()
     }
+    #[inline(never)]
     pub fn take(&mut self, n: usize) -> Result<&'a [u8]> {
         if self.data.len() - self.pos < n {
             return Err(Error::decode(self.what));
@@ -24,31 +25,38 @@ impl<'a> Reader<'a> {
         self.pos += n;
         Ok(s)
     }
+    #[inline(never)]
     pub fn u8(&mut self) -> Result<u8> {
         Ok(self.take(1)?[0])
     }
+    #[inline(never)]
     pub fn u16(&mut self) -> Result<u16> {
         let b = self.take(2)?;
         Ok(u16::from_be_bytes([b[0], b[1]]))
     }
+    #[inline(never)]
     pub fn u32(&mut self) -> Result<u32> {
         let b = self.take(4)?;
         Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
     }
+    #[inline(never)]
     pub fn vec8(&mut self) -> Result<&'a [u8]> {
         let n = self.u8()? as usize;
         self.take(n)
     }
+    #[inline(never)]
     pub fn vec16(&mut self) -> Result<&'a [u8]> {
         let n = self.u16()? as usize;
         self.take(n)
     }
+    #[inline(never)]
     pub fn vec24(&mut self) -> Result<&'a [u8]> {
         let b = self.take(3)?;
         let n = (b[0] as usize) << 16 | (b[1] as usize) << 8 | b[2] as usize;
         self.take(n)
     }
     /// Fails unless everything was consumed.
+    #[inline(never)]
     pub fn finish(&self) -> Result<()> {
         if self.is_empty() {
             Ok(())
@@ -58,24 +66,31 @@ impl<'a> Reader<'a> {
     }
 }
 
+// The writers and `Reader::take` are out of line: they serve the handshake only (not the record
+// layer), and inlined at their ~40 call sites they cost about 8 KB.
+#[inline(never)]
 pub(crate) fn put_u16(out: &mut Vec<u8>, v: u16) {
     out.extend_from_slice(&v.to_be_bytes());
 }
 
+#[inline(never)]
 pub(crate) fn put_u24(out: &mut Vec<u8>, v: usize) {
     out.extend_from_slice(&[(v >> 16) as u8, (v >> 8) as u8, v as u8]);
 }
 
+#[inline(never)]
 pub(crate) fn put_vec8(out: &mut Vec<u8>, data: &[u8]) {
     out.push(data.len() as u8);
     out.extend_from_slice(data);
 }
 
+#[inline(never)]
 pub(crate) fn put_vec16(out: &mut Vec<u8>, data: &[u8]) {
     put_u16(out, data.len() as u16);
     out.extend_from_slice(data);
 }
 
+#[inline(never)]
 pub(crate) fn put_vec24(out: &mut Vec<u8>, data: &[u8]) {
     put_u24(out, data.len());
     out.extend_from_slice(data);

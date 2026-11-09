@@ -204,9 +204,13 @@ pub(crate) struct Shared {
     pub(crate) growing: AtomicBool,
     /// Lazy start: loop 0's back end once it has built its driver (or failed to).
     boot: Mutex<Option<(Backend, Option<String>)>>,
+    /// The first loop that failed to start: why.
+    error: Mutex<Option<io::Error>>,
     boot_cv: Condvar,
 }
 
+// Out of line: the poison handling, inlined at each of its many call sites, costs about 2 KB.
+#[inline(never)]
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -216,8 +220,9 @@ impl Shared {
     /// a stop began is woken, so it sees the stop at once.
     pub(crate) fn register(&self, h: LoopHandle) {
         let mut v = lock(&self.handles);
-        v.push(h.clone());
-        v.sort_by_key(|l| l.index);
+        // kept sorted by index (an insertion: a sort call costs about 6 KB of code)
+        let at = v.iter().position(|l| l.index > h.index).unwrap_or(v.len());
+        v.insert(at, h.clone());
         self.started.store(v.len(), Ordering::Release);
         if self.stop.load(Ordering::Acquire) {
             h.queue.waker.wake();
@@ -323,76 +328,6 @@ impl Stats {
             t.timers += l.timers;
         }
         t
-    }
-}
-
-/// The start-up rendezvous between [`Builder::start`] and the loop threads: one mutex and one
-/// condition variable (two channel types cost about 20 KB of code).
-struct StartGate {
-    st: Mutex<StartState>,
-    cv: Condvar,
-}
-
-type LoopReport = io::Result<(LoopHandle, (Backend, Option<String>))>;
-
-struct StartState {
-    reports: Vec<Option<LoopReport>>,
-    reported: usize,
-    /// `None` until decided; `Some(None)` tells the loops to exit.
-    peers: Option<Option<Arc<Vec<LoopHandle>>>>,
-}
-
-impl StartGate {
-    fn lock(&self) -> MutexGuard<'_, StartState> {
-        self.st.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Waits for the decision of [`Builder::start`]: every loop's handle, or `None` to exit.
-    fn peers(&self) -> Option<Arc<Vec<LoopHandle>>> {
-        let mut st = self.lock();
-        loop {
-            if let Some(p) = &st.peers {
-                return p.clone();
-            }
-            st = self.cv.wait(st).unwrap_or_else(PoisonError::into_inner);
-        }
-    }
-
-    fn release(&self, peers: Option<Arc<Vec<LoopHandle>>>) {
-        self.lock().peers = Some(peers);
-        self.cv.notify_all();
-    }
-}
-
-/// A loop thread's report slot; a thread that ends without reporting counts as failed.
-struct Reporter {
-    gate: Arc<StartGate>,
-    index: usize,
-    done: bool,
-}
-
-impl Reporter {
-    fn report(&mut self, r: LoopReport) {
-        if !self.done {
-            self.done = true;
-            let mut st = self.gate.lock();
-            st.reports[self.index] = Some(r);
-            st.reported += 1;
-            drop(st);
-            self.gate.cv.notify_all();
-        }
-    }
-}
-
-impl Drop for Reporter {
-    fn drop(&mut self) {
-        if !self.done {
-            self.done = true;
-            let mut st = self.gate.lock();
-            st.reported += 1;
-            drop(st);
-            self.gate.cv.notify_all();
-        }
     }
 }
 
@@ -583,6 +518,7 @@ impl Builder {
             grow: Mutex::new(None),
             growing: AtomicBool::new(false),
             boot: Mutex::new(None),
+            error: Mutex::new(None),
             boot_cv: Condvar::new(),
         });
         let mut ocfg = cfg.offload.clone();
@@ -617,7 +553,7 @@ impl Builder {
                     // Called on the loop thread that saw the first connection: a helper creates
                     // the threads, so that loop goes on serving.
                     let w = weak.clone();
-                    let helper = std::thread::Builder::new().name(format!("{}-start", cfg.thread_name)).spawn(move || {
+                    let helper = crate::spawn(std::thread::Builder::new().name(format!("{}-start", cfg.thread_name)), Box::new(move || {
                         let mut later = later;
                         if quota_later {
                             later.truncate(simoom_sys::cpu::cpu_count().saturating_sub(1));
@@ -646,7 +582,7 @@ impl Builder {
                             drop(g);
                             shared.grown();
                         }
-                    });
+                    }));
                     match (helper, weak.upgrade()) {
                         (Ok(t), Some(shared)) => lock(&shared.threads).push(t),
                         (Err(e), Some(shared)) => {
@@ -661,95 +597,74 @@ impl Builder {
         }
         let now = setups.len();
 
-        // Start the loops: each creates its driver on its own thread, reports its handle, then
-        // waits for the go of this thread before serving.
-        let gate = Arc::new(StartGate { st: Mutex::new(StartState { reports: (0..now).map(|_| None).collect(), reported: 0, peers: None }), cv: Condvar::new() });
-        let mut threads = Vec::new();
+        // Every loop at once (the same thread body as a lazy start); wait until each has built
+        // its driver and registered, or failed.
         for setup in setups {
             let i = setup.index;
-            let pin = pin_of(i);
-            let mut reporter = Reporter { gate: gate.clone(), index: i, done: false };
-            let spawned = loop_thread(&cfg, i).spawn(move || {
-                if let Some(cpu) = pin {
-                    let _ = simoom_sys::cpu::pin_current_thread(cpu);
-                }
-                let (mut core, queue) = match build(setup) {
-                    Ok(x) => x,
-                    Err(e) => return reporter.report(Err(e)),
-                };
-                let backend = core.backend();
-                reporter.report(Ok((LoopHandle { index: i, queue }, backend)));
-                let Some(peers) = reporter.gate.peers() else { return };
-                core.set_peers(peers.to_vec());
-                drop(reporter);
-                if let Err(e) = core.run() {
-                    eprintln!("simoom loop {i} failed: {e}");
-                }
-            });
-            match spawned {
-                Ok(t) => threads.push(t),
+            match spawn_loop(&cfg, setup, pin_of(i), shared.clone()) {
+                Ok(t) => lock(&shared.threads).push(t),
                 Err(e) => {
-                    gate.release(None);
-                    for t in threads {
-                        let _ = t.join();
-                    }
-                    return Err(e);
+                    *lock(&shared.error) = Some(e);
+                    break;
                 }
             }
         }
-        let mut backend = (Backend::Auto, None);
-        let mut err = None;
-        let mut loops = Vec::with_capacity(now);
-        {
-            let mut st = gate.lock();
-            while st.reported < now {
-                st = gate.cv.wait(st).unwrap_or_else(PoisonError::into_inner);
-            }
-            for r in st.reports.iter_mut() {
-                match r.take() {
-                    Some(Ok((h, b))) => {
-                        loops.push(h);
-                        backend = b;
-                    }
-                    Some(Err(e)) => err = Some(e),
-                    None => err = Some(io::Error::other("a loop thread died during start")),
-                }
-            }
+        let mut g = lock(&shared.boot);
+        let spawned = lock(&shared.threads).len();
+        while shared.started.load(Ordering::Acquire) + shared.failed.load(Ordering::Acquire) < spawned {
+            g = shared.boot_cv.wait(g).unwrap_or_else(PoisonError::into_inner);
         }
-        if let Some(e) = err {
-            gate.release(None);
-            for t in threads {
-                let _ = t.join();
-            }
-            return Err(e);
+        drop(g);
+        let mut handle = RuntimeHandle { shared, addrs, udp_addrs, offload, backend: OnceLock::new(), lazy: false };
+        if spawned < now || handle.shared.failed.load(Ordering::Acquire) != 0 {
+            // A loop failed: stop the others (they serve nothing yet) and report its error.
+            handle.stop(Duration::ZERO);
+            handle.join_threads();
+            let e = lock(&handle.shared.error).take();
+            return Err(e.unwrap_or_else(|| io::Error::other("a loop thread died during start")));
         }
-        for h in &loops {
-            shared.register(h.clone());
-        }
-        lock(&shared.threads).extend(threads);
-        gate.release(Some(Arc::new(loops)));
-        Ok(RuntimeHandle { shared, addrs, udp_addrs, offload, backend: OnceLock::from(backend), lazy: false })
+        Ok(handle)
     }
 }
 
-/// Starts a loop that needs no start-up handshake (lazy start): it registers itself once its
-/// driver is built; a failure is logged.
+/// Counts a loop thread as failed unless it registered (also when `build` panics), so a start
+/// waiting for the loops never hangs.
+struct Starting {
+    shared: Arc<Shared>,
+    done: bool,
+}
+
+impl Drop for Starting {
+    fn drop(&mut self) {
+        if !self.done {
+            self.shared.failed.fetch_add(1, Ordering::AcqRel);
+            drop(lock(&self.shared.boot));
+            self.shared.boot_cv.notify_all();
+        }
+    }
+}
+
+/// Starts a loop thread: it builds its driver and registers itself. A failure is counted in
+/// `failed` and kept in `error`; with a lazy start it is logged too (nothing waits for it).
 fn spawn_loop(cfg: &Config, setup: LoopSetup, pin: Option<usize>, shared: Arc<Shared>) -> io::Result<JoinHandle<()>> {
     let i = setup.index;
-    loop_thread(cfg, i).spawn(move || {
+    let log = cfg.lazy_loops;
+    crate::spawn(loop_thread(cfg, i), Box::new(move || {
         if let Some(cpu) = pin {
             let _ = simoom_sys::cpu::pin_current_thread(cpu);
         }
+        let mut starting = Starting { shared, done: false };
+        let shared = &starting.shared;
         let (mut core, queue) = match build(setup) {
             Ok(x) => x,
             Err(e) => {
-                eprintln!("simoom loop {i} failed to start: {e}");
+                if log {
+                    eprintln!("simoom loop {i} failed to start: {e}");
+                }
                 if i == 0 {
                     shared.booted((Backend::Auto, Some(format!("loop 0 failed to start: {e}"))));
                 }
-                shared.failed.fetch_add(1, Ordering::AcqRel);
-                drop(lock(&shared.boot));
-                shared.boot_cv.notify_all();
+                lock(&shared.error).get_or_insert(e);
                 return;
             }
         };
@@ -757,11 +672,12 @@ fn spawn_loop(cfg: &Config, setup: LoopSetup, pin: Option<usize>, shared: Arc<Sh
             shared.booted(core.backend());
         }
         shared.register(LoopHandle { index: i, queue });
-        drop(shared);
+        starting.done = true;
+        drop(starting);
         if let Err(e) = core.run() {
             eprintln!("simoom loop {i} failed: {e}");
         }
-    })
+    }))
 }
 
 fn loop_thread(cfg: &Config, i: usize) -> std::thread::Builder {

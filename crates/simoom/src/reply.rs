@@ -232,6 +232,8 @@ impl<'a> Reply<'a> {
 
     /// Runs a route the watchdog moved to the offload pool, timing each call there so the
     /// route can come back inline once it is fast again.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn offload_watched(self, req: &mut Request<'_>, svc: Arc<dyn Service>, watch: Arc<crate::watchdog::Watch>) -> Outcome {
         self.offload(req, move |r, reply| {
             let t0 = std::time::Instant::now();

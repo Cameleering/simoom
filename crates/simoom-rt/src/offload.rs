@@ -176,7 +176,7 @@ impl OffloadPool {
             st.threads += 1;
             drop(st);
             let inner2 = self.inner.clone();
-            let spawned = std::thread::Builder::new().name(inner.cfg.name.clone()).spawn(move || worker(inner2));
+            let spawned = crate::spawn(std::thread::Builder::new().name(inner.cfg.name.clone()), Box::new(move || worker(inner2)));
             if spawned.is_err() {
                 self.inner.state.lock().unwrap().threads -= 1;
             }

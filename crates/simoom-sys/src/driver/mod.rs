@@ -68,11 +68,11 @@ impl Backend {
         if self != Backend::Auto {
             return self;
         }
-        match std::env::var("SIMOOM_BACKEND").ok().as_deref() {
-            Some("epoll") => return Backend::Epoll,
-            Some("io_uring") | Some("uring") => return Backend::IoUring,
-            Some("iocp") => return Backend::Iocp,
-            Some("kqueue") => return Backend::Kqueue,
+        match env_bytes("SIMOOM_BACKEND").as_deref() {
+            Some(b"epoll") => return Backend::Epoll,
+            Some(b"io_uring") | Some(b"uring") => return Backend::IoUring,
+            Some(b"iocp") => return Backend::Iocp,
+            Some(b"kqueue") => return Backend::Kqueue,
             _ => {}
         }
         if cfg!(windows) {
@@ -302,9 +302,24 @@ pub(crate) struct Spin {
     pub(crate) worked: bool,
 }
 
+/// An environment variable's bytes (`std::env::var` and its UTF-8 check cost more code).
+#[inline(never)]
+pub(crate) fn env_bytes(name: &str) -> Option<Vec<u8>> {
+    std::env::var_os(name).map(|v| v.into_encoded_bytes())
+}
+
+/// An environment variable holding a decimal number; `None` if unset or not a number.
+pub(crate) fn env_u64(name: &str) -> Option<u64> {
+    let v = env_bytes(name)?;
+    if v.is_empty() || v.len() > 19 || !v.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    Some(v.iter().fold(0, |n, &d| n * 10 + u64::from(d - b'0')))
+}
+
 impl Spin {
     pub(crate) fn new(cfg: &DriverConfig) -> Spin {
-        let max = std::env::var("SIMOOM_BUSY_POLL_US").ok().and_then(|v| v.parse::<u64>().ok()).map_or(cfg.busy_poll.as_nanos().min(u64::MAX as u128) as u64, |us| us.saturating_mul(1000));
+        let max = env_u64("SIMOOM_BUSY_POLL_US").map_or(cfg.busy_poll.as_nanos().min(u64::MAX as u128) as u64, |us| us.saturating_mul(1000));
         Spin { max, gap: max, probe: 0, worked: false }
     }
 
@@ -497,7 +512,7 @@ impl LargeBufs {
     /// inlined; keeping the buffer (GRO sockets only) is not.
     #[inline]
     pub(crate) fn keep(&mut self, buf: Vec<u8>) -> Option<Vec<u8>> {
-        if self.size == 0 || buf.capacity() < self.size {
+        if !cfg!(feature = "udp") || self.size == 0 || buf.capacity() < self.size {
             return Some(buf);
         }
         self.store(buf);
