@@ -101,7 +101,9 @@ impl Backend {
 pub struct DriverConfig {
     /// Which back end to use.
     pub backend: Backend,
-    /// Most OS events taken per wait (epoll and kqueue events, IOCP entries).
+    /// Most OS events taken per wait (epoll and kqueue events, IOCP entries). The array starts
+    /// at 64 entries and doubles, up to this, whenever a wait fills it, so a busy loop drains
+    /// every ready event in one call and an idle one keeps a small array.
     pub events: usize,
     /// Most receives per connection per turn before others get a go (epoll, kqueue, IOCP).
     pub recv_budget: usize,
@@ -125,13 +127,20 @@ pub struct DriverConfig {
     pub accepts_outstanding: usize,
     /// UDP: receives kept outstanding per socket on IOCP.
     pub udp_recvs_outstanding: usize,
+    /// Adaptive busy polling: after a turn that delivered events, poll without blocking for up
+    /// to this long before going to sleep, so a request that arrives a few microseconds later
+    /// costs no sleep and wake-up. The window adapts (halt-polling style): it grows when a sleep
+    /// ended soon after the window would have, and shrinks when spinning finds nothing, down to
+    /// zero; an idle loop never spins. `Duration::ZERO` turns it off. The environment variable
+    /// `SIMOOM_BUSY_POLL_US` overrides it. Default 50 µs.
+    pub busy_poll: Duration,
 }
 
 impl Default for DriverConfig {
     fn default() -> Self {
         DriverConfig {
             backend: Backend::Auto,
-            events: 256,
+            events: 1024,
             recv_budget: 16,
             uring_entries: 1024,
             uring_buffers: 1024,
@@ -141,6 +150,7 @@ impl Default for DriverConfig {
             iocp_eager_recv: false,
             accepts_outstanding: 32,
             udp_recvs_outstanding: 4,
+            busy_poll: Duration::from_micros(50),
         }
     }
 }
@@ -241,12 +251,94 @@ pub struct DriverStats {
     pub sqes: u64,
     /// Completions or readiness events taken from the OS.
     pub os_events: u64,
+    /// Waits that blocked (put the thread to sleep, or could have: a non-zero timeout).
+    pub sleeps: u64,
+    /// Non-blocking polls made while busy polling (also counted in `waits` when they were system
+    /// calls; io_uring polls its rings in user space and enters only when work is flagged).
+    pub spin_polls: u64,
 }
 
 impl DriverStats {
     /// All counted system calls.
     pub fn syscalls(&self) -> u64 {
         self.waits + self.recv_calls + self.send_calls + self.accept_calls + self.other_calls
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Adaptive busy polling
+// ---------------------------------------------------------------------------------------------
+
+/// Smallest busy-poll window once it starts growing again.
+const SPIN_START_NS: u64 = 4_000;
+
+/// Entries of an event array before it grows (see [`DriverConfig::events`]).
+pub(crate) const EVENTS_START: usize = 64;
+
+/// Most turns in a row that report results without asking the OS for new events.
+pub(crate) const MAX_SKIPS: u8 = 3;
+
+/// The adaptive busy-poll window of one driver (see [`DriverConfig::busy_poll`]).
+pub(crate) struct Spin {
+    max: u64,
+    win: u64,
+    /// The last turn delivered events: the loop is busy, so spinning is worth trying.
+    pub(crate) worked: bool,
+}
+
+impl Spin {
+    pub(crate) fn new(cfg: &DriverConfig) -> Spin {
+        let max = std::env::var("SIMOOM_BUSY_POLL_US").ok().and_then(|v| v.parse::<u64>().ok()).map_or(cfg.busy_poll.as_nanos().min(u64::MAX as u128) as u64, |us| us.saturating_mul(1000));
+        Spin { max, win: max / 2, worked: false }
+    }
+
+    /// Waits for events with `poll`, which waits up to the given timeout (zero: does not block)
+    /// and returns whether it found anything. Spins first when the window is open and the
+    /// last turn did work; `syscall_polls` paces polls that are system calls to one a microsecond.
+    pub(crate) fn wait(&mut self, timeout: Option<Duration>, syscall_polls: bool, stats: &mut DriverStats, mut poll: impl FnMut(Option<Duration>, &mut DriverStats) -> io::Result<bool>) -> io::Result<()> {
+        if timeout == Some(Duration::ZERO) {
+            return poll(timeout, stats).map(drop);
+        }
+        let limit = timeout.map_or(u64::MAX, |t| t.as_nanos().min(u64::MAX as u128) as u64);
+        let mut spun = 0;
+        if self.worked && self.win > 0 {
+            let window = self.win.min(limit);
+            let t0 = crate::time::now_ns();
+            let mut last = 0;
+            loop {
+                let now = crate::time::now_ns() - t0;
+                if !syscall_polls || now - last >= 1_000 || last == 0 {
+                    last = now.max(1);
+                    stats.spin_polls += 1;
+                    if poll(Some(Duration::ZERO), stats)? {
+                        return Ok(()); // found work while spinning: keep the window
+                    }
+                }
+                if now >= window {
+                    spun = now;
+                    break;
+                }
+                core::hint::spin_loop();
+            }
+        }
+        stats.sleeps += 1;
+        let rest = timeout.map(|t| t.saturating_sub(Duration::from_nanos(spun)));
+        let t1 = crate::time::now_ns();
+        let got = poll(rest, stats)?;
+        if self.max > 0 {
+            let slept = spun + (crate::time::now_ns() - t1);
+            if got && slept <= self.max {
+                // A slightly longer spin would have caught it.
+                self.win = (self.win * 2).clamp(SPIN_START_NS, self.max);
+            } else if spun > 0 {
+                // Spun for nothing.
+                self.win /= 2;
+                if self.win < SPIN_START_NS {
+                    self.win = 0;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

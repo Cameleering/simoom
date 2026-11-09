@@ -27,6 +27,7 @@ pub const IPPROTO_TCP: c_int = 6;
 pub const IPPROTO_UDP: c_int = 17;
 pub const IPPROTO_IPV6: c_int = 41;
 pub const TCP_NODELAY: c_int = 1;
+pub const TCP_DEFER_ACCEPT: c_int = 9;
 pub const IP_TOS: c_int = 1;
 pub const IP_PKTINFO: c_int = 8;
 pub const IP_MTU_DISCOVER: c_int = 10;
@@ -67,6 +68,8 @@ pub const EFD_CLOEXEC: c_int = 0o2000000;
 pub const EFD_NONBLOCK: c_int = 0o4000;
 
 pub const CLOCK_MONOTONIC: c_int = 1;
+pub const CLOCK_PROCESS_CPUTIME_ID: c_int = 2;
+pub const CLOCK_THREAD_CPUTIME_ID: c_int = 3;
 pub const CLOCK_MONOTONIC_COARSE: c_int = 6;
 
 pub const PROT_READ: c_int = 1;

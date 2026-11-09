@@ -1,7 +1,7 @@
 //! macOS and BSD kqueue poller (`EV_CLEAR`, edge-triggered) with an `EVFILT_USER` waker.
 
 use super::readiness::{Poller as PollerTrait, Ready, WAKE};
-use super::{DriverStats, Waker};
+use super::{DriverStats, Waker, EVENTS_START};
 use crate::net::RawSock;
 use crate::os::bsd as sys;
 use std::io;
@@ -12,6 +12,7 @@ use std::time::Duration;
 pub(crate) struct Poller {
     kq: Arc<OwnedFd>,
     events: Vec<sys::kevent>,
+    max_events: usize,
 }
 
 fn kev(ident: usize, filter: i16, flags: u16, fflags: u32, udata: u64) -> sys::kevent {
@@ -49,7 +50,7 @@ impl PollerTrait for Poller {
             let _ = apply(k2.as_raw_fd(), &[kev(0, sys::EVFILT_USER, 0, sys::NOTE_TRIGGER, WAKE)]);
         }));
         // SAFETY: an all-zero kevent is valid.
-        Ok((Poller { kq, events: vec![unsafe { core::mem::zeroed() }; events] }, waker))
+        Ok((Poller { kq, events: vec![unsafe { core::mem::zeroed() }; EVENTS_START.min(events)], max_events: events }, waker))
     }
 
     fn add(&mut self, sock: RawSock, token: u64, listener: bool, stats: &mut DriverStats) -> io::Result<()> {
@@ -75,6 +76,7 @@ impl PollerTrait for Poller {
             }
             return Err(e);
         }
+        let full = n as usize == self.events.len();
         for k in &self.events[..n as usize] {
             let token = k.udata as usize as u64;
             out.push(Ready {
@@ -84,6 +86,11 @@ impl PollerTrait for Poller {
                 closed: k.flags & sys::EV_ERROR != 0,
                 hup: k.filter == sys::EVFILT_READ && k.flags & sys::EV_EOF != 0,
             });
+        }
+        if full && self.events.len() < self.max_events {
+            let len = (self.events.len() * 2).min(self.max_events);
+            // SAFETY: an all-zero kevent is valid.
+            self.events.resize(len, unsafe { core::mem::zeroed() });
         }
         Ok(())
     }

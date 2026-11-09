@@ -69,6 +69,14 @@ pub const NOTE_TRIGGER: u32 = 0x0100_0000;
 pub const CLOCK_MONOTONIC: c_int = 6;
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
 pub const CLOCK_MONOTONIC: c_int = 4;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub const CLOCK_PROCESS_CPUTIME_ID: c_int = 12;
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub const CLOCK_PROCESS_CPUTIME_ID: c_int = 15;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub const CLOCK_THREAD_CPUTIME_ID: c_int = 16;
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub const CLOCK_THREAD_CPUTIME_ID: c_int = 14;
 
 #[repr(C)]
 #[derive(Clone, Copy)]

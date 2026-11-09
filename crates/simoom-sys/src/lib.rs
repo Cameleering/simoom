@@ -20,6 +20,8 @@ mod os;
 
 pub mod alloc;
 pub mod cpu;
+/// Per-thread CPU time (owned by the facade work, for the stall watchdog).
+pub mod cputime;
 pub mod driver;
 pub mod net;
 pub mod time;

@@ -19,6 +19,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const LISTENER_BIT: u64 = 1 << 63;
+/// Receive buffers lent to the driver before the loop's first connection.
+const INITIAL_RECV_BUFFERS: usize = 8;
 const UDP_BIT: u64 = 1 << 62;
 
 /// A task run on a loop thread.
@@ -220,11 +222,13 @@ pub(crate) struct ListenerSlot {
     /// `SO_REUSEPORT` socket per loop.
     handoff: bool,
     id: Option<Id>,
+    /// Bind this loop's own `SO_REUSEPORT` socket on the loop thread at start.
+    pub(crate) bind: Option<(SocketAddr, simoom_sys::net::ListenOptions)>,
 }
 
 impl ListenerSlot {
     pub(crate) fn new(acceptor: Arc<dyn Acceptor>, socket: Option<Socket>, handoff: bool) -> ListenerSlot {
-        ListenerSlot { acceptor, socket, handoff, id: None }
+        ListenerSlot { acceptor, socket, handoff, id: None, bind: None }
     }
 }
 
@@ -236,6 +240,8 @@ pub(crate) struct UdpSlot {
     gro: bool,
     id: Option<Id>,
     local: Option<SocketAddr>,
+    /// Bind this loop's own `SO_REUSEPORT` socket on the loop thread at start.
+    pub(crate) bind: Option<(SocketAddr, simoom_sys::net::UdpOptions)>,
 }
 
 /// Receive buffer size for a UDP socket with GRO: a whole coalesced batch (at most 64 KiB).
@@ -244,8 +250,8 @@ pub(crate) const GRO_BUFFER: usize = 64 * 1024;
 
 impl UdpSlot {
     #[cfg_attr(not(feature = "udp"), allow(dead_code))]
-    pub(crate) fn new(service: Arc<dyn UdpService>, binding: usize, socket: Socket, gro: bool) -> UdpSlot {
-        UdpSlot { service, binding, socket: Some(socket), gro, id: None, local: None }
+    pub(crate) fn new(service: Arc<dyn UdpService>, binding: usize, socket: Option<Socket>, gro: bool) -> UdpSlot {
+        UdpSlot { service, binding, socket, gro, id: None, local: None, bind: None }
     }
 }
 
@@ -318,6 +324,16 @@ impl Core {
         self.with_udp(idx, |h, cx| h.on_message(cx, msg));
     }
 
+    /// Creates the endpoint of UDP slot `idx` (at start, once its socket is registered).
+    fn ensure_endpoint(&mut self, idx: usize) {
+        let Some(slot) = self.udps.get(idx) else { return };
+        if slot.id.is_none() || self.endpoints[idx].is_some() {
+            return;
+        }
+        let info = UdpInfo { binding: slot.binding, loop_index: self.index, local_addr: slot.local.unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0))) };
+        self.endpoints[idx] = Some(slot.service.endpoint(&info));
+    }
+
     fn close_now(&mut self, key: u64, reason: CloseReason) {
         let Some(c) = self.conns.get_mut(key) else { return };
         if c.closed {
@@ -352,6 +368,9 @@ impl Core {
             self.shared.active.fetch_sub(1, Ordering::AcqRel);
             self.rejected += 1;
             return;
+        }
+        if self.accepted == 0 {
+            self.driver.set_buffer_target(self.cfg.recv_buffers);
         }
         self.accepted += 1;
     }
@@ -708,10 +727,22 @@ pub(crate) struct LoopSetup {
 }
 
 /// Creates the driver on this thread and returns the loop, ready to run.
-pub(crate) fn build(setup: LoopSetup) -> io::Result<(Core, Arc<Queue>)> {
+pub(crate) fn build(mut setup: LoopSetup) -> io::Result<(Core, Arc<Queue>)> {
     let cfg = setup.cfg;
+    for l in setup.listeners.iter_mut() {
+        if let Some((addr, opts)) = l.bind.take() {
+            l.socket = Some(Socket::tcp_listen(addr, &opts)?);
+        }
+    }
+    #[cfg(feature = "udp")]
+    for u in setup.udps.iter_mut() {
+        if let Some((addr, opts)) = u.bind.take() {
+            u.socket = Some(Socket::udp_bind(addr, &opts)?);
+        }
+    }
     let mut driver = Driver::new(&cfg.driver)?;
-    driver.set_buffer_target(cfg.recv_buffers);
+    // A small stock until the loop has work: an idle loop holds few receive buffers.
+    driver.set_buffer_target(if setup.udps.is_empty() { cfg.recv_buffers.min(INITIAL_RECV_BUFFERS) } else { cfg.recv_buffers });
     let queue = Arc::new(Queue::new(driver.waker()));
     let tick_ns = (cfg.timer_tick.as_nanos() as u64).max(1);
     let now_ns = simoom_sys::time::now_ns();
@@ -763,12 +794,10 @@ impl Core {
                 let key = UDP_BIT | i as u64;
                 let id = if self.udps[i].gro { self.driver.udp_large(s, key, GRO_BUFFER)? } else { self.driver.udp(s, key)? };
                 self.driver.recv(id, true);
-                let info = UdpInfo { binding: self.udps[i].binding, loop_index: self.index, local_addr: local.unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0))) };
-                let ep = self.udps[i].service.endpoint(&info);
                 let slot = &mut self.udps[i];
                 slot.id = Some(id);
                 slot.local = local;
-                self.endpoints[i] = Some(ep);
+                self.ensure_endpoint(i);
             }
         }
         Ok(())

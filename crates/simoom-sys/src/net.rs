@@ -34,7 +34,9 @@ pub struct Socket {
 /// Options for [`Socket::tcp_listen`].
 #[derive(Clone, Debug)]
 pub struct ListenOptions {
-    /// Length of the kernel accept queue.
+    /// Length of the kernel accept queue. The default is [`default_backlog`]: the system's
+    /// maximum (`net.core.somaxconn` on Linux, capped at 65535; `SOMAXCONN` on Windows), so a
+    /// burst of connections, or 100k idle ones arriving together, isn't dropped.
     pub backlog: i32,
     /// `SO_REUSEPORT` (Linux, BSD): several sockets may bind the same address and the kernel
     /// spreads connections over them. Ignored on Windows.
@@ -47,11 +49,43 @@ pub struct ListenOptions {
     pub recv_buffer: Option<usize>,
     /// `SO_SNDBUF`, inherited by accepted sockets.
     pub send_buffer: Option<usize>,
+    /// `TCP_DEFER_ACCEPT` (Linux) in seconds: the kernel hands over a connection only once its
+    /// first data has arrived (or this long after the handshake), so accepting and reading the
+    /// first request take one turn. Only for protocols where the client speaks first (HTTP,
+    /// TLS). `None` (the default here) leaves it off; ignored on other systems.
+    pub defer_accept: Option<u32>,
 }
 
 impl Default for ListenOptions {
     fn default() -> Self {
-        ListenOptions { backlog: 1024, reuse_port: false, nodelay: true, v6_only: None, recv_buffer: None, send_buffer: None }
+        ListenOptions { backlog: default_backlog(), reuse_port: false, nodelay: true, v6_only: None, recv_buffer: None, send_buffer: None, defer_accept: None }
+    }
+}
+
+/// The default listen backlog: the system's maximum accept queue. On Linux that is
+/// `/proc/sys/net/core/somaxconn` (read once), capped at 65535, or 4096 if it can't be read; on
+/// Windows `SOMAXCONN` (the provider's maximum); elsewhere 65535, which the kernel clamps to its
+/// own `somaxconn`.
+pub fn default_backlog() -> i32 {
+    #[cfg(target_os = "linux")]
+    {
+        use std::sync::atomic::{AtomicI32, Ordering};
+        static CACHED: AtomicI32 = AtomicI32::new(0);
+        let c = CACHED.load(Ordering::Relaxed);
+        if c > 0 {
+            return c;
+        }
+        let v = std::fs::read_to_string("/proc/sys/net/core/somaxconn").ok().and_then(|s| s.trim().parse::<i64>().ok()).filter(|&v| v > 0).map_or(4096, |v| v.min(65535) as i32);
+        CACHED.store(v, Ordering::Relaxed);
+        v
+    }
+    #[cfg(windows)]
+    {
+        sys::SOMAXCONN
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        65535
     }
 }
 
@@ -288,6 +322,10 @@ impl Socket {
         }
         if opts.nodelay {
             s.set_nodelay(true)?;
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(secs) = opts.defer_accept {
+            s.setsockopt_int(sys::IPPROTO_TCP, sys::TCP_DEFER_ACCEPT, secs.min(i32::MAX as u32) as i32)?;
         }
         s.bind(&addr)?;
         // SAFETY: listen on a bound socket we own.

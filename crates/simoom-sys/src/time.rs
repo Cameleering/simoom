@@ -54,9 +54,64 @@ pub fn coarse_ns() -> u64 {
     }
 }
 
+/// CPU time (user and system) used by the whole process so far, in nanoseconds:
+/// `CLOCK_PROCESS_CPUTIME_ID` on Unix, `GetProcessTimes` on Windows (100 ns steps, updated at
+/// the scheduler tick). For measurements such as "an idle server uses no CPU".
+pub fn process_cpu_ns() -> u64 {
+    #[cfg(unix)]
+    {
+        let mut ts = sys::timespec { tv_sec: 0, tv_nsec: 0 };
+        // SAFETY: `ts` is a valid output struct; the clock exists on every supported system.
+        unsafe { sys::clock_gettime(sys::CLOCK_PROCESS_CPUTIME_ID, &mut ts) };
+        ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
+    }
+    #[cfg(windows)]
+    {
+        let (mut c, mut e, mut k, mut u) = (0u64, 0u64, 0u64, 0u64);
+        // SAFETY: the pseudo handle of the current process; four writable FILETIME-sized slots.
+        unsafe { sys::GetProcessTimes(sys::GetCurrentProcess(), &mut c, &mut e, &mut k, &mut u) };
+        (k + u) * 100
+    }
+}
+
+/// CPU time of the calling thread in nanoseconds (tests only).
+#[cfg(test)]
+pub(crate) fn thread_cpu_ns_for_tests() -> u64 {
+    #[cfg(unix)]
+    {
+        let mut ts = sys::timespec { tv_sec: 0, tv_nsec: 0 };
+        // SAFETY: `ts` is a valid output struct; the clock exists on every supported system.
+        unsafe { sys::clock_gettime(sys::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
+        ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
+    }
+    #[cfg(windows)]
+    {
+        let (mut c, mut e, mut k, mut u) = (0u64, 0u64, 0u64, 0u64);
+        // SAFETY: the pseudo handle of the current thread; four writable FILETIME-sized slots.
+        unsafe { sys::GetThreadTimes(sys::GetCurrentThread(), &mut c, &mut e, &mut k, &mut u) };
+        (k + u) * 100
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cpu_clocks_count_work_not_sleep() {
+        let (p0, t0) = (process_cpu_ns(), thread_cpu_ns_for_tests());
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let t1 = thread_cpu_ns_for_tests();
+        assert!(t1 - t0 < 30_000_000, "sleeping used {} ns of thread CPU", t1 - t0);
+        let end = now_ns() + 60_000_000;
+        let mut x = 0u64;
+        while now_ns() < end {
+            x = x.wrapping_add(1);
+        }
+        let (p2, t2) = (process_cpu_ns(), thread_cpu_ns_for_tests());
+        assert!(t2 - t1 >= 20_000_000, "spinning 60 ms counted {} ns ({x})", t2 - t1);
+        assert!(p2 - p0 >= t2 - t1 - 16_000_000);
+    }
 
     #[test]
     fn clocks_are_monotonic_and_track_real_time() {

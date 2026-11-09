@@ -17,7 +17,7 @@
 //! dequeued (or it completed inline). Closing a socket aborts its pending operations, whose
 //! completions still arrive; the entry is freed once all have.
 
-use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Waker};
+use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Spin, Waker, EVENTS_START, MAX_SKIPS};
 use crate::net::{decode_addr, last_error, SockAddrBuf, Socket};
 use crate::os::windows as sys;
 use crate::udp::{finish_meta_windows, wsa_recvmsg, Transmit};
@@ -151,6 +151,11 @@ pub(crate) struct Driver {
     accepts: usize,
     udp_recvs: usize,
     eager: bool,
+    spin: Spin,
+    skips: u8,
+    /// Entries the last `GetQueuedCompletionStatusEx` filled.
+    got: usize,
+    max_entries: usize,
 }
 
 fn ext_fn(s: &Socket, guid: sys::GUID) -> io::Result<usize> {
@@ -221,7 +226,8 @@ impl Driver {
             repost: Vec::new(),
             closing: Vec::new(),
             pending: Vec::new(),
-            entries: vec![sys::OVERLAPPED_ENTRY { lpCompletionKey: 0, lpOverlapped: core::ptr::null_mut(), Internal: 0, dwNumberOfBytesTransferred: 0 }; cfg.events.max(16)],
+            entries: vec![sys::OVERLAPPED_ENTRY { lpCompletionKey: 0, lpOverlapped: core::ptr::null_mut(), Internal: 0, dwNumberOfBytesTransferred: 0 }; EVENTS_START.min(cfg.events.max(16))],
+            max_entries: cfg.events.max(16),
             send_pool: Vec::new(),
             // SAFETY: both values are the Winsock entry points for these GUIDs.
             accept_ex: unsafe { core::mem::transmute::<usize, sys::LPFN_ACCEPTEX>(ax) },
@@ -232,6 +238,9 @@ impl Driver {
             accepts: cfg.accepts_outstanding.max(1),
             udp_recvs: cfg.udp_recvs_outstanding.max(1),
             eager: cfg.iocp_eager_recv,
+            spin: Spin::new(cfg),
+            skips: 0,
+            got: 0,
         })
     }
 
@@ -1012,6 +1021,7 @@ impl Driver {
 
     pub(crate) fn turn(&mut self, timeout: Option<Duration>, out: &mut Vec<Event>) -> io::Result<()> {
         self.finish_closing();
+        let start = out.len();
         out.append(&mut self.pending);
         let repost = std::mem::take(&mut self.repost);
         for id in repost {
@@ -1019,36 +1029,51 @@ impl Driver {
         }
         out.append(&mut self.pending);
         self.flush(out);
-        let busy = !out.is_empty() || (!self.read_list.is_empty() && !self.stash.is_empty()) || !self.repost.is_empty() && !self.stash.is_empty();
-        let ms = if busy {
-            0
-        } else {
-            match timeout {
+        let work = (!self.read_list.is_empty() && !self.stash.is_empty()) || !self.repost.is_empty() && !self.stash.is_empty();
+        if out.len() > start && !work && self.skips < MAX_SKIPS {
+            // Results to report already: no system call this turn (bounded, see readiness).
+            self.skips += 1;
+            self.spin.worked = true;
+            return Ok(());
+        }
+        self.skips = 0;
+        let t = if out.len() > start || work { Some(Duration::ZERO) } else { timeout };
+        let (port, entries, got) = (&self.port, &mut self.entries, &mut self.got);
+        self.spin.wait(t, true, &mut self.stats, |t, st| {
+            let ms = match t {
                 None => sys::INFINITE,
                 Some(d) => d.as_nanos().div_ceil(1_000_000).min(u32::MAX as u128 - 1) as u32,
+            };
+            let mut n = 0u32;
+            st.waits += 1;
+            // SAFETY: `entries` has room for its length.
+            let ok = unsafe { sys::GetQueuedCompletionStatusEx(port.0, entries.as_mut_ptr(), entries.len() as u32, &mut n, ms, 0) };
+            if ok == 0 {
+                let e = io::Error::last_os_error();
+                if e.raw_os_error() != Some(sys::WAIT_TIMEOUT as i32) {
+                    return Err(e);
+                }
+                n = 0;
             }
-        };
-        let mut n = 0u32;
-        self.stats.waits += 1;
-        // SAFETY: `entries` has room for its length.
-        let ok = unsafe { sys::GetQueuedCompletionStatusEx(self.port.0, self.entries.as_mut_ptr(), self.entries.len() as u32, &mut n, ms, 0) };
-        if ok == 0 {
-            let e = io::Error::last_os_error();
-            if e.raw_os_error() != Some(sys::WAIT_TIMEOUT as i32) {
-                return Err(e);
-            }
-            n = 0;
-        }
+            *got = n as usize;
+            Ok(n > 0)
+        })?;
+        let n = std::mem::take(&mut self.got);
         self.stats.os_events += n as u64;
-        for i in 0..n as usize {
+        for i in 0..n {
             let ent = self.entries[i];
             self.complete(ent, out);
+        }
+        if n == self.entries.len() && n < self.max_entries {
+            let len = (n * 2).min(self.max_entries);
+            self.entries.resize(len, sys::OVERLAPPED_ENTRY { lpCompletionKey: 0, lpOverlapped: core::ptr::null_mut(), Internal: 0, dwNumberOfBytesTransferred: 0 });
         }
         out.append(&mut self.pending);
         self.read(out);
         self.flush(out);
         self.finish_closing();
         out.append(&mut self.pending);
+        self.spin.worked = out.len() > start;
         Ok(())
     }
 }

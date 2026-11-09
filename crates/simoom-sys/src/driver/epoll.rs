@@ -1,7 +1,7 @@
 //! Linux epoll poller (edge-triggered) with an eventfd waker.
 
 use super::readiness::{Poller as PollerTrait, Ready, WAKE};
-use super::{timeout_ms, DriverStats, Waker};
+use super::{timeout_ms, DriverStats, Waker, EVENTS_START};
 use crate::net::RawSock;
 use crate::os::linux as sys;
 use std::io;
@@ -13,6 +13,7 @@ pub(crate) struct Poller {
     ep: OwnedFd,
     efd: Arc<OwnedFd>,
     events: Vec<sys::epoll_event>,
+    max_events: usize,
 }
 
 pub(crate) fn eventfd() -> io::Result<OwnedFd> {
@@ -57,7 +58,7 @@ impl PollerTrait for Poller {
             return Err(io::Error::last_os_error());
         }
         let waker = eventfd_waker(efd.clone());
-        Ok((Poller { ep, efd, events: vec![sys::epoll_event { events: 0, data: 0 }; events] }, waker))
+        Ok((Poller { ep, efd, events: vec![sys::epoll_event { events: 0, data: 0 }; EVENTS_START.min(events)], max_events: events }, waker))
     }
 
     fn add(&mut self, sock: RawSock, token: u64, listener: bool, stats: &mut DriverStats) -> io::Result<()> {
@@ -82,6 +83,7 @@ impl PollerTrait for Poller {
             }
             return Err(e);
         }
+        let full = n as usize == self.events.len();
         for ev in &self.events[..n as usize] {
             let (flags, token) = (ev.events, ev.data);
             if token == WAKE {
@@ -95,6 +97,10 @@ impl PollerTrait for Poller {
                 closed: flags & (sys::EPOLLHUP | sys::EPOLLERR) != 0,
                 hup: flags & sys::EPOLLRDHUP != 0,
             });
+        }
+        if full && self.events.len() < self.max_events {
+            let len = (self.events.len() * 2).min(self.max_events);
+            self.events.resize(len, sys::epoll_event { events: 0, data: 0 });
         }
         Ok(())
     }

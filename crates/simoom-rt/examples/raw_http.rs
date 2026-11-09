@@ -52,6 +52,11 @@ impl Connection for Raw {
             cx.send_static(RESPONSE);
         }
         SERVED.with(|c| c.set(c.get() + n as u64));
+        // `Connection: close` (a connection per request, S5): close once the reply is written,
+        // as an HTTP server does.
+        if n > 0 && data[..end].windows(17).any(|w| w.eq_ignore_ascii_case(b"connection: close")) {
+            cx.close();
+        }
         end
     }
 }
@@ -140,14 +145,16 @@ fn main() {
     let per = |x: u64| if served == 0 { 0.0 } else { x as f64 / served as f64 };
     println!("served {served} requests on {} connections", t.accepted);
     println!(
-        "per request: {:.3} syscalls (waits {:.3}, recv {:.3}, send {:.3}, other {:.3}); {:.3} io_uring SQEs; {:.3} OS events",
+        "per request: {:.3} syscalls (waits {:.3}, recv {:.3}, send {:.3}, other {:.3}); {:.3} io_uring SQEs; {:.3} OS events; {:.3} sleeps; {:.3} spin polls",
         per(d.syscalls()),
         per(d.waits),
         per(d.recv_calls),
         per(d.send_calls),
         per(d.accept_calls + d.other_calls),
         per(d.sqes),
-        per(d.os_events)
+        per(d.os_events),
+        per(d.sleeps),
+        per(d.spin_polls)
     );
     rt.stop(Duration::from_millis(100));
     rt.join();

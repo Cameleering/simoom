@@ -47,10 +47,17 @@ pub struct Config {
     pub timer_tick: Duration,
     /// The shared offload pool.
     pub offload: OffloadConfig,
-    /// Listener options (backlog, buffer sizes; `reuse_port` is set by the runtime).
+    /// Listener options (backlog, buffer sizes; `reuse_port` is set by the runtime). The
+    /// default backlog is the system maximum, and `defer_accept` is `Some(1)`: on Linux a
+    /// connection is handed over once its first bytes arrived, so the first request is read
+    /// in the same turn as the accept. Set `defer_accept` to `None` for a protocol where the
+    /// server speaks first.
     pub listen: ListenOptions,
     /// Loop thread name prefix.
     pub thread_name: String,
+    /// Stack size of the loop threads; `None` keeps std's default (2 MiB, or `RUST_MIN_STACK`).
+    /// Only touched pages cost memory, so this mostly matters for address space.
+    pub stack_size: Option<usize>,
 }
 
 impl Default for Config {
@@ -70,8 +77,9 @@ impl Default for Config {
             write_low_water: 64 * 1024,
             timer_tick: Duration::from_millis(1),
             offload: OffloadConfig::default(),
-            listen: ListenOptions::default(),
+            listen: ListenOptions { defer_accept: Some(1), ..ListenOptions::default() },
             thread_name: "simoom-loop".into(),
+            stack_size: None,
         }
     }
 }
@@ -85,6 +93,8 @@ pub(crate) struct LoopStats {
     other_calls: AtomicU64,
     sqes: AtomicU64,
     os_events: AtomicU64,
+    sleeps: AtomicU64,
+    spin_polls: AtomicU64,
     accepted: AtomicU64,
     rejected: AtomicU64,
     closed: AtomicU64,
@@ -104,6 +114,8 @@ impl LoopStats {
         self.other_calls.store(d.other_calls, r);
         self.sqes.store(d.sqes, r);
         self.os_events.store(d.os_events, r);
+        self.sleeps.store(d.sleeps, r);
+        self.spin_polls.store(d.spin_polls, r);
         self.accepted.store(accepted, r);
         self.rejected.store(rejected, r);
         self.closed.store(closed, r);
@@ -124,6 +136,8 @@ impl LoopStats {
                 other_calls: self.other_calls.load(r),
                 sqes: self.sqes.load(r),
                 os_events: self.os_events.load(r),
+                sleeps: self.sleeps.load(r),
+                spin_polls: self.spin_polls.load(r),
             },
             accepted: self.accepted.load(r),
             rejected: self.rejected.load(r),
@@ -186,6 +200,8 @@ impl Stats {
             t.driver.other_calls += l.driver.other_calls;
             t.driver.sqes += l.driver.sqes;
             t.driver.os_events += l.driver.os_events;
+            t.driver.sleeps += l.driver.sleeps;
+            t.driver.spin_polls += l.driver.spin_polls;
             t.accepted += l.accepted;
             t.rejected += l.rejected;
             t.closed += l.closed;
@@ -394,15 +410,15 @@ impl Builder {
                     let s0 = Socket::tcp_listen(first, &opts)?;
                     let bound = s0.local_addr()?;
                     addrs.push(bound);
-                    let mut socks = vec![Some(s0)];
-                    if per_loop {
-                        for _ in 1..n {
-                            socks.push(Some(Socket::tcp_listen(bound, &opts)?));
-                        }
-                    }
+                    // Loop 0 gets the socket bound here (it fixes the port); the other loops bind
+                    // their SO_REUSEPORT sockets on their own threads, in parallel.
+                    let mut s0 = Some(s0);
                     for (i, slots) in per_loop_listeners.iter_mut().enumerate() {
-                        let sock = socks.get_mut(i).and_then(Option::take);
-                        slots.push(ListenerSlot::new(acceptor.clone(), sock, !per_loop));
+                        let mut slot = ListenerSlot::new(acceptor.clone(), s0.take(), !per_loop);
+                        if per_loop && i > 0 {
+                            slot.bind = Some((bound, opts.clone()));
+                        }
+                        slots.push(slot);
                     }
                 }
             }
@@ -420,10 +436,12 @@ impl Builder {
             let s0 = Socket::udp_bind(first, &opts)?;
             let bound = s0.local_addr()?;
             udp_addrs.push(bound);
-            per_loop_udps[0].push(UdpSlot::new(service.clone(), b, s0, opts.gro));
+            per_loop_udps[0].push(UdpSlot::new(service.clone(), b, Some(s0), opts.gro));
             if per_loop {
                 for slots in per_loop_udps.iter_mut().skip(1) {
-                    slots.push(UdpSlot::new(service.clone(), b, Socket::udp_bind(bound, &opts)?, opts.gro));
+                    let mut slot = UdpSlot::new(service.clone(), b, None, opts.gro);
+                    slot.bind = Some((bound, opts.clone()));
+                    slots.push(slot);
                 }
             }
         }
@@ -450,7 +468,11 @@ impl Builder {
             let setup = LoopSetup { index: i, cfg: cfg.clone(), shared: shared.clone(), offload: offload.clone(), listeners, udps };
             let pin = if cfg.pin_threads && !cpus.is_empty() { Some(cpus[i % cpus.len()]) } else { None };
             let mut reporter = Reporter { gate: gate.clone(), index: i, done: false };
-            let spawned = std::thread::Builder::new().name(format!("{}-{i}", cfg.thread_name)).spawn(move || {
+            let mut tb = std::thread::Builder::new().name(format!("{}-{i}", cfg.thread_name));
+            if let Some(sz) = cfg.stack_size {
+                tb = tb.stack_size(sz);
+            }
+            let spawned = tb.spawn(move || {
                 if let Some(cpu) = pin {
                     let _ = simoom_sys::cpu::pin_current_thread(cpu);
                 }

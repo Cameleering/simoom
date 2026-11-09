@@ -2,7 +2,7 @@
 //! registration once per socket, non-blocking `recv` into a stock buffer only after readiness,
 //! and one vectored `sendmsg` per connection per turn for everything queued.
 
-use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Waker, LARGE_BATCH};
+use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Spin, Waker, LARGE_BATCH, MAX_SKIPS};
 use crate::net::{RawSock, Socket};
 use crate::udp::{RecvMeta, Transmit, BATCH};
 use std::collections::VecDeque;
@@ -30,7 +30,8 @@ pub(crate) trait Poller: Sized {
     fn new(events: usize) -> io::Result<(Self, Waker)>;
     /// Registers `sock` for edge-triggered read and (unless `listener`) write readiness.
     fn add(&mut self, sock: RawSock, token: u64, listener: bool, stats: &mut DriverStats) -> io::Result<()>;
-    /// Waits for readiness and appends events (the waker's as `WAKE`, already reset).
+    /// Waits for readiness and appends events (the waker's as `WAKE`, already reset). Takes
+    /// every ready event the OS has, up to the event array's size, in one call.
     fn wait(&mut self, out: &mut Vec<Ready>, timeout: Option<Duration>, stats: &mut DriverStats) -> io::Result<()>;
 }
 
@@ -52,6 +53,10 @@ struct Entry {
     in_flush: bool,
     failed: bool,
     hup: bool,
+    /// Registered with the poller. Streams are registered lazily, just before the next poll,
+    /// so a connection that is read, answered and closed within a few turns (one request per
+    /// connection) never costs a registration.
+    registered: bool,
     /// A UDP socket receiving into large buffers (GRO).
     large: bool,
     off: usize,
@@ -68,11 +73,16 @@ pub(crate) struct Driver<P: Poller> {
     read_list: Vec<Id>,
     flush_list: Vec<Id>,
     accept_list: Vec<Id>,
+    /// Streams not yet registered with the poller.
+    unregistered: Vec<Id>,
     pending: Vec<Event>,
     ready: Vec<Ready>,
     scratch: Vec<Vec<u8>>,
     stats: DriverStats,
     budget: usize,
+    spin: Spin,
+    /// Turns in a row that returned results without polling the OS.
+    skips: u8,
 }
 
 impl<P: Poller> Driver<P> {
@@ -88,11 +98,14 @@ impl<P: Poller> Driver<P> {
             read_list: Vec::new(),
             flush_list: Vec::new(),
             accept_list: Vec::new(),
+            unregistered: Vec::new(),
             pending: Vec::new(),
-            ready: Vec::with_capacity(cfg.events.max(16)),
+            ready: Vec::with_capacity(super::EVENTS_START),
             scratch: Vec::with_capacity(BATCH),
             stats: DriverStats::default(),
             budget: cfg.recv_budget.max(1),
+            spin: Spin::new(cfg),
+            skips: 0,
         })
     }
 
@@ -113,11 +126,14 @@ impl<P: Poller> Driver<P> {
             in_flush: false,
             failed: false,
             hup: false,
+            registered: kind != Kind::Stream,
             large: false,
             off: 0,
             out: VecDeque::new(),
         });
-        if let Err(e) = self.poller.add(raw, id.0, kind == Kind::Listener, &mut self.stats) {
+        if kind == Kind::Stream {
+            self.unregistered.push(id);
+        } else if let Err(e) = self.poller.add(raw, id.0, kind == Kind::Listener, &mut self.stats) {
             self.slab.remove(id);
             return Err(e);
         }
@@ -157,11 +173,38 @@ impl<P: Poller> Driver<P> {
         }
         e.armed = on;
         if on && !e.in_read {
-            // The socket may hold data that arrived before; edge triggering won't repeat it,
-            // so try a read.
+            // The socket may hold data that arrived before (a request right behind the
+            // handshake, or with TCP_DEFER_ACCEPT always); edge triggering won't repeat it, so
+            // read now: the data is reported at the start of the next turn, without a poll.
             e.readable = true;
             e.in_read = true;
+            if e.kind == Kind::Stream && !self.stash.is_empty() {
+                let mut pending = std::mem::take(&mut self.pending);
+                let done = self.read_one(id, &mut pending);
+                self.pending = pending;
+                if done {
+                    return;
+                }
+            }
             self.read_list.push(id);
+        }
+    }
+
+    /// Registers streams that are still open with the poller (before a poll).
+    fn register_new(&mut self) {
+        for id in std::mem::take(&mut self.unregistered) {
+            let Some(e) = self.slab.get_mut(id) else { continue };
+            if e.registered {
+                continue;
+            }
+            e.registered = true;
+            let raw = e.sock.raw();
+            if let Err(error) = self.poller.add(raw, id.0, false, &mut self.stats) {
+                let key = e.key;
+                e.failed = true;
+                e.armed = false;
+                self.pending.push(Event::Error { key, error });
+            }
         }
     }
 
@@ -223,11 +266,29 @@ impl<P: Poller> Driver<P> {
     }
 
     pub(crate) fn turn(&mut self, timeout: Option<Duration>, out: &mut Vec<Event>) -> io::Result<()> {
+        let start = out.len();
         out.append(&mut self.pending);
         self.flush(out);
-        let busy = !out.is_empty() || !self.accept_list.is_empty() || (!self.read_list.is_empty() && !self.stash.is_empty());
-        let timeout = if busy { Some(Duration::ZERO) } else { timeout };
-        self.poller.wait(&mut self.ready, timeout, &mut self.stats)?;
+        let work = !self.accept_list.is_empty() || (!self.read_list.is_empty() && !self.stash.is_empty());
+        if out.len() > start && !work && self.skips < MAX_SKIPS {
+            // Results to report already (sends done, a read made when receiving was turned on):
+            // hand them over without a system call; the next turn polls. Bounded, so a loop
+            // that keeps producing output still looks at new events.
+            self.skips += 1;
+            self.spin.worked = true;
+            return Ok(());
+        }
+        self.skips = 0;
+        if !self.unregistered.is_empty() {
+            self.register_new();
+            out.append(&mut self.pending);
+        }
+        let timeout = if out.len() > start || work { Some(Duration::ZERO) } else { timeout };
+        let (poller, ready) = (&mut self.poller, &mut self.ready);
+        self.spin.wait(timeout, true, &mut self.stats, |t, st| {
+            poller.wait(ready, t, st)?;
+            Ok(!ready.is_empty())
+        })?;
         self.stats.os_events += self.ready.len() as u64;
         for i in 0..self.ready.len() {
             let r = self.ready[i];
@@ -268,6 +329,7 @@ impl<P: Poller> Driver<P> {
         self.read(out);
         self.flush(out);
         out.append(&mut self.pending);
+        self.spin.worked = out.len() > start;
         Ok(())
     }
 
@@ -307,111 +369,117 @@ impl<P: Poller> Driver<P> {
         let list = std::mem::take(&mut self.read_list);
         let mut keep = Vec::new();
         for id in list {
-            let Some(e) = self.slab.get_mut(id) else { continue };
-            if !e.armed || !e.readable {
-                e.in_read = false;
-                continue;
-            }
-            if self.stash.is_empty() && !e.large {
-                keep.push(id); // starved: wait for buffers
-                continue;
-            }
-            let mut done = false;
-            for _ in 0..self.budget {
-                if e.kind == Kind::Udp {
-                    let n = if e.large {
-                        let large = &mut self.large;
-                        self.scratch.extend((0..LARGE_BATCH).map(|_| large.take()));
-                        LARGE_BATCH
-                    } else {
-                        let n = self.stash.len().min(BATCH);
-                        if n == 0 {
-                            break;
-                        }
-                        let at = self.stash.len() - n;
-                        self.scratch.extend(self.stash.drain(at..));
-                        n
-                    };
-                    let mut meta = [RecvMeta::default(); BATCH];
-                    self.stats.recv_calls += 1;
-                    let r = e.sock.recv_msgs(&mut self.scratch, &mut meta);
-                    match r {
-                        Ok(got) => {
-                            for (i, buf) in self.scratch.drain(..got).enumerate() {
-                                out.push(Event::Datagram { key: e.key, buf, meta: meta[i] });
-                            }
-                            for b in self.scratch.drain(..) {
-                                if let Some(mut b) = self.large.keep(b) {
-                                    b.clear();
-                                    self.stash.push(b);
-                                }
-                            }
-                            if got < n {
-                                done = true;
-                                break;
-                            }
-                        }
-                        Err(err) => {
-                            for b in self.scratch.drain(..) {
-                                if let Some(mut b) = self.large.keep(b) {
-                                    b.clear();
-                                    self.stash.push(b);
-                                }
-                            }
-                            if err.kind() != io::ErrorKind::WouldBlock && err.kind() != io::ErrorKind::Interrupted {
-                                out.push(Event::Error { key: e.key, error: err });
-                            }
-                            done = true;
-                            break;
-                        }
-                    }
-                    continue;
-                }
-                let Some(mut buf) = self.stash.pop() else { break };
-                self.stats.recv_calls += 1;
-                match e.sock.recv_into(&mut buf) {
-                    Ok(0) => {
-                        self.stash.push(buf);
-                        e.armed = false;
-                        out.push(Event::Eof { key: e.key });
-                        done = true;
-                        break;
-                    }
-                    Ok(n) => {
-                        let full = n == buf.capacity();
-                        out.push(Event::Data { key: e.key, buf });
-                        if !full && !e.hup {
-                            // A short read drained the socket; new data raises a new edge. After
-                            // a hang-up no edge follows, so read on until 0.
-                            done = true;
-                            break;
-                        }
-                    }
-                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                        self.stash.push(buf);
-                        done = true;
-                        break;
-                    }
-                    Err(err) if err.kind() == io::ErrorKind::Interrupted => {
-                        self.stash.push(buf);
-                    }
-                    Err(error) => {
-                        self.stash.push(buf);
-                        e.armed = false;
-                        out.push(Event::Error { key: e.key, error });
-                        done = true;
-                        break;
-                    }
-                }
-            }
-            if done {
-                e.readable = false;
-                e.in_read = false;
-            } else {
+            if !self.read_one(id, out) {
                 keep.push(id);
             }
         }
         self.read_list = keep;
+    }
+
+    /// Reads one socket on the read list up to the budget. Returns `false` when it must stay
+    /// on the list (budget used up, or no buffer).
+    fn read_one(&mut self, id: Id, out: &mut Vec<Event>) -> bool {
+        let Some(e) = self.slab.get_mut(id) else { return true };
+        if !e.armed || !e.readable {
+            e.in_read = false;
+            return true;
+        }
+        if self.stash.is_empty() && !e.large {
+            return false; // starved: wait for buffers
+        }
+        let mut done = false;
+        for _ in 0..self.budget {
+            if e.kind == Kind::Udp {
+                let n = if e.large {
+                    let large = &mut self.large;
+                    self.scratch.extend((0..LARGE_BATCH).map(|_| large.take()));
+                    LARGE_BATCH
+                } else {
+                    let n = self.stash.len().min(BATCH);
+                    if n == 0 {
+                        break;
+                    }
+                    let at = self.stash.len() - n;
+                    self.scratch.extend(self.stash.drain(at..));
+                    n
+                };
+                let mut meta = [RecvMeta::default(); BATCH];
+                self.stats.recv_calls += 1;
+                let r = e.sock.recv_msgs(&mut self.scratch, &mut meta);
+                match r {
+                    Ok(got) => {
+                        for (i, buf) in self.scratch.drain(..got).enumerate() {
+                            out.push(Event::Datagram { key: e.key, buf, meta: meta[i] });
+                        }
+                        for b in self.scratch.drain(..) {
+                            if let Some(mut b) = self.large.keep(b) {
+                                b.clear();
+                                self.stash.push(b);
+                            }
+                        }
+                        if got < n {
+                            done = true;
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        for b in self.scratch.drain(..) {
+                            if let Some(mut b) = self.large.keep(b) {
+                                b.clear();
+                                self.stash.push(b);
+                            }
+                        }
+                        if err.kind() != io::ErrorKind::WouldBlock && err.kind() != io::ErrorKind::Interrupted {
+                            out.push(Event::Error { key: e.key, error: err });
+                        }
+                        done = true;
+                        break;
+                    }
+                }
+                continue;
+            }
+            let Some(mut buf) = self.stash.pop() else { break };
+            self.stats.recv_calls += 1;
+            match e.sock.recv_into(&mut buf) {
+                Ok(0) => {
+                    self.stash.push(buf);
+                    e.armed = false;
+                    out.push(Event::Eof { key: e.key });
+                    done = true;
+                    break;
+                }
+                Ok(n) => {
+                    let full = n == buf.capacity();
+                    out.push(Event::Data { key: e.key, buf });
+                    if !full && !e.hup {
+                        // A short read drained the socket; new data raises a new edge. After
+                        // a hang-up no edge follows, so read on until 0.
+                        done = true;
+                        break;
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                    self.stash.push(buf);
+                    done = true;
+                    break;
+                }
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {
+                    self.stash.push(buf);
+                }
+                Err(error) => {
+                    self.stash.push(buf);
+                    e.armed = false;
+                    out.push(Event::Error { key: e.key, error });
+                    done = true;
+                    break;
+                }
+            }
+        }
+        if done {
+            e.readable = false;
+            e.in_read = false;
+        }
+        done
     }
 
     fn flush(&mut self, out: &mut Vec<Event>) {

@@ -30,6 +30,7 @@ pub const SO_RCVBUF: c_int = 0x1002;
 pub const SO_ERROR: c_int = 0x1007;
 pub const SO_UPDATE_ACCEPT_CONTEXT: c_int = 0x700B;
 pub const TCP_NODELAY: c_int = 1;
+pub const SOMAXCONN: i32 = 0x7fff_ffff;
 pub const IP_TOS: c_int = 3;
 pub const IP_PKTINFO: c_int = 19;
 pub const IP_DONTFRAGMENT: c_int = 14;
@@ -215,6 +216,9 @@ extern "system" {
     pub fn QueryPerformanceCounter(count: *mut i64) -> BOOL;
     pub fn QueryPerformanceFrequency(freq: *mut i64) -> BOOL;
     pub fn GetTickCount64() -> u64;
+    /// The four times are FILETIMEs (100 ns units), written here as little-endian `u64`s.
+    pub fn GetProcessTimes(process: HANDLE, creation: *mut u64, exit: *mut u64, kernel: *mut u64, user: *mut u64) -> BOOL;
+    pub fn GetThreadTimes(thread: HANDLE, creation: *mut u64, exit: *mut u64, kernel: *mut u64, user: *mut u64) -> BOOL;
 }
 
 #[link(name = "ntdll")]

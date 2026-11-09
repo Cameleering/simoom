@@ -594,3 +594,335 @@ fn io_uring_falls_back_to_kernel_allocated_rings_then_to_provide_buffers() {
     client.join().unwrap();
     }
 }
+
+// --- runtime-fix round: busy polling, accept path, backlog ------------------------------------
+
+/// Serves one echo exchange so the driver's last turns did work, then leaves it idle.
+fn warm_echo(d: &mut Driver, addr: std::net::SocketAddr) -> (TcpStream, Id) {
+    let mut c = TcpStream::connect(addr).unwrap();
+    c.write_all(b"ping").unwrap();
+    let mut conn = None;
+    run(d, |d, ev| {
+        match ev {
+            Event::Accepted { socket, .. } => {
+                let id = d.stream(socket, 3).unwrap();
+                d.recv(id, true);
+                conn = Some(id);
+            }
+            Event::Data { key: 3, buf } => d.send(conn.unwrap(), OutBuf::Owned(buf)),
+            Event::Sent { key: 3, .. } => return true,
+            _ => {}
+        }
+        false
+    });
+    let mut got = [0u8; 4];
+    c.read_exact(&mut got).unwrap();
+    (c, conn.unwrap())
+}
+
+#[test]
+fn an_idle_driver_sleeps_instead_of_spinning() {
+    for b in backends() {
+        let mut d = Driver::new(&DriverConfig { backend: b, busy_poll: Duration::from_micros(200), ..Default::default() }).unwrap();
+        let addr = listener(&mut d);
+        let (_c, _id) = warm_echo(&mut d, addr);
+        // Right after work the driver may spin for one window (at most 200 µs here); after that
+        // it must block. A second of idle turns must cost (almost) no CPU.
+        let mut evs = Vec::new();
+        let (cpu0, t0) = (crate::time::thread_cpu_ns_for_tests(), Instant::now());
+        while t0.elapsed() < Duration::from_secs(1) {
+            d.turn(Some(Duration::from_millis(100)), &mut evs).unwrap();
+            evs.clear();
+        }
+        let cpu = crate::time::thread_cpu_ns_for_tests() - cpu0;
+        let s = d.stats();
+        eprintln!("{b:?}: idle second used {} us of CPU; {s:?}", cpu / 1000);
+        assert!(cpu < 30_000_000, "{b:?}: an idle second used {} ms of CPU", cpu / 1_000_000);
+    }
+}
+
+#[test]
+fn busy_poll_window_shrinks_when_spinning_finds_nothing_and_grows_when_it_would_have() {
+    let cfg = DriverConfig { busy_poll: Duration::from_micros(40), ..Default::default() };
+    let mut spin = Spin::new(&cfg);
+    if spin.max == 0 {
+        return; // turned off with SIMOOM_BUSY_POLL_US=0
+    }
+    let mut st = DriverStats::default();
+    // Every spin misses and every sleep is long: the window closes.
+    for _ in 0..20 {
+        spin.worked = true;
+        spin.wait(Some(Duration::from_millis(1)), true, &mut st, |t, _| {
+            if t != Some(Duration::ZERO) {
+                std::thread::sleep(Duration::from_micros(300));
+            }
+            Ok(false)
+        })
+        .unwrap();
+    }
+    assert_eq!(spin.win, 0, "the window must close after spinning for nothing");
+    assert!(st.spin_polls > 0 && st.sleeps == 20);
+    // Sleeps that end within the window's reach reopen it.
+    spin.worked = true;
+    spin.wait(Some(Duration::from_millis(1)), true, &mut st, |_, _| Ok(true)).unwrap();
+    assert!(spin.win >= SPIN_START_NS, "a short sleep must reopen the window: {}", spin.win);
+    // Not after an idle turn: no spinning at all.
+    spin.worked = false;
+    let polls = st.spin_polls;
+    spin.wait(Some(Duration::from_micros(100)), true, &mut st, |_, _| Ok(false)).unwrap();
+    assert_eq!(st.spin_polls, polls, "an idle loop must not spin");
+}
+
+#[test]
+fn accepts_are_batched_until_the_queue_is_empty() {
+    for b in backends() {
+        let mut d = driver(b);
+        let addr = listener(&mut d);
+        let clients: Vec<TcpStream> = (0..40).map(|_| TcpStream::connect(addr).unwrap()).collect();
+        std::thread::sleep(Duration::from_millis(50));
+        let before = d.stats();
+        let mut accepted = 0;
+        let mut turns = 0;
+        let mut evs = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while accepted < 40 {
+            assert!(Instant::now() < deadline, "{b:?}: accepted only {accepted}");
+            d.turn(Some(Duration::from_millis(50)), &mut evs).unwrap();
+            turns += 1;
+            for e in evs.drain(..) {
+                if let Event::Accepted { .. } = e {
+                    accepted += 1;
+                }
+            }
+        }
+        let s = d.stats();
+        let calls = s.accept_calls - before.accept_calls;
+        eprintln!("{b:?}: 40 queued connections accepted in {turns} turns, {calls} accept calls");
+        // epoll and kqueue: one accept per connection plus one EAGAIN; io_uring: one multishot
+        // accept; IOCP: AcceptEx calls kept outstanding (re-posted per connection).
+        assert!(turns <= 3, "{b:?}: {turns} turns");
+        if matches!(b, Backend::Epoll | Backend::Kqueue) {
+            assert!(calls <= 41, "{b:?}: {calls} accept calls");
+        }
+        drop(clients);
+    }
+}
+
+#[test]
+fn default_backlog_is_the_system_maximum() {
+    let b = crate::net::default_backlog();
+    assert_eq!(ListenOptions::default().backlog, b);
+    #[cfg(target_os = "linux")]
+    {
+        let somax: i64 = std::fs::read_to_string("/proc/sys/net/core/somaxconn").unwrap().trim().parse().unwrap();
+        assert_eq!(b as i64, somax.min(65535));
+    }
+    #[cfg(windows)]
+    assert_eq!(b, 0x7fff_ffff);
+    assert!(b > 1024, "{b}");
+    // A configured backlog is still honoured.
+    let l = Socket::tcp_listen("127.0.0.1:0".parse().unwrap(), &ListenOptions { backlog: 16, ..Default::default() }).unwrap();
+    let c = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+    drop(c);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn defer_accept_hands_over_a_connection_only_with_its_first_bytes() {
+    let opts = ListenOptions { defer_accept: Some(1), ..Default::default() };
+    let l = Socket::tcp_listen("127.0.0.1:0".parse().unwrap(), &opts).unwrap();
+    assert!(l.getsockopt_int(crate::os::linux::IPPROTO_TCP, crate::os::linux::TCP_DEFER_ACCEPT).unwrap() > 0);
+    let mut c = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(l.accept().unwrap_err().kind(), io::ErrorKind::WouldBlock, "a silent connection must not be handed over yet");
+    c.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let s = loop {
+        match l.accept() {
+            Ok((s, _)) => break s,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(1)),
+            Err(e) => panic!("{e}"),
+        }
+    };
+    // The request is already there: the first read after accept succeeds.
+    let mut buf = [0u8; 64];
+    assert_eq!(s.recv(&mut buf).unwrap(), 18);
+}
+
+/// Turning receiving on reads at once: data already queued (TCP_DEFER_ACCEPT, or a request right
+/// behind the handshake) is reported by the next turn without a wait, and a connection served and
+/// closed within a few turns is never registered with the poller.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
+#[test]
+fn readiness_reads_right_after_accept_and_registers_lazily() {
+    let b = if cfg!(target_os = "linux") { Backend::Epoll } else { Backend::Kqueue };
+    let mut d = driver(b);
+    let opts = ListenOptions { defer_accept: Some(1), ..Default::default() };
+    let l = Socket::tcp_listen("127.0.0.1:0".parse().unwrap(), &opts).unwrap();
+    let addr = l.local_addr().unwrap();
+    d.listen(l, 1).unwrap();
+    let mut c = TcpStream::connect(addr).unwrap();
+    c.write_all(b"hello").unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    let mut evs = Vec::new();
+    let mut sock = None;
+    while sock.is_none() {
+        topup(&mut d, 2048);
+        d.turn(Some(Duration::from_millis(50)), &mut evs).unwrap();
+        for e in evs.drain(..) {
+            if let Event::Accepted { socket, .. } = e {
+                sock = Some(socket);
+            }
+        }
+    }
+    let before = d.stats();
+    let id = d.stream(sock.unwrap(), 5).unwrap();
+    d.recv(id, true);
+    d.turn(Some(Duration::from_secs(5)), &mut evs).unwrap();
+    let data: Vec<u8> = evs.drain(..).filter_map(|e| if let Event::Data { buf, .. } = e { Some(buf) } else { None }).flatten().collect();
+    assert_eq!(data, b"hello");
+    d.send(id, OutBuf::Static(b"bye"));
+    d.turn(Some(Duration::from_secs(5)), &mut evs).unwrap();
+    assert!(evs.drain(..).any(|e| matches!(e, Event::Sent { key: 5, .. })));
+    d.close(id);
+    d.turn(Some(Duration::from_secs(5)), &mut evs).unwrap();
+    assert!(evs.drain(..).any(|e| matches!(e, Event::Closed { key: 5 })));
+    let s = d.stats();
+    assert_eq!(s.waits, before.waits, "read, answer and close took no wait");
+    assert_eq!(s.other_calls, before.other_calls, "the connection was never registered");
+    let mut got = Vec::new();
+    c.read_to_end(&mut got).unwrap();
+    assert_eq!(got, b"bye");
+
+    // A connection that stays open is registered before the next poll and keeps working.
+    let mut c2 = TcpStream::connect(addr).unwrap();
+    c2.write_all(b"one").unwrap();
+    let mut conn = None;
+    let mut msgs = 0;
+    run(&mut d, |d, ev| {
+        match ev {
+            Event::Accepted { socket, .. } => {
+                let id = d.stream(socket, 6).unwrap();
+                d.recv(id, true);
+                conn = Some(id);
+            }
+            Event::Data { key: 6, buf } => {
+                msgs += 1;
+                d.send(conn.unwrap(), OutBuf::Owned(buf));
+                if msgs == 1 {
+                    // The second message must arrive through the poller (registered lazily).
+                    c2.write_all(b"two").unwrap();
+                } else {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        false
+    });
+    assert_eq!(msgs, 2);
+}
+
+/// A loop that queues output on every turn still polls for new events (the turns that skip the
+/// poll are bounded).
+#[test]
+fn a_loop_that_always_has_output_still_sees_new_connections() {
+    for b in backends() {
+        let mut d = driver(b);
+        let addr = listener(&mut d);
+        let (mut c, id) = warm_echo(&mut d, addr);
+        let reader = std::thread::spawn(move || {
+            let mut buf = vec![0u8; 65536];
+            let mut n = 0usize;
+            while n < 4 << 20 {
+                match c.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(k) => n += k,
+                }
+            }
+        });
+        let _second = TcpStream::connect(addr).unwrap();
+        let mut evs = Vec::new();
+        let mut seen = false;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !seen {
+            assert!(Instant::now() < deadline, "{b:?}: the new connection was never reported");
+            d.send(id, OutBuf::Static(&[b'x'; 1024]));
+            d.turn(Some(Duration::from_millis(50)), &mut evs).unwrap();
+            seen = evs.drain(..).any(|e| matches!(e, Event::Accepted { .. }));
+        }
+        d.close(id);
+        drop(reader);
+    }
+}
+
+/// A socket closed just before the driver is dropped is really closed (io_uring closes
+/// descriptors with SQEs, which `Drop` must still submit).
+#[test]
+fn a_close_right_before_drop_reaches_the_peer() {
+    for b in backends() {
+        let mut d = driver(b);
+        let addr = listener(&mut d);
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.write_all(b"x").unwrap();
+        let mut conn = None;
+        run(&mut d, |d, ev| {
+            match ev {
+                Event::Accepted { socket, .. } => {
+                    let id = d.stream(socket, 8).unwrap();
+                    d.recv(id, true);
+                    conn = Some(id);
+                }
+                Event::Data { key: 8, .. } => d.close(conn.unwrap()),
+                Event::Closed { key: 8 } => return true,
+                _ => {}
+            }
+            false
+        });
+        drop(d);
+        c.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let mut buf = [0u8; 8];
+        let t = Instant::now();
+        let r = c.read(&mut buf);
+        assert!(matches!(r, Ok(0)) || matches!(&r, Err(e) if e.kind() == io::ErrorKind::ConnectionReset), "{b:?}: {r:?} after {:?}", t.elapsed());
+    }
+}
+
+/// io_uring: a connection's fixed-file slot is set and cleared, and its descriptor closed, with
+/// SQEs inside the enters the loop makes anyway: no system call of its own.
+#[cfg(all(target_os = "linux", feature = "io-uring"))]
+#[test]
+fn io_uring_connections_cost_no_register_calls() {
+    if uring::available().is_err() {
+        return;
+    }
+    let mut d = driver(Backend::IoUring);
+    let addr = listener(&mut d);
+    let before = d.stats();
+    for i in 0..5u64 {
+        let mut c = TcpStream::connect(addr).unwrap();
+        c.write_all(b"hi").unwrap();
+        let mut conn = None;
+        run(&mut d, |d, ev| {
+            match ev {
+                Event::Accepted { socket, .. } => {
+                    let id = d.stream(socket, 100 + i).unwrap();
+                    d.recv(id, true);
+                    conn = Some(id);
+                }
+                Event::Data { key, buf } if key == 100 + i => {
+                    d.send(conn.unwrap(), OutBuf::Owned(buf));
+                }
+                Event::Sent { key, .. } if key == 100 + i => d.close(conn.unwrap()),
+                Event::Closed { key } if key == 100 + i => return true,
+                _ => {}
+            }
+            false
+        });
+        let mut got = Vec::new();
+        c.read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"hi");
+    }
+    let s = d.stats();
+    assert_eq!(s.other_calls, before.other_calls, "{s:?}");
+}

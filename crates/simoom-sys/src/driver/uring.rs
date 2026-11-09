@@ -22,7 +22,7 @@
 //! cancellation round, their memory is leaked rather than freed under the kernel.
 
 use super::epoll::{drain_eventfd, eventfd, eventfd_waker};
-use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Waker, LARGE_BATCH};
+use super::{DriverConfig, DriverStats, Event, Id, LargeBufs, OutBuf, Slab, Waker, LARGE_BATCH, MAX_SKIPS};
 use crate::net::Socket;
 use crate::os::linux as sys;
 use crate::udp::{RecvMeta, Transmit, BATCH};
@@ -39,6 +39,7 @@ use std::time::{Duration, Instant};
 const SETUP_CQSIZE: u32 = 1 << 3;
 const SETUP_CLAMP: u32 = 1 << 4;
 const SETUP_SUBMIT_ALL: u32 = 1 << 7;
+const SETUP_TASKRUN_FLAG: u32 = 1 << 9;
 const SETUP_SINGLE_ISSUER: u32 = 1 << 12;
 const SETUP_DEFER_TASKRUN: u32 = 1 << 13;
 
@@ -49,6 +50,9 @@ const FEAT_EXT_ARG: u32 = 1 << 8;
 const ENTER_GETEVENTS: u32 = 1 << 0;
 const ENTER_EXT_ARG: u32 = 1 << 3;
 
+const SQ_CQ_OVERFLOW: u32 = 1 << 1;
+const SQ_TASKRUN: u32 = 1 << 2;
+
 const OFF_SQ_RING: i64 = 0;
 const OFF_SQES: i64 = 0x1000_0000;
 
@@ -56,6 +60,8 @@ const OP_POLL_ADD: u8 = 6;
 const OP_SENDMSG: u8 = 9;
 const OP_ACCEPT: u8 = 13;
 const OP_ASYNC_CANCEL: u8 = 14;
+const OP_CLOSE: u8 = 19;
+const OP_FILES_UPDATE: u8 = 20;
 const OP_SEND: u8 = 26;
 const OP_RECV: u8 = 27;
 const OP_PROVIDE_BUFFERS: u8 = 31;
@@ -244,8 +250,10 @@ struct Mmap {
 
 impl Mmap {
     fn ring(fd: i32, len: usize, off: i64) -> io::Result<Mmap> {
+        // No MAP_POPULATE: the pages come in as the rings are used, so an idle loop's rings cost
+        // a page or two instead of all of them.
         // SAFETY: maps a region of the ring descriptor; checked against MAP_FAILED.
-        let p = unsafe { sys::mmap(core::ptr::null_mut(), len, sys::PROT_READ | sys::PROT_WRITE, sys::MAP_SHARED | sys::MAP_POPULATE, fd, off) };
+        let p = unsafe { sys::mmap(core::ptr::null_mut(), len, sys::PROT_READ | sys::PROT_WRITE, sys::MAP_SHARED, fd, off) };
         if p == sys::MAP_FAILED {
             return Err(io::Error::last_os_error());
         }
@@ -289,6 +297,11 @@ struct Ring {
     cq_tail: *const AtomicU32,
     cq_mask: u32,
     cqes: *const Cqe,
+    /// The SQ ring flags (`IORING_SQ_TASKRUN`, `IORING_SQ_CQ_OVERFLOW`).
+    sq_flags: *const AtomicU32,
+    /// The kernel raises `IORING_SQ_TASKRUN` when completions wait to be run
+    /// (`IORING_SETUP_TASKRUN_FLAG`), so a busy poll can look at memory instead of entering.
+    taskrun_flag: bool,
     tail: u32,
 }
 
@@ -298,13 +311,16 @@ const OPTIONAL_SETUP: [(u32, &str); 3] = [(SETUP_SUBMIT_ALL, "SUBMIT_ALL"), (SET
 /// The optional flags to leave out, tried in this order while the kernel answers `EINVAL` (a
 /// flag it doesn't know, or a combination it refuses): one flag at a time first, so a kernel
 /// gets the best subset it accepts. `DEFER_TASKRUN` needs `SINGLE_ISSUER`.
-const SETUP_DROPS: [u32; 6] = [
+/// `TASKRUN_FLAG` is asked for only with `DEFER_TASKRUN` (it needs a deferred or cooperative
+/// task-run mode) and is dropped silently: it only lets busy polling skip system calls.
+const SETUP_DROPS: [u32; 7] = [
     0,
-    SETUP_SUBMIT_ALL,
-    SETUP_DEFER_TASKRUN,
-    SETUP_DEFER_TASKRUN | SETUP_SUBMIT_ALL,
-    SETUP_DEFER_TASKRUN | SETUP_SINGLE_ISSUER,
-    SETUP_DEFER_TASKRUN | SETUP_SINGLE_ISSUER | SETUP_SUBMIT_ALL,
+    SETUP_TASKRUN_FLAG,
+    SETUP_SUBMIT_ALL | SETUP_TASKRUN_FLAG,
+    SETUP_DEFER_TASKRUN | SETUP_TASKRUN_FLAG,
+    SETUP_DEFER_TASKRUN | SETUP_TASKRUN_FLAG | SETUP_SUBMIT_ALL,
+    SETUP_DEFER_TASKRUN | SETUP_TASKRUN_FLAG | SETUP_SINGLE_ISSUER,
+    SETUP_DEFER_TASKRUN | SETUP_TASKRUN_FLAG | SETUP_SINGLE_ISSUER | SETUP_SUBMIT_ALL,
 ];
 
 #[cfg(test)]
@@ -328,7 +344,7 @@ impl Ring {
     /// Sets up a ring with the best set-up flags the kernel accepts; `dropped` collects the
     /// names of the optional flags it refused.
     fn new(entries: u32, dropped: &mut Vec<&'static str>) -> io::Result<Ring> {
-        let all = SETUP_CQSIZE | SETUP_CLAMP | SETUP_SUBMIT_ALL | SETUP_DEFER_TASKRUN | SETUP_SINGLE_ISSUER;
+        let all = SETUP_CQSIZE | SETUP_CLAMP | SETUP_SUBMIT_ALL | SETUP_DEFER_TASKRUN | SETUP_SINGLE_ISSUER | SETUP_TASKRUN_FLAG;
         let mut found = None;
         let mut last = None;
         for drop in SETUP_DROPS {
@@ -378,6 +394,8 @@ impl Ring {
                 cq_tail: base.add(p.cq_off.tail as usize).cast(),
                 cq_mask: *base.add(p.cq_off.ring_mask as usize).cast::<u32>(),
                 cqes: base.add(p.cq_off.cqes as usize).cast(),
+                sq_flags: base.add(p.sq_off.flags as usize).cast(),
+                taskrun_flag: p.flags & SETUP_TASKRUN_FLAG != 0,
                 tail: (*base.add(p.sq_off.tail as usize).cast::<AtomicU32>()).load(Ordering::Relaxed),
                 _sq_map: sq_map,
                 _sqe_map: sqe_map,
@@ -389,6 +407,25 @@ impl Ring {
     fn sq_head(&self) -> u32 {
         // SAFETY: points into the live SQ ring mapping.
         unsafe { (*self.sq_head).load(Ordering::Acquire) }
+    }
+
+    /// Whether a non-blocking `io_uring_enter` could find anything: completions in the ring, or
+    /// task work (or a CQ overflow) flagged by the kernel. Without `TASKRUN_FLAG` it can't
+    /// tell, and says yes.
+    fn may_have_work(&self) -> bool {
+        // SAFETY: both point into the live ring mapping.
+        unsafe {
+            if (*self.cq_head).load(Ordering::Relaxed) != (*self.cq_tail).load(Ordering::Acquire) {
+                return true;
+            }
+            !self.taskrun_flag || (*self.sq_flags).load(Ordering::Acquire) & (SQ_TASKRUN | SQ_CQ_OVERFLOW) != 0
+        }
+    }
+
+    /// Whether completions are in the ring now (no task work run).
+    fn cq_ready(&self) -> bool {
+        // SAFETY: both point into the live ring mapping.
+        unsafe { (*self.cq_head).load(Ordering::Relaxed) != (*self.cq_tail).load(Ordering::Acquire) }
     }
 
     /// Entries written but not yet consumed by the kernel.
@@ -460,15 +497,22 @@ impl Ring {
 /// deferred task running, the opcodes used here, and provided-buffer rings.
 pub fn available() -> io::Result<()> {
     let ring = Ring::new(8, &mut Vec::new())?;
-    let provide_ok = probe_ops(&ring)?;
-    let pb = BufRing::new(ring.fd.as_raw_fd(), 8, provide_ok, &mut Vec::new())?;
+    let ops = probe_ops(&ring)?;
+    let pb = BufRing::new(ring.fd.as_raw_fd(), 8, ops.provide, &mut Vec::new())?;
     drop(pb);
     Ok(())
 }
 
-/// Checks the opcodes the driver needs; returns whether `IORING_OP_PROVIDE_BUFFERS` (the
-/// fallback for kernels that refuse provided-buffer rings) is there too.
-fn probe_ops(ring: &Ring) -> io::Result<bool> {
+/// Optional opcodes: `IORING_OP_PROVIDE_BUFFERS` (the fallback for kernels that refuse
+/// provided-buffer rings), and `IORING_OP_FILES_UPDATE` with `IORING_OP_CLOSE` (5.6), which let a
+/// connection's fixed-file slot and descriptor be set up and torn down inside the next
+/// `io_uring_enter` instead of with system calls of their own.
+struct OptionalOps {
+    provide: bool,
+    files_update: bool,
+}
+
+fn probe_ops(ring: &Ring) -> io::Result<OptionalOps> {
     // SAFETY: an all-zero probe is what the kernel expects as input.
     let mut probe: Probe = unsafe { core::mem::zeroed() };
     register(ring.fd.as_raw_fd(), REGISTER_PROBE, (&mut probe as *mut Probe).cast(), 64).map_err(|e| step("IORING_REGISTER_PROBE", e))?;
@@ -478,9 +522,13 @@ fn probe_ops(ring: &Ring) -> io::Result<bool> {
             return Err(io::Error::new(io::ErrorKind::Unsupported, format!("io_uring opcode {op} not supported")));
         }
     }
-    let op = OP_PROVIDE_BUFFERS as usize;
-    Ok(op < probe.ops_len as usize && probe.ops[op].flags & PROBE_OP_SUPPORTED != 0)
+    let has = |op: u8| (op as usize) < probe.ops_len as usize && probe.ops[op as usize].flags & PROBE_OP_SUPPORTED != 0;
+    Ok(OptionalOps { provide: has(OP_PROVIDE_BUFFERS), files_update: has(OP_FILES_UPDATE) && has(OP_CLOSE) })
 }
+
+/// The value a fixed-file slot is cleared with (read by the kernel when a `FILES_UPDATE` SQE is
+/// submitted, so it must live as long as the program).
+static CLEAR_SLOT: i32 = -1;
 
 // --- provided-buffer ring ---------------------------------------------------------------------
 
@@ -630,7 +678,17 @@ pub(crate) struct Driver {
     stash: Vec<Vec<u8>>,
     target: usize,
     slab: Slab<Entry>,
+    /// Fixed-file slots given back; `slots_next` up to `slots_max` were never used.
     slots_free: Vec<u32>,
+    slots_next: u32,
+    slots_max: u32,
+    /// The descriptor each fixed-file slot was last given, read by the kernel when the
+    /// `FILES_UPDATE` SQE is submitted. Its capacity is reserved up front (`slots_max`) so it
+    /// never moves; only the slots used so far are touched.
+    slot_fds: Vec<i32>,
+    /// `IORING_OP_FILES_UPDATE` and `IORING_OP_CLOSE` are there: slot updates and closes go in
+    /// SQEs.
+    sqe_files: bool,
     fixed: bool,
     efd: Arc<OwnedFd>,
     waker: Waker,
@@ -650,6 +708,8 @@ pub(crate) struct Driver {
     budget: usize,
     /// Optional features the kernel refused (set-up flags, registered files).
     dropped: Vec<&'static str>,
+    spin: super::Spin,
+    skips: u8,
 }
 
 impl Driver {
@@ -677,12 +737,12 @@ impl Driver {
         }
         let mut dropped = Vec::new();
         let ring = Ring::new(cfg.uring_entries.clamp(8, 32768), &mut dropped)?;
-        let provide_ok = probe_ops(&ring)?;
-        let bufring = BufRing::new(ring.fd.as_raw_fd(), cfg.uring_buffers.max(8), provide_ok, &mut dropped)?;
+        let ops = probe_ops(&ring)?;
+        let bufring = BufRing::new(ring.fd.as_raw_fd(), cfg.uring_buffers.max(8), ops.provide, &mut dropped)?;
         let entries = bufring.entries;
         let mut stats = DriverStats::default();
         let mut fixed = false;
-        let mut slots_free = Vec::new();
+        let mut slots_max = 0;
         if cfg.uring_fixed_files && cfg.uring_max_files > 0 {
             // The kernel refuses a table larger than RLIMIT_NOFILE (EMFILE); shells default the
             // soft limit to 1024, so ask for at most that many.
@@ -699,7 +759,7 @@ impl Driver {
             };
             if ok {
                 fixed = true;
-                slots_free = (0..n).rev().collect();
+                slots_max = n;
             } else {
                 dropped.push("registered files");
             }
@@ -714,7 +774,11 @@ impl Driver {
             stash: Vec::new(),
             target: (entries as usize / 2).max(8),
             slab: Slab::new(),
-            slots_free,
+            slots_free: Vec::new(),
+            slots_next: 0,
+            slots_max,
+            slot_fds: Vec::with_capacity(if ops.files_update { slots_max as usize } else { 0 }),
+            sqe_files: ops.files_update,
             fixed,
             efd,
             waker,
@@ -733,6 +797,8 @@ impl Driver {
             stats,
             budget: cfg.recv_budget.max(1),
             dropped,
+            spin: super::Spin::new(cfg),
+            skips: 0,
         };
         d.arm_wake();
         Ok(d)
@@ -801,13 +867,34 @@ impl Driver {
     fn add(&mut self, sock: Socket, key: u64, kind: Kind) -> io::Result<Id> {
         let mut slot = None;
         if self.fixed && kind == Kind::Stream {
-            if let Some(s) = self.slots_free.pop() {
+            let free = self.slots_free.pop().or_else(|| {
+                (self.slots_next < self.slots_max).then(|| {
+                    self.slots_next += 1;
+                    self.slots_next - 1
+                })
+            });
+            if let Some(s) = free {
                 let fd = sock.raw();
-                let up = FilesUpdate { offset: s, resv: 0, fds: &fd as *const i32 as u64 };
-                self.stats.other_calls += 1;
-                match register(self.ring.fd.as_raw_fd(), REGISTER_FILES_UPDATE, (&up as *const FilesUpdate).cast(), 1) {
-                    Ok(_) => slot = Some(s),
-                    Err(_) => self.slots_free.push(s),
+                if self.sqe_files {
+                    // Set the slot inside the next io_uring_enter, ahead of the receive that
+                    // uses it (SQEs are issued in order, and a files update completes inline).
+                    let i = s as usize;
+                    if i == self.slot_fds.len() {
+                        self.slot_fds.push(fd); // within the reserved capacity: no move
+                    } else {
+                        self.slot_fds[i] = fd;
+                    }
+                    let ptr = &self.slot_fds[i] as *const i32 as u64;
+                    self.push(Sqe { opcode: OP_FILES_UPDATE, flags: SQE_CQE_SKIP_SUCCESS, fd: -1, addr: ptr, len: 1, off: s as u64, user_data: (Op::Cancel as u64) << 56, ..Default::default() });
+                    self.stats.sqes -= 1; // set-up, not I/O: kept out of the SQE count
+                    slot = Some(s);
+                } else {
+                    let up = FilesUpdate { offset: s, resv: 0, fds: &fd as *const i32 as u64 };
+                    self.stats.other_calls += 1;
+                    match register(self.ring.fd.as_raw_fd(), REGISTER_FILES_UPDATE, (&up as *const FilesUpdate).cast(), 1) {
+                        Ok(_) => slot = Some(s),
+                        Err(_) => self.slots_free.push(s),
+                    }
                 }
             }
         }
@@ -940,17 +1027,34 @@ impl Driver {
             self.closing.swap_remove(i);
             if let Some(e) = self.slab.remove(id) {
                 if let Some(s) = e.slot {
-                    let fd: i32 = -1;
-                    let up = FilesUpdate { offset: s, resv: 0, fds: &fd as *const i32 as u64 };
-                    self.stats.other_calls += 1;
-                    if register(self.ring.fd.as_raw_fd(), REGISTER_FILES_UPDATE, (&up as *const FilesUpdate).cast(), 1).is_ok() {
+                    if self.sqe_files {
+                        // Cleared in the next io_uring_enter; a new connection given this slot
+                        // later sets it with an SQE behind this one.
+                        let ptr = &CLEAR_SLOT as *const i32 as u64;
+                        self.push(Sqe { opcode: OP_FILES_UPDATE, flags: SQE_CQE_SKIP_SUCCESS, fd: -1, addr: ptr, len: 1, off: s as u64, user_data: (Op::Cancel as u64) << 56, ..Default::default() });
+                        self.stats.sqes -= 1;
                         self.slots_free.push(s);
+                    } else {
+                        let fd: i32 = -1;
+                        let up = FilesUpdate { offset: s, resv: 0, fds: &fd as *const i32 as u64 };
+                        self.stats.other_calls += 1;
+                        if register(self.ring.fd.as_raw_fd(), REGISTER_FILES_UPDATE, (&up as *const FilesUpdate).cast(), 1).is_ok() {
+                            self.slots_free.push(s);
+                        }
                     }
                 }
                 if e.kind == Kind::Udp {
                     self.udp_count -= 1;
                 }
-                self.pending.push(Event::Closed { key: e.key });
+                let key = e.key;
+                if self.sqe_files && e.kind == Kind::Stream {
+                    // Close the descriptor inside the next io_uring_enter rather than with a
+                    // close(2) of its own. Nothing of ours uses the number any more.
+                    let fd = e.sock.into_raw();
+                    self.push(Sqe { opcode: OP_CLOSE, flags: SQE_CQE_SKIP_SUCCESS, fd, user_data: (Op::Cancel as u64) << 56, ..Default::default() });
+                    self.stats.sqes -= 1;
+                }
+                self.pending.push(Event::Closed { key });
             }
         }
     }
@@ -1315,6 +1419,7 @@ impl Driver {
 
     pub(crate) fn turn(&mut self, timeout: Option<Duration>, out: &mut Vec<Event>) -> io::Result<()> {
         self.finish_closing();
+        let start = out.len();
         out.append(&mut self.pending);
         self.refill_ring();
         // Re-arm what stopped: ended multishots, and receives that ran out of ring buffers.
@@ -1330,12 +1435,31 @@ impl Driver {
             self.arm_wake();
         }
         self.flush();
-        let busy = !out.is_empty() || (!self.read_list.is_empty() && !self.stash.is_empty());
-        let t = if busy { Some(Duration::ZERO) } else { timeout };
-        let min = if t == Some(Duration::ZERO) { 0 } else { 1 };
-        self.stats.waits += 1;
-        self.ring.enter(min, t)?;
-        self.ring.reap(&mut self.cqes);
+        let work = !self.read_list.is_empty() && !self.stash.is_empty();
+        let unsubmitted = self.ring.pending() > 0;
+        if out.len() > start && !work && !unsubmitted && !self.ring.cq_ready() && self.skips < MAX_SKIPS {
+            // Results to report and nothing to submit: no system call this turn.
+            self.skips += 1;
+            self.spin.worked = true;
+            return Ok(());
+        }
+        self.skips = 0;
+        let t = if out.len() > start || work { Some(Duration::ZERO) } else { timeout };
+        // One io_uring_enter per poll submits everything queued (sends, re-arms) and waits.
+        let (ring, cqes) = (&mut self.ring, &mut self.cqes);
+        let syscall_polls = !ring.taskrun_flag;
+        self.spin.wait(t, syscall_polls, &mut self.stats, |t, st| {
+            let zero = t == Some(Duration::ZERO);
+            if zero && ring.pending() == 0 && !ring.may_have_work() {
+                return Ok(false); // nothing flagged: no system call
+            }
+            if !(zero && ring.pending() == 0 && ring.cq_ready()) {
+                st.waits += 1;
+                ring.enter(if zero { 0 } else { 1 }, t)?;
+            }
+            ring.reap(cqes);
+            Ok(!cqes.is_empty())
+        })?;
         self.stats.os_events += self.cqes.len() as u64;
         let cqes = std::mem::take(&mut self.cqes);
         for c in &cqes {
@@ -1345,7 +1469,12 @@ impl Driver {
         self.cqes.clear();
         self.read_udp(out);
         self.finish_closing();
-        out.append(&mut self.pending);
+        if self.ring.pending() == 0 {
+            out.append(&mut self.pending);
+        }
+        // Otherwise closes went into SQEs: their `Closed` events wait for the next turn, which
+        // submits them before reporting (it never skips its enter while SQEs are queued).
+        self.spin.worked = out.len() > start || !self.pending.is_empty();
         Ok(())
     }
 }
@@ -1362,6 +1491,10 @@ impl Drop for Driver {
             }
         }
         self.push(sqe);
+        // Submit at least once: queued closes and slot updates (and the cancellations) must
+        // reach the kernel even when nothing is in flight any more.
+        self.stats.waits += 1;
+        let _ = self.ring.enter(0, Some(Duration::ZERO));
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut sink = Vec::new();
         loop {
