@@ -32,7 +32,7 @@ Each item gets a regression test when it is fixed. Owner key: **C** is the confo
 | 17 | facade | slowloris: idle half-requests still hold a buffer; hold partial heads without one | S | open |
 | 19 | cold start | the full server with TLS and HTTP/3 measured 27–30 ms and 5.3 MB to its first response, against 2.5 ms without TLS. It must not slow Cameleer's start-up (Cameleer's HTTP route is ready in about 1–8 ms depending on build and OS). **Owner requirement (2026-11-09): start-up time and memory must be within 5% of Cameleer's current HTTP server (`cameleer-http`, plain and with `cameleer-tls`), measured the same way; anything above 5% needs a specific, measured advantage in real use cases.** Target: TLS + HTTP/3 ready in ≤ 3 ms and ≤ 3 MB; find out where the time goes (PEM/key parsing, `ServerConfig` set-up, ticket keys, P-256 comb table or other tables built on first use, the first handshake, QUIC endpoints) and fix it | S | open |
 | 20 | runtime | no lingering close: when simoom closes with unread input, the peer can get a TCP reset instead of the last response | S | open |
-| 21 | QUIC | after switching a connection to v2, the client's retransmitted v1 Initial packets are dropped | C | open |
+| 21 | QUIC | after switching a connection to v2, the client's retransmitted v1 Initial packets are dropped | C | fixed: v1 Initial keys kept until Initial keys are discarded; ngtcp2 v2 3/3 |
 | 18 | docs | `SECURITY.md` and `plan.md` list the old watchdog defaults; `stall_window`, `stall_recovery` and `shed_lag` are missing | S | open |
 
 ## Known gaps (features not built; not bugs, listed so nothing is forgotten)

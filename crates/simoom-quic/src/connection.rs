@@ -261,6 +261,10 @@ pub struct Connection {
     deferred: Option<(Cid, Option<Cid>)>,
     /// The ClientHello bytes buffered while `deferred` is set.
     hello: Vec<u8>,
+    /// Server that switched versions (RFC 9368): the original version and its Initial keys,
+    /// kept to read the client's Initial packets still sent in that version (retransmissions,
+    /// ACKs) until the Initial keys are discarded (RFC 9368 §4).
+    orig_initial: Option<(u32, Keys)>,
 }
 
 fn space_of(ty: PacketType) -> usize {
@@ -353,6 +357,7 @@ impl Connection {
             initial_dcid: orig_dcid,
             deferred: None,
             hello: Vec::new(),
+            orig_initial: None,
             cfg,
         }
     }
@@ -714,10 +719,13 @@ impl Connection {
                 }
                 _ => {}
             }
-            if h.ty != PacketType::OneRtt && h.version != self.version && !self.follow_version(&h) {
+            // A client Initial in the version the server switched away from (RFC 9368 §4).
+            let original = self.is_server && h.ty == PacketType::Initial && self.orig_initial.as_ref().is_some_and(|o| o.0 == h.version);
+            if h.ty != PacketType::OneRtt && h.version != self.version && !original && !self.follow_version(&h) {
                 break;
             }
-            match self.recv_packet(now, remote, data, start, &h) {
+            let result = if original { self.recv_original_initial(now, remote, data, start, &h) } else { self.recv_packet(now, remote, data, start, &h) };
+            match result {
                 Ok(true) => processed_any = true,
                 Ok(false) => self.stats.dropped_packets += 1,
                 Err(e) => {
@@ -744,6 +752,21 @@ impl Connection {
         if hit {
             self.drain_now(ConnectionError::StatelessReset);
         }
+    }
+
+    /// Server: processes a client Initial in the original version with that version's keys
+    /// (packet numbers and CRYPTO offsets are shared across versions).
+    fn recv_original_initial(&mut self, now: Instant, remote: SocketAddr, data: &mut [u8], start: usize, h: &packet::Header) -> Result<bool, TransportError> {
+        let (v, keys) = self.orig_initial.take().expect("original keys");
+        let current = std::mem::replace(&mut self.spaces[0].keys, Some(keys));
+        let r = self.recv_packet(now, remote, data, start, h);
+        let used = std::mem::replace(&mut self.spaces[0].keys, current);
+        if self.spaces[0].discarded {
+            self.spaces[0].keys = None;
+        } else if let Some(k) = used {
+            self.orig_initial = Some((v, k));
+        }
+        r
     }
 
     /// Client: the server answered our first Initial in another configured, compatible
@@ -1191,8 +1214,9 @@ impl Connection {
         if chosen != self.version {
             // Continue in the negotiated version: our Initial packets (and the client's from
             // now on) use its keys, derived from the same connection ID.
-            self.version = chosen;
-            self.spaces[0].keys = Some(self.cfg.provider.initial_keys(chosen, &self.initial_dcid, true));
+            let original = std::mem::replace(&mut self.version, chosen);
+            let old = self.spaces[0].keys.replace(self.cfg.provider.initial_keys(chosen, &self.initial_dcid, true));
+            self.orig_initial = old.map(|k| (original, k));
         }
         self.deferred = None;
         let tp = self.local_params(Some(odcid), retry_scid);
@@ -1300,6 +1324,10 @@ impl Connection {
         }
         s.discarded = true;
         s.keys = None;
+        if space == 0 {
+            self.orig_initial = None;
+        }
+        let s = &mut self.spaces[space];
         s.crypto_out = Vec::new();
         s.crypto_retx.clear();
         s.ack_now = false;

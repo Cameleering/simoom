@@ -134,6 +134,50 @@ fn compatible_version_negotiation_v1_to_v2() {
     }
 }
 
+/// RFC 9368 §4: after the server switches a connection to v2, the client may still send v1
+/// Initial packets (it has not seen the server's v2 Initial yet, here because the server's
+/// flight is lost, so its PTO resends the ClientHello in v1). The server must keep processing
+/// them; before, they were dropped.
+#[test]
+fn v1_initials_after_the_switch_to_v2_are_processed() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let mut c = Config::new(client_provider(true));
+    let mut s = Config::new(server_provider());
+    c.versions = vec![VERSION_1, VERSION_2];
+    s.versions = vec![VERSION_2, VERSION_1];
+    let mut p = Pair::new(Arc::new(c), Arc::new(s), Link::default(), 61);
+    let dark = Rc::new(Cell::new(true));
+    let sent = Rc::new(Cell::new(0usize));
+    let (d2, s2) = (dark.clone(), sent.clone());
+    // Count the client's datagrams; lose everything the server sends while `dark`.
+    p.tamper = Some(Box::new(move |to_server, _| {
+        if to_server {
+            s2.set(s2.get() + 1);
+            true
+        } else {
+            !d2.get()
+        }
+    }));
+    let ch = p.connect();
+    assert!(p.run_until(Duration::from_millis(200), |p| p.server_conn().is_some_and(|s| p.server.conn(s).is_some_and(|c| c.version() == VERSION_2))));
+    let sh = p.server_conn().unwrap();
+    let before = p.server.conn(sh).unwrap().stats().recv_packets;
+    let n = sent.get();
+    let s3 = sent.clone();
+    assert!(p.run_until(Duration::from_secs(5), |_| s3.get() > n), "the client's PTO resent its Initial");
+    p.run_for(Duration::from_millis(20));
+    assert_eq!(p.client.conn(ch).unwrap().version(), VERSION_1, "the client has not seen v2 yet, so it resent in v1");
+    assert!(p.server.conn(sh).unwrap().stats().recv_packets > before, "the server processed the client's v1 Initial");
+    // With the server's packets getting through, the handshake finishes in v2.
+    dark.set(false);
+    assert!(p.run_until(Duration::from_secs(30), |p| p.client.conn(ch).is_some_and(|c| c.is_established())
+        && p.server.conn(sh).is_some_and(|c| c.is_established())));
+    assert_eq!(p.client.conn(ch).unwrap().version(), VERSION_2);
+    assert_eq!(p.server.conn(sh).unwrap().version(), VERSION_2);
+    echo_on(&mut p, ch, sh, 50_000, Duration::from_secs(60));
+}
+
 #[test]
 fn real_tls_under_loss_with_retry_and_key_updates() {
     let (c, s) = configs(|c| {
