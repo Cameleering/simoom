@@ -1,0 +1,38 @@
+==> 10:26:25 campaign start: passes [1:S1,S3,S4,S5,S6,S7,S8,S9,S10,H3,CPU,SLEEP,COLD 2:S1,S5,CPU 3:S1,S5,CPU 2:S3,S7,S8,SLEEP 3:S3,S7,S8,SLEEP], servers [simoom simoom-uring simoom-builder simoom-builder-uring simoom-default simoom-deferred simoom-deferred-stream simoom-blocking hyper may-minihttp xitca ntex axum h2o nginx haproxy fasthttp netty actix go-nethttp envoy caddy vertx uws kestrel cameleer-http-min cameleer], deadline 2026-11-09T19:40:00Z
+==> 10:26:27 round 1 on srvA: simoom (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 CPU COLD)
+==> 10:26:45   simoom S1
+==> 10:33:19   simoom S3
+==> 10:34:43   simoom S4
+==> 10:36:46   simoom S5
+==> 10:38:10   simoom S6
+==> 10:39:45   simoom S7
+==> 10:41:46   simoom S8
+==> 10:43:10   simoom S9
+==> 10:43:48   simoom S10
+==> 10:45:40   simoom H3
+==> 10:47:46   simoom CPU
+==> 10:48:11   simoom COLD
+==> 10:48:14 round 1 on srvA: simoom-uring (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 CPU COLD)
+==> 10:48:32   simoom-uring S1
+==> 10:55:07   simoom-uring S3
+==> 10:56:32   simoom-uring S4
+==> 10:58:34   simoom-uring S5
+==> 10:59:58   simoom-uring S6
+==> 11:01:33   simoom-uring S7
+==> 11:03:34   simoom-uring S8
+==> 11:04:58   simoom-uring S9
+==> 11:05:36   simoom-uring S10
+==> 11:07:30   simoom-uring H3
+==> 11:09:36   simoom-uring CPU
+==> 11:10:01   simoom-uring COLD
+==> 11:10:03 round 1 on srvA: simoom-builder (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 CPU COLD)
+==> 11:10:21   simoom-builder S1
+==> 11:16:56   simoom-builder S3
+==> 11:18:22   simoom-builder S4
+==> 11:20:24   simoom-builder S5
+==> 11:21:47   simoom-builder S6
+==> 11:23:23   simoom-builder S7
+==> 11:25:25   simoom-builder S8
+==> 11:26:49   simoom-builder S9
+==> 11:27:27   simoom-builder S10
+==> 11:29:19   simoom-builder H3

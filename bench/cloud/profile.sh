@@ -9,7 +9,7 @@
 #   PROF_SRV=A PROF_SERVERS="simoom-prof nginx" PROF_CASES="s1 s5 s7" profile.sh
 set -uo pipefail
 ulimit -n 1048576 2>/dev/null || true
-C=/root/campaign
+C=${CAMPAIGN_DIR:-/root/campaign}
 . $C/env
 OUT=$C/out; RES=$OUT/results.txt
 SB=/root/simoom/target/release/simoom-bench
@@ -19,6 +19,7 @@ AGENTS="$(for l in $LOADS; do printf '%s:7070,' "$l"; done)"; AGENTS="${AGENTS%,
 SSH=(ssh -i $C/key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$C/known_hosts -o BatchMode=yes -o ConnectTimeout=10)
 on() { local h=$1; shift; "${SSH[@]}" "root@$h" "$@"; }
 S=$SRV_A; sv=srvA; [ "${PROF_SRV:-A}" = B ] && { S=$SRV_B; sv=srvB; }
+[ -n "${PROF_HOST:-}" ] && { S=$PROF_HOST; sv=${PROF_NAME:-srv}; }
 CA=(--cacert /root/bench-ca.pem --sni bench.local)
 RATE_S1="${RATE_S1:-60000}"; RATE_S5="${RATE_S5:-8000}"; RATE_S7="${RATE_S7:-2000}"; RATE_S8="${RATE_S8:-60000}"
 for n in ${PROF_SERVERS:-simoom-prof nginx}; do

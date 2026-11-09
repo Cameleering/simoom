@@ -1,0 +1,21 @@
+[package]
+name = "simoom-default"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# The campaign server (crates/simoom-bench/src/bin/simoom-server.rs) built against the simoom
+# crate with its DEFAULT features (http1, http2, websocket, io-uring, watchdog): no TLS, no
+# HTTP/3. simoom-bench itself depends on simoom with `full`, and cargo unifies features inside a
+# workspace, so this is a standalone project (path dependency, no external crates).
+[dependencies]
+simoom = { path = "../../../crates/simoom" }
+
+[workspace]
+
+# The same release settings as simoom's workspace.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false

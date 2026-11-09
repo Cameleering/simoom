@@ -63,6 +63,8 @@ SWEEP (SLO throughput: highest rate with p99 <= limit, no errors, rate achieved)
   --slo-us 1000  --probe S  --step-warmup S  --step S  --point-warmup S  --point S  --steps N
   --points 0.5,0.8,0.95   fractions of the SLO throughput measured after the search (repeat a
                           fraction to measure it more than once)
+  --hint RATE             expected SLO rate: try it first, then 30% above or below, then bisect
+  --precision 0.02        stop when the pass/fail bracket is narrower than this fraction
 
 OUTPUT
   One `RESULT key=value ...` line per run on stdout (latencies in microseconds; gen_cpu_pct is the
@@ -333,6 +335,10 @@ fn cmd_sweep(a: &Args) -> Result<(), String> {
         ..sweep::Plan::default()
     };
     let mut plan = plan;
+    if let Some(h) = a.get("--hint") {
+        plan.hint = Some(h.parse::<f64>().map_err(|_| format!("bad --hint {h}"))?);
+    }
+    plan.precision = a.num("--precision", plan.precision)?;
     if let Some(p) = a.get("--points") {
         plan.points = p.split(',').map(|x| x.trim().parse::<f64>().map_err(|_| format!("bad --points {p}"))).collect::<Result<_, _>>()?;
     }

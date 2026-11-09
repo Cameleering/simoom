@@ -49,6 +49,22 @@ case "$1" in
     nohup bash -c "while true; do $SRV pss; sleep 1; done" > $W/pss.log 2>/dev/null < /dev/null &
     echo $! > $W/pss.pid
     ;;
+  mon-begin) # mon-begin TAG SECS: per-second NIC packets and CPU (busy, steal) in the background
+    pkill -f "# mon-$2\$" 2>/dev/null || true
+    LC_ALL=C nohup bash -c "sar -n DEV 1 $3 # mon-$2" > "$W/mon-$2.net" 2>&1 < /dev/null &
+    LC_ALL=C nohup bash -c "sar -u 1 $3 # mon-$2" > "$W/mon-$2.cpu" 2>&1 < /dev/null &
+    ;;
+  mon-end) # mon-end TAG LABEL: NICPEAK line, the highest per-second values seen
+    pkill -f "# mon-$2\$" 2>/dev/null || true
+    sleep 0.2
+    sec='$1 ~ /^[0-9]+:[0-9]+:[0-9]+$/ && ($2 ~ /^eth1$|^ens4$/)'
+    rx=$(awk "$sec"' {if ($3 > m) m = $3} END {printf "%.0f", m}' "$W/mon-$2.net")
+    tx=$(awk "$sec"' {if ($4 > m) m = $4} END {printf "%.0f", m}' "$W/mon-$2.net")
+    pk=$(awk "$sec"' {if ($3 + $4 > m) m = $3 + $4} END {printf "%.0f", m}' "$W/mon-$2.net")
+    mb=$(awk "$sec"' {v = ($5 + $6) * 8 / 1000; if (v > m) m = v} END {printf "%.0f", m}' "$W/mon-$2.net")
+    cpu=$(awk '$1 ~ /^[0-9]+:[0-9]+:[0-9]+$/ && $2 == "all" {b = 100 - $8; if (b > m) m = b; if (b > 20) {s += $7; n++}; if ($7 > sm) sm = $7} END {printf "cpu_busy_max=%.1f steal_max=%.1f steal_avg_busy=%.1f busy_secs=%d", m, sm, (n ? s / n : 0), n}' "$W/mon-$2.cpu")
+    echo "NICPEAK $3 rxpck_max=$rx txpck_max=$tx pck_max=$pk mbit_max=$mb $cpu"
+    ;;
   pss-end)
     kill "$(cat $W/pss.pid)" 2>/dev/null || true
     echo "PEAK server=$2 pss_kb=$(sort -n $W/pss.log | tail -1) mem_peak_kb=$($SRV mem | cut -d' ' -f2)"

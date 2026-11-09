@@ -1,0 +1,76 @@
+==> 11:32:25 lane 3 start: rounds [1 2 3], servers [simoom-default simoom-blocking h2o axum may-minihttp cameleer actix], loads [10.122.0.9 10.122.0.11], deadline 2026-11-09T13:12:00Z
+==> 11:32:28 round 1 on srvC: simoom-default (S1 S3 S5 S8 CPU COLD)
+==> 11:32:46   simoom-default S1
+==> 11:38:33   simoom-default S3
+==> 11:40:00   simoom-default S5
+==> 11:41:27   simoom-default S8
+==> 11:42:54   simoom-default CPU
+==> 11:43:19   simoom-default COLD
+==> 11:43:21 round 1 on srvC: simoom-blocking (S1 S3 CPU SLEEP)
+==> 11:43:39   simoom-blocking S1
+==> 11:49:23   simoom-blocking S3
+==> 11:50:52   simoom-blocking CPU
+==> 11:51:16   simoom-blocking SLEEP
+==> 11:51:45 round 1 on srvC: h2o (S1 S5 S7 S8 H3 CPU COLD)
+==> 11:52:03   h2o S1
+==> 11:56:21   h2o S5
+==> 11:57:49   h2o S7
+==> 11:59:54   h2o S8
+==> 12:01:21   h2o H3
+==> 12:03:32   h2o CPU
+==> 12:03:56   h2o COLD
+==> 12:04:04 round 1 on srvC: axum (S1 S3 S5 S8 CPU COLD)
+==> 12:04:23   axum S1
+==> 12:08:53   axum S3
+==> 12:10:21   axum S5
+==> 12:11:52   axum S8
+==> 12:13:11   axum CPU
+==> 12:13:36   axum COLD
+==> 12:13:39 round 1 on srvC: may-minihttp (S1 S3 S5 CPU COLD)
+==> 12:13:57   may-minihttp S1
+==> 12:19:14   may-minihttp S3
+==> 12:20:28   may-minihttp S5
+==> 12:22:46   may-minihttp CPU
+==> 12:28:22   may-minihttp COLD
+==> 12:28:25 round 1 on srvC: cameleer (S1 S3 S5 CPU COLD)
+==> 12:28:59   cameleer S1
+2026-11-09T12:29:48Z restart after the lane collision: removed contaminated records (see results.before-fix.txt)
+==> 12:30:20 lane 3 start: rounds [1 2 3], servers [simoom-default simoom-blocking h2o axum may-minihttp cameleer actix], loads [10.122.0.9 10.122.0.11], deadline 2026-11-09T13:28:00Z
+==> 12:30:20 round 1 on srvC: cameleer (S1 S3 S5 CPU COLD)
+==> 12:30:39   cameleer S1
+==> 12:34:59   cameleer S3
+==> 12:36:26   cameleer S5
+==> 12:37:54   cameleer CPU
+==> 12:38:18   cameleer COLD
+==> 12:38:20 round 1 on srvC: actix (S1 S3 S5 S8 CPU COLD)
+==> 12:38:38   actix S1
+==> 12:42:57   actix S3
+==> 12:44:26   actix S5
+==> 12:45:53   actix S8
+==> 12:47:20   actix CPU
+==> 12:47:44   actix COLD
+==> 12:47:46 lane 3 waiting for the other lanes to finish round 1
+==> 12:47:49 round 2 on srvA: simoom-default (S1R)
+==> 12:48:07   simoom-default S1R
+==> 12:49:47 round 2 on srvA: simoom-blocking (S1R)
+==> 12:50:06   simoom-blocking S1R
+==> 12:51:47 round 2 on srvA: h2o (S1R)
+==> 12:52:06   h2o S1R
+==> 12:53:47 round 2 on srvA: axum (S1R)
+==> 12:54:05   axum S1R
+==> 12:55:45 round 2 on srvA: may-minihttp (S1R)
+==> 12:56:03   may-minihttp S1R
+==> 12:57:13 lane 3 waiting for the other lanes to finish round 2
+==> 12:59:45 round 3 on srvB: simoom-default (S1R)
+==> 13:00:03   simoom-default S1R
+==> 13:01:43 round 3 on srvB: simoom-blocking (S1R)
+==> 13:02:01   simoom-blocking S1R
+==> 13:03:40 round 3 on srvB: h2o (S1R)
+==> 13:03:59   h2o S1R
+==> 13:05:39 round 3 on srvB: axum (S1R)
+==> 13:05:57   axum S1R
+==> 13:07:37 round 3 on srvB: may-minihttp (S1R)
+==> 13:07:55   may-minihttp S1R
+==> 13:09:35 profiles: may-minihttp
+==> 13:11:22 campaign done
+CAMPAIGN DONE 2026-11-09T13:11:22Z

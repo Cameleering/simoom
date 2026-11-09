@@ -1,0 +1,506 @@
+MACHINE session=lane1 round=1 lane=1 srv=srvA
+srv-srvA cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvA vcpus: 4
+srv-srvA ram: 7.8 GiB
+srv-srvA os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvA governor: n/a
+srv-srvA sysctl net.core.somaxconn = 65535
+srv-srvA sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvA sysctl net.core.busy_poll = 0
+srv-srvA sysctl net.core.busy_read = 0
+srv-srvA sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvA sysctl net.core.netdev_max_backlog = 65536
+srv-srvA sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvA nic: lo 127.0.0.1/8 eth0 168.144.95.13/20 eth0 10.47.0.6/16 eth1 10.122.0.3/20  driver virtio_net
+srv-srvA io_uring_disabled: 0
+srv-srvA perf: 1021794,,cycles,334416,100.00,,
+srv-srvA nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 143.244.143.104/20 eth0 10.47.0.9/16 eth1 10.122.0.6/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 923214,,cycles,291017,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 168.144.158.221/20 eth0 10.47.0.10/16 eth1 10.122.0.7/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 975170,,cycles,315539,100.00,,
+load2 nginx: no-http3
+MACHINE session=lane1 round=2 lane=1 srv=srvB
+srv-srvB cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvB vcpus: 4
+srv-srvB ram: 7.8 GiB
+srv-srvB os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvB governor: n/a
+srv-srvB sysctl net.core.somaxconn = 65535
+srv-srvB sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvB sysctl net.core.busy_poll = 0
+srv-srvB sysctl net.core.busy_read = 0
+srv-srvB sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvB sysctl net.core.netdev_max_backlog = 65536
+srv-srvB sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvB nic: lo 127.0.0.1/8 eth0 206.189.133.221/20 eth0 10.47.0.7/16 eth1 10.122.0.4/20  driver virtio_net
+srv-srvB io_uring_disabled: 0
+srv-srvB perf: 1427864,,cycles,499991,100.00,,
+srv-srvB nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 143.244.143.104/20 eth0 10.47.0.9/16 eth1 10.122.0.6/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 938349,,cycles,304920,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 168.144.158.221/20 eth0 10.47.0.10/16 eth1 10.122.0.7/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 1096036,,cycles,349813,100.00,,
+load2 nginx: no-http3
+MACHINE session=lane1 round=3 lane=1 srv=srvC
+srv-srvC cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvC vcpus: 4
+srv-srvC ram: 7.8 GiB
+srv-srvC os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvC governor: n/a
+srv-srvC sysctl net.core.somaxconn = 65535
+srv-srvC sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvC sysctl net.core.busy_poll = 0
+srv-srvC sysctl net.core.busy_read = 0
+srv-srvC sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvC sysctl net.core.netdev_max_backlog = 65536
+srv-srvC sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvC nic: lo 127.0.0.1/8 eth0 139.59.14.157/20 eth0 10.47.0.11/16 eth1 10.122.0.8/20  driver virtio_net
+srv-srvC io_uring_disabled: 0
+srv-srvC perf: 1042853,,cycles,344412,100.00,,
+srv-srvC nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 143.244.143.104/20 eth0 10.47.0.9/16 eth1 10.122.0.6/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 920398,,cycles,295134,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 168.144.158.221/20 eth0 10.47.0.10/16 eth1 10.122.0.7/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 963452,,cycles,312253,100.00,,
+load2 nginx: no-http3
+MACHINE session=lane2 round=1 lane=2 srv=srvB
+srv-srvB cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvB vcpus: 4
+srv-srvB ram: 7.8 GiB
+srv-srvB os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvB governor: n/a
+srv-srvB sysctl net.core.somaxconn = 65535
+srv-srvB sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvB sysctl net.core.busy_poll = 0
+srv-srvB sysctl net.core.busy_read = 0
+srv-srvB sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvB sysctl net.core.netdev_max_backlog = 65536
+srv-srvB sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvB nic: lo 127.0.0.1/8 eth0 206.189.133.221/20 eth0 10.47.0.7/16 eth1 10.122.0.4/20  driver virtio_net
+srv-srvB io_uring_disabled: 0
+srv-srvB perf: 1258484,,cycles,427341,100.00,,
+srv-srvB nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 206.189.134.19/20 eth0 10.47.0.8/16 eth1 10.122.0.5/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 944644,,cycles,302672,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 139.59.58.12/21 eth0 10.47.0.13/16 eth1 10.122.0.10/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 1087340,,cycles,427182,100.00,,
+load2 nginx: no-http3
+MACHINE session=lane2 round=2 lane=2 srv=srvC
+srv-srvC cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvC vcpus: 4
+srv-srvC ram: 7.8 GiB
+srv-srvC os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvC governor: n/a
+srv-srvC sysctl net.core.somaxconn = 65535
+srv-srvC sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvC sysctl net.core.busy_poll = 0
+srv-srvC sysctl net.core.busy_read = 0
+srv-srvC sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvC sysctl net.core.netdev_max_backlog = 65536
+srv-srvC sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvC nic: lo 127.0.0.1/8 eth0 139.59.14.157/20 eth0 10.47.0.11/16 eth1 10.122.0.8/20  driver virtio_net
+srv-srvC io_uring_disabled: 0
+srv-srvC perf: 973370,,cycles,307142,100.00,,
+srv-srvC nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 206.189.134.19/20 eth0 10.47.0.8/16 eth1 10.122.0.5/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 948574,,cycles,315985,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 139.59.58.12/21 eth0 10.47.0.13/16 eth1 10.122.0.10/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 980371,,cycles,389395,100.00,,
+load2 nginx: no-http3
+MACHINE session=lane2 round=3 lane=2 srv=srvA
+srv-srvA cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvA vcpus: 4
+srv-srvA ram: 7.8 GiB
+srv-srvA os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvA governor: n/a
+srv-srvA sysctl net.core.somaxconn = 65535
+srv-srvA sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvA sysctl net.core.busy_poll = 0
+srv-srvA sysctl net.core.busy_read = 0
+srv-srvA sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvA sysctl net.core.netdev_max_backlog = 65536
+srv-srvA sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvA nic: lo 127.0.0.1/8 eth0 168.144.95.13/20 eth0 10.47.0.6/16 eth1 10.122.0.3/20  driver virtio_net
+srv-srvA io_uring_disabled: 0
+srv-srvA perf: 958286,,cycles,323045,100.00,,
+srv-srvA nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 206.189.134.19/20 eth0 10.47.0.8/16 eth1 10.122.0.5/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 933283,,cycles,301991,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 139.59.58.12/21 eth0 10.47.0.13/16 eth1 10.122.0.10/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 974404,,cycles,388343,100.00,,
+load2 nginx: no-http3
+MACHINE session=lane3 round=1 lane=3 srv=srvC
+srv-srvC cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvC vcpus: 4
+srv-srvC ram: 7.8 GiB
+srv-srvC os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvC governor: n/a
+srv-srvC sysctl net.core.somaxconn = 65535
+srv-srvC sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvC sysctl net.core.busy_poll = 0
+srv-srvC sysctl net.core.busy_read = 0
+srv-srvC sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvC sysctl net.core.netdev_max_backlog = 65536
+srv-srvC sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvC nic: lo 127.0.0.1/8 eth0 139.59.14.157/20 eth0 10.47.0.11/16 eth1 10.122.0.8/20  driver virtio_net
+srv-srvC io_uring_disabled: 0
+srv-srvC perf: 1103453,,cycles,393975,100.00,,
+srv-srvC nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 143.110.240.160/20 eth0 10.47.0.12/16 eth1 10.122.0.9/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 1582757,,cycles,619546,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 143.244.133.33/20 eth0 10.47.0.14/16 eth1 10.122.0.11/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 1568651,,cycles,537631,100.00,,
+load2 nginx: no-http3
+MACHINE session=lane3 round=2 lane=3 srv=srvA
+srv-srvA cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvA vcpus: 4
+srv-srvA ram: 7.8 GiB
+srv-srvA os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvA governor: n/a
+srv-srvA sysctl net.core.somaxconn = 65535
+srv-srvA sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvA sysctl net.core.busy_poll = 0
+srv-srvA sysctl net.core.busy_read = 0
+srv-srvA sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvA sysctl net.core.netdev_max_backlog = 65536
+srv-srvA sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvA nic: lo 127.0.0.1/8 eth0 168.144.95.13/20 eth0 10.47.0.6/16 eth1 10.122.0.3/20  driver virtio_net
+srv-srvA io_uring_disabled: 0
+srv-srvA perf: 960549,,cycles,330236,100.00,,
+srv-srvA nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 143.110.240.160/20 eth0 10.47.0.12/16 eth1 10.122.0.9/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 1320375,,cycles,433740,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 143.244.133.33/20 eth0 10.47.0.14/16 eth1 10.122.0.11/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 1486013,,cycles,461979,100.00,,
+load2 nginx: no-http3
+MACHINE session=lane3 round=3 lane=3 srv=srvB
+srv-srvB cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvB vcpus: 4
+srv-srvB ram: 7.8 GiB
+srv-srvB os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvB governor: n/a
+srv-srvB sysctl net.core.somaxconn = 65535
+srv-srvB sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvB sysctl net.core.busy_poll = 0
+srv-srvB sysctl net.core.busy_read = 0
+srv-srvB sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvB sysctl net.core.netdev_max_backlog = 65536
+srv-srvB sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvB nic: lo 127.0.0.1/8 eth0 206.189.133.221/20 eth0 10.47.0.7/16 eth1 10.122.0.4/20  driver virtio_net
+srv-srvB io_uring_disabled: 0
+srv-srvB perf: 1200467,,cycles,371659,100.00,,
+srv-srvB nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 143.110.240.160/20 eth0 10.47.0.12/16 eth1 10.122.0.9/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 1479815,,cycles,482476,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 143.244.133.33/20 eth0 10.47.0.14/16 eth1 10.122.0.11/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 1584837,,cycles,486863,100.00,,
+load2 nginx: no-http3
+MACHINE session=s1 round=1 srv=srvA
+srv-srvA cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+srv-srvA vcpus: 4
+srv-srvA ram: 7.8 GiB
+srv-srvA os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+srv-srvA governor: n/a
+srv-srvA sysctl net.core.somaxconn = 65535
+srv-srvA sysctl net.ipv4.tcp_max_syn_backlog = 65535
+srv-srvA sysctl net.core.busy_poll = 0
+srv-srvA sysctl net.core.busy_read = 0
+srv-srvA sysctl net.ipv4.ip_local_port_range = 10240 65535
+srv-srvA sysctl net.core.netdev_max_backlog = 65536
+srv-srvA sysctl net.ipv4.tcp_tw_reuse = 1
+srv-srvA nic: lo 127.0.0.1/8 eth0 168.144.95.13/20 eth0 10.47.0.6/16 eth1 10.122.0.3/20  driver virtio_net
+srv-srvA io_uring_disabled: 0
+srv-srvA perf: 931815,,cycles,300129,100.00,,
+srv-srvA nginx: no-http3
+load1 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load1 vcpus: 4
+load1 ram: 7.8 GiB
+load1 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load1 governor: n/a
+load1 sysctl net.core.somaxconn = 65535
+load1 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load1 sysctl net.core.busy_poll = 0
+load1 sysctl net.core.busy_read = 0
+load1 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load1 sysctl net.core.netdev_max_backlog = 65536
+load1 sysctl net.ipv4.tcp_tw_reuse = 1
+load1 nic: lo 127.0.0.1/8 eth0 143.244.143.104/20 eth0 10.47.0.9/16 eth1 10.122.0.6/20  driver virtio_net
+load1 io_uring_disabled: 0
+load1 perf: 927931,,cycles,308433,100.00,,
+load1 nginx: no-http3
+load2 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load2 vcpus: 4
+load2 ram: 7.8 GiB
+load2 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load2 governor: n/a
+load2 sysctl net.core.somaxconn = 65535
+load2 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load2 sysctl net.core.busy_poll = 0
+load2 sysctl net.core.busy_read = 0
+load2 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load2 sysctl net.core.netdev_max_backlog = 65536
+load2 sysctl net.ipv4.tcp_tw_reuse = 1
+load2 nic: lo 127.0.0.1/8 eth0 168.144.158.221/20 eth0 10.47.0.10/16 eth1 10.122.0.7/20  driver virtio_net
+load2 io_uring_disabled: 0
+load2 perf: 1008700,,cycles,361784,100.00,,
+load2 nginx: no-http3
+load3 cpu: Intel(R) Xeon(R) Platinum 8280 CPU @ 2.70GHz
+load3 vcpus: 4
+load3 ram: 7.8 GiB
+load3 os: Ubuntu 24.04.5 LTS kernel 6.8.0-147-generic
+load3 governor: n/a
+load3 sysctl net.core.somaxconn = 65535
+load3 sysctl net.ipv4.tcp_max_syn_backlog = 65535
+load3 sysctl net.core.busy_poll = 0
+load3 sysctl net.core.busy_read = 0
+load3 sysctl net.ipv4.ip_local_port_range = 10240 65535
+load3 sysctl net.core.netdev_max_backlog = 65536
+load3 sysctl net.ipv4.tcp_tw_reuse = 1
+load3 nic: lo 127.0.0.1/8 eth0 206.189.134.19/20 eth0 10.47.0.8/16 eth1 10.122.0.5/20  driver virtio_net
+load3 io_uring_disabled: 0
+load3 perf: 946499,,cycles,305087,100.00,,
+load3 nginx: no-http3

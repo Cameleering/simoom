@@ -20,6 +20,9 @@ pub struct Plan {
     pub max_steps: usize,
     pub precision: f64,
     pub points: Vec<f64>,
+    /// An expected SLO rate (an earlier campaign's result): the search tries it first, then 30%
+    /// above or below it, then bisects, instead of starting at 60% of the probe's capacity.
+    pub hint: Option<f64>,
 }
 
 impl Default for Plan {
@@ -34,6 +37,7 @@ impl Default for Plan {
             max_steps: 8,
             precision: 0.02,
             points: vec![0.5, 0.8, 0.95],
+            hint: None,
         }
     }
 }
@@ -98,14 +102,22 @@ pub fn sweep(base: &Spec, plan: &Plan, run: &mut dyn FnMut(&Spec) -> Result<Repo
         lo = hi;
         out.capped = true;
     } else {
-        let mut first = true;
+        let mut n = 0usize;
+        let hint = plan.hint.filter(|h| *h > 0.0).map(|h| h.min(hi * 0.97));
         for _ in 0..plan.max_steps {
             if lo > 0.0 && (hi - lo) / hi < plan.precision {
                 break;
             }
-            // start at 60% of the capacity, then bisect
-            let mid = if first { (cap * 0.6).round() } else { ((lo + hi) / 2.0).round() };
-            first = false;
+            // without a hint: start at 60% of the capacity, then bisect; with one: the hint,
+            // then 30% above (if it passed) or below it, then bisect
+            let mid = match (hint, n) {
+                (None, 0) => (cap * 0.6).round(),
+                (Some(h), 0) => h.round(),
+                (Some(h), 1) if lo > 0.0 => (h * 1.3).min((lo + hi) / 2.0 + (hi - lo) * 0.45).round(),
+                (Some(h), 1) => (h * 0.7).round(),
+                _ => ((lo + hi) / 2.0).round(),
+            };
+            n += 1;
             let r = run(&step(mid))?;
             let v = verdict(&r, mid, plan.p99_limit_us);
             emit(&format!("phase=step verdict={} ", if v.is_none() { "pass" } else { "fail" }), &r);

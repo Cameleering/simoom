@@ -68,7 +68,8 @@ for v in json.load(sys.stdin)['vpcs']:
 }
 
 up() {
-  if [ -n "$(list)" ]; then echo "droplets tagged $TAG already exist:" >&2; list >&2; exit 1; fi
+  # DO_ADD=1: add droplets (DO_NAMES) next to the tagged ones that already exist
+  if [ -n "$(list)" ] && [ "${DO_ADD:-0}" != 1 ]; then echo "droplets tagged $TAG already exist:" >&2; list >&2; exit 1; fi
   local kid; kid="$(key_id)"
   if [ -z "$kid" ]; then
     local pub; pub="$(cat "$SSH_PUB")"
@@ -81,12 +82,13 @@ up() {
   api POST /droplets "{\"names\":[${names%,}],\"region\":\"$REGION\",\"size\":\"$SIZE\",\"image\":\"$IMAGE\",\"ssh_keys\":[$kid],\"tags\":[\"$TAG\"],\"monitoring\":false,\"ipv6\":false$vpcj}" \
     | py "import json,sys; r=json.load(sys.stdin); print('created:', [d['name'] for d in r['droplets']]) if 'droplets' in r else sys.exit('create failed: '+r.get('message',''))"
   echo "waiting for the droplets to become active" >&2
+  local want=${#NAMES[@]}; [ "${DO_ADD:-0}" = 1 ] && want=$(( $(list | wc -l) ))
   for _ in $(seq 90); do
-    if [ "$(list | awk '$4=="active" && $3!="-"' | wc -l)" -eq "${#NAMES[@]}" ]; then break; fi
+    if [ "$(list | awk '$4=="active" && $3!="-"' | wc -l)" -ge "$want" ]; then break; fi
     sleep 5
   done
   list | tee "$STATE"
-  date -u +%s > "$STATE_DIR/created-at"
+  [ -f "$STATE_DIR/created-at" ] || date -u +%s > "$STATE_DIR/created-at"
 }
 
 down() {

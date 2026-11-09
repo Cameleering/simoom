@@ -1,0 +1,22 @@
+[package]
+name = "cameleer-client-min"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Cameleer's HTTP client (cameleer-http, keep-alive pool) and its HTTP/2 client (cameleer-grpc):
+# the baseline for simoom-client's client_bench example (docs/parity/client.md). Path
+# dependencies on the Cameleer checkout, which is read, never edited.
+[dependencies]
+cameleer-http = { path = "../../../../Rust-camel/crates/cameleer-http", default-features = false }
+cameleer-grpc = { path = "../../../../Rust-camel/crates/cameleer-grpc", default-features = false }
+
+[workspace]
+# a standalone project outside the simoom workspace, with its own Cargo.lock (CLAUDE.md rule 1 exception)
+
+# The same release settings as simoom's workspace (and Cameleer's: fat LTO, one codegen unit).
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = false

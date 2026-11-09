@@ -1169,7 +1169,6 @@ impl Connection for Client {
 
     fn on_data(&mut self, cx: &mut Ctx<'_>, data: &[u8]) -> usize {
         let now = cx.now_ns();
-        STATS.with(|s| s.borrow_mut().bytes_in += data.len() as u64);
         let (consumed, close, err) = if let Some(t) = &mut self.tls {
             // decrypt everything offered, then frame the plaintext
             let mut off = 0;
@@ -1205,6 +1204,14 @@ impl Connection for Client {
         } else {
             self.on_plain(now, data)
         };
+        // count each byte once: unconsumed input is offered again with the next read (a large
+        // body that arrives in pieces was counted many times, campaign 1's 684 Tbit/s for Go)
+        let counted = if err || close { data.len() } else { consumed.min(data.len()) };
+        let (ms, me) = (self.sh.mstart.load(Ordering::Relaxed), self.sh.mend.load(Ordering::Relaxed));
+        if now >= ms && now < me {
+            // inside the measured window only, like the request counters
+            STATS.with(|s| s.borrow_mut().bytes_in += counted as u64);
+        }
         if err {
             self.fail(cx);
             return data.len();

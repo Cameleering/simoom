@@ -1,0 +1,77 @@
+==> 11:32:21 lane 1 start: rounds [1 2 3], servers [simoom simoom-builder simoom-deferred cameleer-http-min nginx xitca fasthttp], loads [10.122.0.6 10.122.0.7], deadline 2026-11-09T13:12:00Z
+==> 11:32:23 round 1 on srvA: simoom-builder (S1 S3 S5 S7 S8 H3 CPU COLD)
+==> 11:32:41   simoom-builder H3
+==> 11:34:45   simoom-builder CPU
+==> 11:35:10   simoom-builder COLD
+==> 11:35:12 round 1 on srvA: simoom-deferred (S1 S3 CPU SLEEP)
+==> 11:35:30   simoom-deferred S1
+==> 11:41:18   simoom-deferred S3
+==> 11:42:46   simoom-deferred CPU
+==> 11:43:10   simoom-deferred SLEEP
+==> 11:43:36 round 1 on srvA: cameleer-http-min (S1 S5 S7 CPU S6 SLEEP COLD)
+==> 11:43:55   cameleer-http-min S1
+==> 11:48:15   cameleer-http-min S5
+==> 11:49:42   cameleer-http-min S7
+==> 11:51:53   cameleer-http-min CPU
+==> 11:52:17   cameleer-http-min S6
+==> 11:54:27   cameleer-http-min SLEEP
+==> 11:54:55   cameleer-http-min COLD
+==> 11:54:57 round 1 on srvA: nginx (S1 S5 S7 S8 H3 CPU S4 S6 S10 COLD)
+==> 11:55:15   nginx S1
+==> 11:59:36   nginx S5
+==> 12:01:02   nginx S7
+==> 12:03:08   nginx S8
+==> 12:04:35   nginx H3
+==> 12:04:36   nginx CPU
+==> 12:05:00   nginx S4
+==> 12:06:34   nginx S6
+==> 12:08:27   nginx S10
+==> 12:10:19   nginx COLD
+==> 12:10:21 round 1 on srvA: xitca (S1 S5 CPU S6 S9 COLD)
+==> 12:10:39   xitca S1
+==> 12:14:58   xitca S5
+==> 12:16:10   xitca CPU
+==> 12:16:35   xitca S6
+==> 12:18:17   xitca S9
+==> 12:18:54   xitca COLD
+==> 12:18:56 round 1 on srvA: fasthttp (S1 S3 S5 CPU COLD)
+==> 12:19:14   fasthttp S1
+==> 12:23:30   fasthttp S3
+==> 12:24:57   fasthttp S5
+==> 12:26:23   fasthttp CPU
+==> 12:26:48   fasthttp COLD
+==> 12:26:52 round 2 on srvB: simoom (S1R)
+==> 12:27:10   simoom S1R
+==> 12:28:51 round 2 on srvB: simoom-builder (S1R)
+==> 12:29:09   simoom-builder S1R
+2026-11-09T12:29:48Z restart after the lane collision: removed contaminated records (see results.before-fix.txt)
+==> 12:30:16 lane 1 start: rounds [1 2 3], servers [simoom simoom-builder simoom-deferred cameleer-http-min nginx xitca fasthttp], loads [10.122.0.6 10.122.0.7], deadline 2026-11-09T13:28:00Z
+==> 12:30:16 lane 1 waiting for the other lanes to finish round 1
+==> 12:47:56 round 2 on srvB: simoom (S1R)
+==> 12:48:15   simoom S1R
+==> 12:49:54 round 2 on srvB: simoom-builder (S1R)
+==> 12:50:12   simoom-builder S1R
+==> 12:51:51 round 2 on srvB: simoom-deferred (S1R)
+==> 12:52:09   simoom-deferred S1R
+==> 12:53:48 round 2 on srvB: cameleer-http-min (S1R)
+==> 12:54:07   cameleer-http-min S1R
+==> 12:55:46 round 2 on srvB: nginx (S1R)
+==> 12:56:04   nginx S1R
+==> 12:57:44 round 2 on srvB: xitca (S1R)
+==> 12:58:02   xitca S1R
+==> 12:59:42 lane 1 waiting for the other lanes to finish round 2
+==> 12:59:44 round 3 on srvC: simoom (S1R)
+==> 13:00:02   simoom S1R
+==> 13:01:41 round 3 on srvC: simoom-builder (S1R)
+==> 13:01:59   simoom-builder S1R
+==> 13:03:38 round 3 on srvC: simoom-deferred (S1R)
+==> 13:03:56   simoom-deferred S1R
+==> 13:05:35 round 3 on srvC: cameleer-http-min (S1R)
+==> 13:05:54   cameleer-http-min S1R
+==> 13:07:33 round 3 on srvC: nginx (S1R)
+==> 13:07:51   nginx S1R
+==> 13:09:31 round 3 on srvC: xitca (S1R)
+==> 13:09:49   xitca S1R
+==> 13:11:29 profiles: simoom-prof simoom-prof-deferred
+==> 13:15:04 campaign done
+CAMPAIGN DONE 2026-11-09T13:15:04Z

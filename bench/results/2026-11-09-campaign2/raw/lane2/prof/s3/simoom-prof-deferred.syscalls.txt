@@ -1,0 +1,20 @@
+
+
+@[tracepoint:syscalls:sys_enter_prctl]: 8
+@[tracepoint:syscalls:sys_enter_clone3]: 8
+@[tracepoint:syscalls:sys_enter_sched_getaffinity]: 8
+@[tracepoint:syscalls:sys_enter_gettid]: 8
+@[tracepoint:syscalls:sys_enter_set_robust_list]: 8
+@[tracepoint:syscalls:sys_enter_mmap]: 8
+@[tracepoint:syscalls:sys_enter_rseq]: 8
+@[tracepoint:syscalls:sys_enter_sigaltstack]: 16
+@[tracepoint:syscalls:sys_enter_rt_sigprocmask]: 24
+@[tracepoint:syscalls:sys_enter_mprotect]: 87
+@[tracepoint:syscalls:sys_enter_shutdown]: 256
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 56602
+@[tracepoint:syscalls:sys_enter_write]: 61147
+@[tracepoint:syscalls:sys_enter_read]: 61187
+@[tracepoint:syscalls:sys_enter_sendto]: 848492
+@[tracepoint:syscalls:sys_enter_getrusage]: 1088710
+@[tracepoint:syscalls:sys_enter_recvfrom]: 1650018
+@[tracepoint:syscalls:sys_enter_futex]: 2558916

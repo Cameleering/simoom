@@ -1,0 +1,34 @@
+simoom commit (measured): 1e50579a181524ea0903fc7e4edd7c9abd9782b4
+overlaid from the working tree: crates/simoom-bench bench scripts/bench-facade.sh scripts/bench-modes.sh scripts/bench-validate.sh
+benchmark diff against 1e50579:
+ bench/cloud/campaign-ctl.sh                        |  75 ++++--
+ bench/cloud/campaign.sh                            | 153 ++++++++++--
+ bench/cloud/node.sh                                |  16 ++
+ bench/cloud/summarize-campaign.py                  | 262 +++++++++++++++++++--
+ .../cameleer-http-min/{run.sh => build.sh}         |   0
+ bench/competitors/cameleer-http-min/src/main.rs    |  20 +-
+ bench/competitors/simoom/setup.sh                  |   4 +
+ crates/simoom-bench/src/bin/simoom-server.rs       | 138 ++++++++++-
+ crates/simoom-bench/src/load.rs                    |   9 +-
+ 9 files changed, 615 insertions(+), 62 deletions(-)
+  new: bench/cloud/compare-campaigns.py
+  new: bench/cloud/dry-run.sh
+  new: bench/cloud/pin-tree.sh
+  new: bench/cloud/safety-net.sh
+  new: bench/competitors/cameleer-http-min/run.sh
+  new: bench/competitors/cameleer-http-min/setup.sh
+  new: bench/competitors/simoom-blocking/run.sh
+  new: bench/competitors/simoom-blocking/setup.sh
+  new: bench/competitors/simoom-default/Cargo.lock
+  new: bench/competitors/simoom-default/Cargo.toml
+  new: bench/competitors/simoom-default/run.sh
+  new: bench/competitors/simoom-default/setup.sh
+  new: bench/competitors/simoom-default/src/main.rs
+  new: bench/competitors/simoom-deferred-stream/run.sh
+  new: bench/competitors/simoom-deferred-stream/setup.sh
+  new: bench/competitors/simoom-deferred/run.sh
+  new: bench/competitors/simoom-deferred/setup.sh
+  new: bench/competitors/simoom-prof-uring/run.sh
+  new: bench/competitors/simoom-prof-uring/setup.sh
+crates outside the overlay differ from the working tree in: crates/simoom-h2/tests/roundtrip.rs crates/simoom-quic/src/connection.rs crates/simoom-quic/src/crypto.rs crates/simoom-quic/src/tls.rs crates/simoom-rt/src/offload.rs crates/simoom/src/lib.rs crates/simoom/src/limits.rs crates/simoom/src/watchdog.rs 
+cameleer head: 94f9e60 (main, committed tree)

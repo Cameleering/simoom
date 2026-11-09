@@ -1,0 +1,11 @@
+
+
+@[tracepoint:syscalls:sys_enter_mprotect]: 52
+@[tracepoint:syscalls:sys_enter_shutdown]: 255
+@[tracepoint:syscalls:sys_enter_write]: 95137
+@[tracepoint:syscalls:sys_enter_read]: 95343
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 105343
+@[tracepoint:syscalls:sys_enter_sendto]: 849919
+@[tracepoint:syscalls:sys_enter_getrusage]: 1000800
+@[tracepoint:syscalls:sys_enter_recvfrom]: 1666457
+@[tracepoint:syscalls:sys_enter_futex]: 2362364
