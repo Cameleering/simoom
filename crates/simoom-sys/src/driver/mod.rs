@@ -127,12 +127,13 @@ pub struct DriverConfig {
     pub accepts_outstanding: usize,
     /// UDP: receives kept outstanding per socket on IOCP.
     pub udp_recvs_outstanding: usize,
-    /// Adaptive busy polling: after a turn that delivered events, poll without blocking for up
-    /// to this long before going to sleep, so a request that arrives a few microseconds later
-    /// costs no sleep and wake-up. The window adapts (halt-polling style): it grows when a sleep
-    /// ended soon after the window would have, and shrinks when spinning finds nothing, down to
-    /// zero; an idle loop never spins. `Duration::ZERO` turns it off. The environment variable
-    /// `SIMOOM_BUSY_POLL_US` overrides it. Default 50 µs.
+    /// Adaptive busy polling: after a turn that delivered events, the driver may poll without
+    /// blocking for up to this long before it sleeps, saving a sleep and a wake-up when the next
+    /// event comes within a few microseconds. It spins only while events have been arriving
+    /// sooner than a quarter of this window after busy turns (measured by an occasional probe
+    /// spin), so at moderate load it sleeps exactly as without busy polling and costs no CPU per
+    /// request; an idle loop never spins. `Duration::ZERO` turns it off. The environment variable
+    /// `SIMOOM_BUSY_POLL_US` overrides it. Default 30 µs.
     pub busy_poll: Duration,
 }
 
@@ -150,7 +151,7 @@ impl Default for DriverConfig {
             iocp_eager_recv: false,
             accepts_outstanding: 32,
             udp_recvs_outstanding: 4,
-            busy_poll: Duration::from_micros(50),
+            busy_poll: Duration::from_micros(30),
         }
     }
 }
@@ -269,40 +270,74 @@ impl DriverStats {
 // Adaptive busy polling
 // ---------------------------------------------------------------------------------------------
 
-/// Smallest busy-poll window once it starts growing again.
-const SPIN_START_NS: u64 = 4_000;
-
 /// Entries of an event array before it grows (see [`DriverConfig::events`]).
 pub(crate) const EVENTS_START: usize = 64;
 
 /// Most turns in a row that report results without asking the OS for new events.
 pub(crate) const MAX_SKIPS: u8 = 3;
 
-/// The adaptive busy-poll window of one driver (see [`DriverConfig::busy_poll`]).
+/// Busy waits between probe spins while the loop sleeps (see [`Spin`]).
+const PROBE_EVERY: u8 = 64;
+
+/// Busy polling of one driver (see [`DriverConfig::busy_poll`]).
+///
+/// Spinning costs the CPU time until the next event; sleeping costs a sleep and a wake-up (a
+/// few microseconds of kernel and scheduler work, more in a VM). So the driver spins only while
+/// the next event comes sooner than about one sleep and wake-up: it keeps `gap`, a smoothed time
+/// from the end of a busy turn to the next event, and spins while it is under a quarter of the
+/// window. The gap is measured only by spinning (a sleep's length includes the wake-up delay, so
+/// it would overstate it): while the loop sleeps, every [`PROBE_EVERY`]th busy wait spins once
+/// for the whole window to sample it. A spin that finds nothing counts as a long gap, so when
+/// load drops the loop goes back to sleeping at once. At moderate load (tens of microseconds
+/// between requests per loop) it sleeps, as without busy polling; on chatty connections with
+/// short round trips and near saturation it spins and saves the wake-ups. An idle loop never
+/// spins.
 pub(crate) struct Spin {
     max: u64,
-    win: u64,
-    /// The last turn delivered events: the loop is busy, so spinning is worth trying.
+    /// Smoothed time to the next event after a busy turn, in nanoseconds (spins only).
+    gap: u64,
+    /// Busy waits since the last probe spin.
+    probe: u8,
+    /// The last turn delivered events: the loop is busy, so spinning may be worth it.
     pub(crate) worked: bool,
 }
 
 impl Spin {
     pub(crate) fn new(cfg: &DriverConfig) -> Spin {
         let max = std::env::var("SIMOOM_BUSY_POLL_US").ok().and_then(|v| v.parse::<u64>().ok()).map_or(cfg.busy_poll.as_nanos().min(u64::MAX as u128) as u64, |us| us.saturating_mul(1000));
-        Spin { max, win: max / 2, worked: false }
+        Spin { max, gap: max, probe: 0, worked: false }
+    }
+
+    /// Whether events come soon enough after busy turns to spin for them.
+    fn spins(&self) -> bool {
+        self.worked && self.max > 0 && self.gap <= self.max / 4
+    }
+
+    /// Folds one observed time-to-event into the smoothed gap (weight 1/4).
+    fn record(&mut self, ns: u64) {
+        let ns = ns.min(4 * self.max);
+        self.gap = self.gap - self.gap / 4 + ns / 4;
     }
 
     /// Waits for events with `poll`, which waits up to the given timeout (zero: does not block)
-    /// and returns whether it found anything. Spins first when the window is open and the
-    /// last turn did work; `syscall_polls` paces polls that are system calls to one a microsecond.
+    /// and returns whether it found anything. Spins first when [`Spin::spins`] or a probe is
+    /// due; `syscall_polls` paces polls that are system calls to one a microsecond.
     pub(crate) fn wait(&mut self, timeout: Option<Duration>, syscall_polls: bool, stats: &mut DriverStats, mut poll: impl FnMut(Option<Duration>, &mut DriverStats) -> io::Result<bool>) -> io::Result<()> {
         if timeout == Some(Duration::ZERO) {
             return poll(timeout, stats).map(drop);
         }
-        let limit = timeout.map_or(u64::MAX, |t| t.as_nanos().min(u64::MAX as u128) as u64);
+        let mut spin = self.spins();
+        if !spin && self.worked && self.max > 0 {
+            self.probe += 1;
+            if self.probe >= PROBE_EVERY {
+                self.probe = 0;
+                spin = true;
+            }
+        }
         let mut spun = 0;
-        if self.worked && self.win > 0 {
-            let window = self.win.min(limit);
+        if spin {
+            let limit = timeout.map_or(u64::MAX, |t| t.as_nanos().min(u64::MAX as u128) as u64);
+            let window = self.max.min(limit);
             let t0 = crate::time::now_ns();
             let mut last = 0;
             loop {
@@ -311,7 +346,8 @@ impl Spin {
                     last = now.max(1);
                     stats.spin_polls += 1;
                     if poll(Some(Duration::ZERO), stats)? {
-                        return Ok(()); // found work while spinning: keep the window
+                        self.record(crate::time::now_ns() - t0);
+                        return Ok(());
                     }
                 }
                 if now >= window {
@@ -320,24 +356,13 @@ impl Spin {
                 }
                 core::hint::spin_loop();
             }
+            if window == self.max {
+                self.record(u64::MAX); // nothing within the whole window
+            }
         }
         stats.sleeps += 1;
         let rest = timeout.map(|t| t.saturating_sub(Duration::from_nanos(spun)));
-        let t1 = crate::time::now_ns();
-        let got = poll(rest, stats)?;
-        if self.max > 0 {
-            let slept = spun + (crate::time::now_ns() - t1);
-            if got && slept <= self.max {
-                // A slightly longer spin would have caught it.
-                self.win = (self.win * 2).clamp(SPIN_START_NS, self.max);
-            } else if spun > 0 {
-                // Spun for nothing.
-                self.win /= 2;
-                if self.win < SPIN_START_NS {
-                    self.win = 0;
-                }
-            }
-        }
+        poll(rest, stats)?;
         Ok(())
     }
 }

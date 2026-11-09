@@ -642,31 +642,43 @@ fn an_idle_driver_sleeps_instead_of_spinning() {
 }
 
 #[test]
-fn busy_poll_window_shrinks_when_spinning_finds_nothing_and_grows_when_it_would_have() {
+fn busy_polling_spins_only_while_events_come_sooner_than_a_wake_up() {
     let cfg = DriverConfig { busy_poll: Duration::from_micros(40), ..Default::default() };
     let mut spin = Spin::new(&cfg);
     if spin.max == 0 {
         return; // turned off with SIMOOM_BUSY_POLL_US=0
     }
     let mut st = DriverStats::default();
-    // Every spin misses and every sleep is long: the window closes.
-    for _ in 0..20 {
+    // Starts sleeping: nothing is known about the gaps yet.
+    spin.worked = true;
+    assert!(!spin.spins());
+    // Events come right after each busy turn. Sleeps don't count; the probe spins (one busy
+    // wait in PROBE_EVERY) find the event at once, and spinning starts.
+    let mut waits = 0;
+    while !spin.spins() {
+        assert!(waits < 64 * 20, "probes must open the window (gap {} ns)", spin.gap);
+        spin.wait(Some(Duration::from_millis(1)), true, &mut st, |_, _| Ok(true)).unwrap();
+        spin.worked = true;
+        waits += 1;
+    }
+    assert!(waits >= PROBE_EVERY as usize, "only probes measure the gap: {waits}");
+    // Load drops: spins find nothing within the window. Spinning stops after a few.
+    for _ in 0..4 {
         spin.worked = true;
         spin.wait(Some(Duration::from_millis(1)), true, &mut st, |t, _| {
             if t != Some(Duration::ZERO) {
-                std::thread::sleep(Duration::from_micros(300));
+                std::thread::sleep(Duration::from_micros(100));
+                return Ok(true);
             }
             Ok(false)
         })
         .unwrap();
     }
-    assert_eq!(spin.win, 0, "the window must close after spinning for nothing");
-    assert!(st.spin_polls > 0 && st.sleeps == 20);
-    // Sleeps that end within the window's reach reopen it.
     spin.worked = true;
-    spin.wait(Some(Duration::from_millis(1)), true, &mut st, |_, _| Ok(true)).unwrap();
-    assert!(spin.win >= SPIN_START_NS, "a short sleep must reopen the window: {}", spin.win);
-    // Not after an idle turn: no spinning at all.
+    assert!(!spin.spins(), "gap {} ns: no spinning when events are far apart", spin.gap);
+    // Never after an idle turn, probe or not.
+    spin.gap = 0;
+    spin.probe = PROBE_EVERY;
     spin.worked = false;
     let polls = st.spin_polls;
     spin.wait(Some(Duration::from_micros(100)), true, &mut st, |_, _| Ok(false)).unwrap();
