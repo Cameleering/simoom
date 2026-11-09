@@ -34,7 +34,11 @@ These decisions take precedence over anything later in this note that disagrees 
    described in §2.8. TLS 1.2 is optional and off by default.
 6. **Std-only, like Cameleer.** Fuzzing uses option F2 (§7.3): std-only harnesses, no
    `libfuzzer-sys`.
-7. The repository is `github.com/pmsudhi/simoom` (private), licensed Apache-2.0 like Cameleer.
+7. **Start-up and memory (owner, 2026-11-09).** simoom's cold start and memory must be within
+   5% of Cameleer's current HTTP server (`cameleer-http`, plain and with TLS), measured the same
+   way on the same machine. Anything above that needs a specific, measured advantage in real use
+   cases, documented alongside the numbers.
+8. The repository is `github.com/pmsudhi/simoom` (private), licensed Apache-2.0 like Cameleer.
    Releases are git tags. Cameleer depends on simoom by tag until the owner decides to publish
    it on crates.io.
 
