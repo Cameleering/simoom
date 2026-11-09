@@ -1,0 +1,17 @@
+[package]
+name = "simoom-compress"
+description = "DEFLATE (RFC 1951), zlib (RFC 1950) and gzip (RFC 1952) for simoom: streaming, bounded, std-only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[[example]]
+name = "bench_compress"
