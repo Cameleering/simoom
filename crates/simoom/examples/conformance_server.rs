@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run --release -p simoom --features full --example conformance_server -- \
-//!     [--addr 127.0.0.1:8080] [--tls-addr 127.0.0.1:8443] [--out DIR]
+//!     [--addr 127.0.0.1:8080] [--tls-addr 127.0.0.1:8443] [--out DIR] [--garden]
 //! ```
 //!
 //! `--addr` is a cleartext listener (HTTP/1.1, h2c prior knowledge, `Upgrade: h2c`);
@@ -19,10 +19,14 @@
 //! ```
 //!
 //! `GET /big/<n>` answers with `n` bytes (for flow-control and many-stream tests).
+//!
+//! `--garden` answers every request with the HTTP Garden's echo format instead (JSON with the
+//! base64 of the method, version, target, each header and the body), so the server can be an
+//! origin in the Garden's differential tests (<https://github.com/narfindustries/http-garden>).
 
 #![forbid(unsafe_code)]
 
-use simoom::{Outcome, Reply, Request, Server};
+use simoom::{Outcome, Reply, Request, Server, Version};
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -31,11 +35,47 @@ fn fnv(b: &[u8]) -> u64 {
     b.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &x| (h ^ u64::from(x)).wrapping_mul(0x100_0000_01b3))
 }
 
+fn base64(b: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity(b.len().div_ceil(3) * 4);
+    for c in b.chunks(3) {
+        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        for k in 0..4 {
+            s.push(if k <= c.len() { A[(n >> (18 - 6 * k)) as usize & 63] as char } else { '=' });
+        }
+    }
+    s
+}
+
+/// The HTTP Garden's echo body for a request.
+fn garden_json(req: &Request<'_>) -> String {
+    let version: &[u8] = match req.version() {
+        Version::Http10 => b"1.0",
+        Version::Http11 => b"1.1",
+        Version::H2 => b"2",
+        Version::H3 => b"3",
+    };
+    let headers: Vec<String> = req.headers().map(|(k, v)| format!("[\"{}\",\"{}\"]", base64(k), base64(v))).collect();
+    format!(
+        "{{\"method\":\"{}\",\"version\":\"{}\",\"uri\":\"{}\",\"headers\":[{}],\"body\":\"{}\"}}",
+        base64(req.method()),
+        base64(version),
+        base64(req.target()),
+        headers.join(","),
+        base64(req.body())
+    )
+}
+
 fn main() {
     let mut addr = "127.0.0.1:8080".to_string();
     let mut tls_addr: Option<String> = None;
     let mut out = std::path::PathBuf::from("conformance-server");
-    let v: Vec<String> = std::env::args().skip(1).collect();
+    let mut garden = false;
+    let mut v: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(p) = v.iter().position(|a| a == "--garden") {
+        v.remove(p);
+        garden = true;
+    }
     let mut i = 0;
     while i + 1 < v.len() {
         let val = v[i + 1].clone();
@@ -49,6 +89,9 @@ fn main() {
     }
     let n = Arc::new(AtomicU64::new(0));
     let svc = move |req: &mut Request<'_>, reply: Reply<'_>| -> Outcome {
+        if garden {
+            return reply.header("content-type", "application/json").body(garden_json(req));
+        }
         let k = n.fetch_add(1, Ordering::Relaxed) + 1;
         let line = format!(
             "REQ {k} {} {} len={} sha={:016x}\n",

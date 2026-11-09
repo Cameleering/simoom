@@ -299,3 +299,75 @@ fn h2_and_http1_share_the_port_and_limits_apply() {
     let id = c.request("POST", "/", &[1u8; 2000]);
     assert_eq!(c.wait(id).status, 413);
 }
+
+/// Sends `bytes` as the first bytes of a connection and reads until the server closes.
+fn first_bytes_reply(h: &simoom::ServerHandle, bytes: &[u8]) -> (Vec<u8>, bool) {
+    let mut s = connect(h);
+    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    s.write_all(bytes).unwrap();
+    let mut out = Vec::new();
+    let mut tmp = [0u8; 4096];
+    let closed = loop {
+        match s.read(&mut tmp) {
+            Ok(0) => break true,
+            Ok(n) => out.extend_from_slice(&tmp[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset || e.kind() == std::io::ErrorKind::ConnectionAborted => break true,
+            Err(_) => break false,
+        }
+    };
+    (out, closed)
+}
+
+/// Splits `b` into HTTP/2 frames `(type, payload)`; `None` if it is not a whole number of frames.
+fn frames(mut b: &[u8]) -> Option<Vec<(u8, Vec<u8>)>> {
+    let mut v = Vec::new();
+    while !b.is_empty() {
+        if b.len() < 9 {
+            return None;
+        }
+        let len = (usize::from(b[0]) << 16) | (usize::from(b[1]) << 8) | usize::from(b[2]);
+        if b.len() < 9 + len {
+            return None;
+        }
+        v.push((b[3], b[9..9 + len].to_vec()));
+        b = &b[9 + len..];
+    }
+    Some(v)
+}
+
+/// h2spec http2/3.5/2: an invalid connection preface on the shared HTTP/1.1 + h2c port is a
+/// connection error of type PROTOCOL_ERROR (RFC 9113 §3.4): whole HTTP/2 frames ending in
+/// GOAWAY(PROTOCOL_ERROR), then a close, never an HTTP/1 response.
+#[test]
+fn invalid_preface_gets_goaway_protocol_error_and_close() {
+    let h = serve(|_req: &mut Request<'_>, reply: Reply<'_>| -> Outcome { reply.body("ok") });
+    let cases: [&[u8]; 4] = [
+        b"INVALID CONNECTION PREFACE\r\n\r\n",
+        b"PRI * HTTP/2.0\r\n\r\nXX\r\n\r\n",
+        b"PRI * HTTP/2.0\r\n\r\nSM\r\n\rX",
+        b"PRI * HTTP/2.0\n\nSM\n\n",
+    ];
+    for c in cases {
+        let (out, closed) = first_bytes_reply(&h, c);
+        let name = String::from_utf8_lossy(c);
+        assert!(closed, "{name:?}: connection not closed");
+        assert!(!out.starts_with(b"HTTP/1"), "{name:?}: answered with HTTP/1: {:?}", String::from_utf8_lossy(&out));
+        let f = frames(&out).unwrap_or_else(|| panic!("{name:?}: not whole HTTP/2 frames: {out:?}"));
+        let (ty, payload) = f.last().unwrap_or_else(|| panic!("{name:?}: no frames"));
+        assert_eq!(*ty, 7, "{name:?}: last frame is not GOAWAY: {f:?}");
+        assert_eq!(&payload[4..8], &[0, 0, 0, 1], "{name:?}: GOAWAY error is not PROTOCOL_ERROR");
+    }
+    // HTTP/1.1 on the same port is unaffected, including a bad HTTP/1 version (400) and a
+    // pipelined second request that happens to look like a broken preface.
+    let (out, _) = first_bytes_reply(&h, b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    assert!(out.starts_with(b"HTTP/1.1 200"), "{:?}", String::from_utf8_lossy(&out));
+    // Damaged versions (found by the HTTP Garden's mutator) are still HTTP/1 errors.
+    for bad in [&b"GET / HTTP/1.x\r\nHost: x\r\n\r\n"[..], b"GET / HT\xbcP/1.1\r\nHost: x\r\n\r\n", b"GET / XTTP/1.1\r\nHost: x\r\n\r\n", b"GET /\r\n\r\n"] {
+        let (out, _) = first_bytes_reply(&h, bad);
+        assert!(out.starts_with(b"HTTP/1.1 400"), "{:?}: {:?}", String::from_utf8_lossy(bad), String::from_utf8_lossy(&out));
+    }
+    let (out, _) = first_bytes_reply(&h, b"GET / HTTP/1.1\r\nHost: x\r\n\r\nINVALID CONNECTION PREFACE\r\n\r\n");
+    assert!(out.starts_with(b"HTTP/1.1 200"), "{:?}", String::from_utf8_lossy(&out));
+    assert!(out.windows(12).any(|w| w == b"HTTP/1.1 400"), "{:?}", String::from_utf8_lossy(&out));
+    h.stop(Duration::from_secs(1));
+}

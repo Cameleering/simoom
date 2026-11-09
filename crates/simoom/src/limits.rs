@@ -57,12 +57,30 @@ pub struct Limits {
     pub stream_buffer: usize,
     /// WebSocket message size (all fragments). Default 1 MiB.
     pub max_ws_message: u64,
-    /// Inline handlers that take longer than this are counted as stalls and logged once per
-    /// route; `None` turns the stall watchdog off. Default 1 ms.
+    /// The stall watchdog's budget for one inline handler call; `None` turns the watchdog off.
+    /// A call over it on the wall clock makes its route suspect; the route's next calls are
+    /// measured with the thread's CPU clock, and a call is a stall only if it used more CPU than
+    /// this or blocked (so a loop thread preempted on a busy machine is not mistaken for a slow
+    /// handler). Stalls are logged once per route. Default 1 ms.
     pub inline_budget: Option<Duration>,
-    /// After this many stalls a service (or a router route) moves to the offload pool. 0 never
-    /// moves it. Default 3.
+    /// Stalls within [`Limits::stall_window`] after which a route (of a [`crate::Router`]; for
+    /// another service, the requests with its path) moves to the offload pool. Other routes stay
+    /// inline. 0 never moves it. Default 5.
     pub stalls_before_offload: u32,
+    /// The window for [`Limits::stalls_before_offload`]. Default 1 s.
+    pub stall_window: Duration,
+    /// Consecutive fast calls on the offload pool after which a moved route comes back inline;
+    /// it needs twice as many each further time. 0 keeps it on the pool. Default 64.
+    pub stall_recovery: u32,
+    /// Admission control: when a loop thread reaches a connection's input this long after the
+    /// loop turn's events were ready (the loop is behind), new HTTP/1.1 requests and HTTP/2
+    /// streams on it get a fast `503` with `retry-after` without calling the service (the
+    /// connection stays open when the whole request has arrived, else it closes); requests
+    /// already admitted keep their latency. Counted in
+    /// [`crate::Stats::shed`]. `None` turns it off. Default `None`: lag also grows when the
+    /// loop thread itself is preempted (a busy VM), so shedding is opt-in; a latency SLO of a
+    /// millisecond or two under overload wants 1-2 ms here.
+    pub shed_lag: Option<Duration>,
     /// Offload pool threads; 0 means twice the CPU count, at least 4.
     pub offload_threads: usize,
     /// Offload jobs waiting; more get a 503. Default 4096.
@@ -97,11 +115,25 @@ impl Default for Limits {
             stream_buffer: 64 * 1024,
             max_ws_message: 1 << 20,
             inline_budget: Some(Duration::from_millis(1)),
-            stalls_before_offload: 3,
+            stalls_before_offload: 5,
+            stall_window: Duration::from_secs(1),
+            stall_recovery: 64,
+            shed_lag: None,
             offload_threads: 0,
             offload_queue: 4096,
             offload_target: Duration::from_millis(5),
             offload_interval: Duration::from_millis(100),
+        }
+    }
+}
+
+impl Limits {
+    pub(crate) fn watchdog(&self) -> crate::watchdog::Policy {
+        crate::watchdog::Policy {
+            budget_ns: self.inline_budget.map_or(0, |d| (d.as_nanos() as u64).max(1)),
+            stalls: self.stalls_before_offload,
+            window_ns: self.stall_window.as_nanos() as u64,
+            recover: self.stall_recovery,
         }
     }
 }

@@ -7,7 +7,7 @@ use crate::reply::{BodyRef, Target};
 use crate::request::{HeaderView, Request};
 use crate::server::{bump, Shared};
 use crate::types::{HeaderBuf, StaticReply, Version};
-use crate::util::{content_length, has_body, status_line, with_date};
+use crate::util::{content_length, date_line, has_body, status_line, with_date};
 use simoom_http1::write::{ChunkHeader, CONTINUE, LAST_CHUNK};
 use simoom_http1::{BodyDecoder, BodyEvent, Error as ParseError, Framing, RequestParser, Status, EMPTY_HEADER};
 use simoom_rt::offload::OffloadPool;
@@ -15,6 +15,10 @@ use std::sync::Arc;
 
 /// Header slots on the stack; requests with more fields are parsed again into a heap array.
 const STACK_HEADERS: usize = 32;
+
+/// A bound on the fixed parts of a response head: the longest status line (49 bytes), the
+/// `date` line (37), `content-length` (38), `connection: keep-alive` (24) and the blank line.
+const HEAD_FIXED: usize = 160;
 
 enum Resp {
     /// No response outstanding.
@@ -136,13 +140,14 @@ impl H1 {
         let with_body = has_body(status);
         {
             let out = io.out();
+            // One reservation for the head and a body small enough to be copied after it, so
+            // the appends below never grow the buffer.
+            let alt = sh.alt_svc_line().map_or(0, <[u8]>::len);
+            let small = if with_body && !self.head_only && len < 4096 { len as usize } else { 0 };
+            out.reserve(HEAD_FIXED + self.hdrs.h1_len() + alt + small);
             status_line(out, status);
             self.hdrs.write_h1(out);
-            with_date(now, |d| {
-                out.extend_from_slice(b"date: ");
-                out.extend_from_slice(d);
-                out.extend_from_slice(b"\r\n");
-            });
+            date_line(now, out);
             if with_body {
                 content_length(out, len);
             }
@@ -190,11 +195,7 @@ impl H1 {
             let out = io.out();
             status_line(out, status);
             self.hdrs.write_h1(out);
-            with_date(now, |d| {
-                out.extend_from_slice(b"date: ");
-                out.extend_from_slice(d);
-                out.extend_from_slice(b"\r\n");
-            });
+            date_line(now, out);
             if chunked {
                 out.extend_from_slice(b"transfer-encoding: chunked\r\n");
             }
@@ -245,6 +246,18 @@ impl H1 {
         }
     }
 
+    /// Admission control: the loop is behind, so the request gets a fast 503 without calling
+    /// the service. The connection stays open when the whole request is here (a reconnect
+    /// costs the loop more than the 503); otherwise it closes.
+    fn shed(&mut self, io: &mut Io<'_, '_>, close: bool) {
+        bump(&io.sh.counters(io.li).shed);
+        self.hdrs.clear();
+        self.hdrs.push(b"retry-after", b"1");
+        self.hdrs.push(b"content-type", b"text/plain");
+        self.write_full(io, 503, BodyRef::Static(b"Service Unavailable"), close);
+        self.finish_response(io);
+    }
+
     /// A request error: an error response, then close.
     fn fail(&mut self, io: &mut Io<'_, '_>, status: u16) {
         let c = io.sh.counters(io.li);
@@ -290,10 +303,24 @@ impl H1 {
                 None
             }
             Err(e) => {
+                let first = std::mem::replace(&mut self.first, false);
+                #[cfg(feature = "http2")]
+                if first && io.sh.http2 && e == ParseError::InvalidVersion && !looks_like_http(rest) {
+                    // The first bytes on a port shared by HTTP/1.1 and h2c are neither an HTTP/1
+                    // request line nor the HTTP/2 preface. As HTTP/2 that is an invalid preface,
+                    // a connection error of type PROTOCOL_ERROR (RFC 9113 §3.4): the HTTP/2 codec
+                    // answers SETTINGS and GOAWAY(PROTOCOL_ERROR) and closes. Nothing was
+                    // consumed, so the codec sees the same bytes.
+                    self.switch = Some(Box::new(crate::h2::H2Layer::new(io.sh, io.now)));
+                    self.done = true;
+                    return None;
+                }
+                let _ = first;
                 self.fail(io, e.status());
                 None
             }
             Ok(Status::Complete(req)) => {
+                self.first = false;
                 self.head_started = 0;
                 Some(self.request(io, &req, rest))
             }
@@ -313,6 +340,15 @@ impl H1 {
         let connect = req.form == simoom_http1::TargetForm::Authority;
         self.close_after = !req.keep_alive || connect || self.stopping || (max != 0 && self.requests >= max);
         let hl = req.head_len;
+        if io.shed {
+            let end = match req.framing {
+                Framing::None => Some(hl),
+                Framing::Length(n) if (rest.len() - hl) as u64 >= n => Some(hl + n as usize),
+                _ => None,
+            };
+            self.shed(io, end.is_none());
+            return end.unwrap_or(rest.len());
+        }
         #[cfg(feature = "http2")]
         if io.sh.http2 && req.upgrade.is_some() && self.h2c(io, req) {
             return hl;
@@ -551,7 +587,9 @@ impl Layer for H1 {
             #[cfg(feature = "http2")]
             if self.first && io.sh.http2 {
                 match simoom_http1::h2c::detect_preface(rest) {
-                    simoom_http1::h2c::Preface::H2 => {
+                    // A broken preface goes to the HTTP/2 codec too, which refuses it with
+                    // GOAWAY(PROTOCOL_ERROR) (RFC 9113 §3.4).
+                    simoom_http1::h2c::Preface::H2 | simoom_http1::h2c::Preface::Invalid => {
                         self.switch = Some(Box::new(crate::h2::H2Layer::new(io.sh, io.now)));
                         self.done = true;
                         break;
@@ -565,7 +603,7 @@ impl Layer for H1 {
                     simoom_http1::h2c::Preface::Http1 => {}
                 }
             }
-            self.first = false;
+            // `first` stays set until the first head parses or fails (see `parsed`).
             match self.head(io, rest) {
                 Some(n) => pos += n,
                 None => break,
@@ -657,7 +695,18 @@ impl Layer for H1 {
         let now = io.now;
         let l = &io.sh.limits;
         if self.head_started != 0 && now >= self.head_started + l.head_timeout.as_nanos() as u64 {
-            self.fail(io, 408);
+            match crate::util::head_timeout_action(now) {
+                crate::util::HeadTimeout::Answer => self.fail(io, 408),
+                crate::util::HeadTimeout::Drop => {
+                    // Many at once on this loop (a slowloris wave): reset without a 408.
+                    bump(&io.sh.counters(io.li).timeouts);
+                    self.done = true;
+                    io.abort = true;
+                }
+                // Spread a wave over time instead of closing (and seeing reopened) thousands
+                // of connections in one loop turn; `deadline` re-arms the timer.
+                crate::util::HeadTimeout::Later(d) => self.head_started = (now + d).saturating_sub(l.head_timeout.as_nanos() as u64).max(1),
+            }
             return;
         }
         if let Some(b) = self.body.as_ref() {
@@ -784,6 +833,18 @@ impl Target for H1Target<'_, '_, '_> {
         self.state = TState::Upgraded;
         true
     }
+}
+
+/// Whether the last word of the first line could be a (damaged) HTTP version: it starts with
+/// `HT` or has a `/`. An HTTP/1 client with a bad version (`HTTP/1.x`, `HT?P/1.1`, `XTTP/1.1`,
+/// HTTP/0.9's `GET /`) still gets a 400; only bytes with no version-like word at all (h2spec's
+/// `INVALID CONNECTION PREFACE`) count as an invalid HTTP/2 preface on an h2c-enabled port.
+#[cfg(feature = "http2")]
+fn looks_like_http(buf: &[u8]) -> bool {
+    let line = buf.split(|&b| b == b'\n').next().unwrap_or(buf);
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let last = line.rsplit(|&b| b == b' ').next().unwrap_or(line);
+    last.starts_with(b"HT") || last.contains(&b'/')
 }
 
 /// `scheme://authority/path?query` to (authority, `/path?query`); `None` without `//`.

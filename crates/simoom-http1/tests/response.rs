@@ -229,6 +229,14 @@ fn h2_preface_detection() {
     assert_eq!(detect_preface(b"PRI * HTTP/1.1\r\n"), Preface::Http1);
     assert_eq!(detect_preface(b"P"), Preface::Partial);
     assert_eq!(detect_preface(b"X"), Preface::Http1);
+    // The preface's request line followed by anything but the rest of the preface is a broken
+    // HTTP/2 client (RFC 9113 §3.4), not an HTTP/1 request.
+    assert_eq!(detect_preface(b"PRI * HTTP/2.0\r\n\r\nXX\r\n\r\n"), Preface::Invalid);
+    assert_eq!(detect_preface(b"PRI * HTTP/2.0\n"), Preface::Invalid);
+    assert_eq!(detect_preface(b"PRI * HTTP/2.0 "), Preface::Invalid);
+    assert_eq!(detect_preface(b"PRI * HTTP/2.0"), Preface::Partial);
+    assert_eq!(detect_preface(b"PRI * HTTP/2.1\r\n"), Preface::Http1);
+    assert_eq!(detect_preface(b"INVALID CONNECTION PREFACE\r\n\r\n"), Preface::Http1);
     // The HTTP/1 parser refuses the preface on its own (asterisk form is for OPTIONS only).
     let mut hs = [EMPTY_HEADER; 4];
     assert!(parse_request(PREFACE, &mut hs, &Limits::default()).is_err());

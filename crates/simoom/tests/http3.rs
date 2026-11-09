@@ -183,7 +183,7 @@ fn start() -> ServerHandle {
                     });
                     Outcome::Done
                 }
-                b"/big" => reply.body(vec![b'q'; 300_000]),
+                b"/big" => reply.body(vec![b'q'; 1_100_000]),
                 b"/slow" => {
                     let responder = reply.defer();
                     std::thread::spawn(move || {
@@ -219,7 +219,7 @@ fn http3_round_trips() {
     let id = c.request("GET", "/stream", b"");
     assert_eq!(c.wait(id).body, b"part0;part1;part2;part3;");
     let id = c.request("GET", "/big", b"");
-    assert_eq!(c.wait(id).body.len(), 300_000);
+    assert_eq!(c.wait(id).body.len(), 1_100_000, "a response over the 1 MiB stream window");
     // Several streams at once.
     let ids: Vec<u64> = (0..10).map(|i| c.request("GET", &format!("/m{i}"), b"")).collect();
     for (i, id) in ids.into_iter().enumerate() {

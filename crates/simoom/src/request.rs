@@ -33,6 +33,8 @@ pub struct Request<'a> {
     pub(crate) secure: bool,
     pub(crate) params: Vec<Param>,
     pub(crate) route: u32,
+    /// What the call cost its thread, when the watchdog measured it.
+    pub(crate) sample: Option<crate::watchdog::Sample>,
     pub(crate) websocket: bool,
     pub(crate) loop_index: usize,
 }
@@ -84,6 +86,7 @@ impl<'a> Request<'a> {
             secure: false,
             params: Vec::new(),
             route: 0,
+            sample: None,
             websocket: false,
             loop_index: 0,
         }
@@ -340,6 +343,7 @@ impl OwnedRequest {
             secure: self.secure,
             params: std::mem::take(&mut self.params),
             route: self.route,
+            sample: None,
             websocket: self.websocket,
             loop_index: self.loop_index,
         }

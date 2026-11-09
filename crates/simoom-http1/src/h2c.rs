@@ -19,13 +19,26 @@ pub enum Preface {
     Http1,
     /// Too few bytes to tell (a prefix of the preface, or nothing).
     Partial,
+    /// The bytes start with the preface's request line, `PRI * HTTP/2.0`, but the rest of the
+    /// preface is wrong: an HTTP/2 client with a broken preface. RFC 9113 §3.4 makes that a
+    /// connection error of type PROTOCOL_ERROR, so hand it to the HTTP/2 codec, which answers
+    /// GOAWAY(PROTOCOL_ERROR) and closes, rather than to the HTTP/1 parser.
+    Invalid,
 }
+
+/// Length of `PRI * HTTP/2.0`, the request line of the preface. The `PRI` method is reserved
+/// for it (RFC 9113 §11.6), so no HTTP/1 request starts with these bytes.
+const PREFACE_LINE: usize = 14;
 
 /// Classifies the start of a connection.
 pub fn detect_preface(buf: &[u8]) -> Preface {
     let n = buf.len().min(PREFACE.len());
     if buf[..n] != PREFACE[..n] {
-        Preface::Http1
+        if n > PREFACE_LINE && buf[..PREFACE_LINE] == PREFACE[..PREFACE_LINE] {
+            Preface::Invalid
+        } else {
+            Preface::Http1
+        }
     } else if n == PREFACE.len() {
         Preface::H2
     } else {

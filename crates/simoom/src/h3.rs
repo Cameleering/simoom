@@ -38,12 +38,13 @@ pub(crate) fn endpoint(sh: Arc<Shared>, cfg: Arc<simoom_quic::Config>, info: &Ud
         ids: FastMap::default(),
         next_id: 1,
         timer: None,
-        rx: Vec::with_capacity(2048),
-        resp: Vec::with_capacity(256),
-        tx: Vec::with_capacity(64 * 1024),
+        // Buffers grow on first use: a QUIC endpoint per loop costs nothing until traffic comes.
+        rx: Vec::new(),
+        resp: Vec::new(),
+        tx: Vec::new(),
         touched: Vec::new(),
         hdrs: HeaderBuf::default(),
-        tmp: vec![0; 16 * 1024],
+        tmp: Vec::new(),
         handle: None,
         pool: None,
         stopping: false,
@@ -285,7 +286,10 @@ fn close_streams(c: &H3Conn) {
     }
 }
 
-fn read_body(c: &mut H3Conn, qc: &mut simoom_quic::Connection, now: Instant, stream: u64, tmp: &mut [u8], buffer: usize, max_body: u64) {
+fn read_body(c: &mut H3Conn, qc: &mut simoom_quic::Connection, now: Instant, stream: u64, tmp: &mut Vec<u8>, buffer: usize, max_body: u64) {
+    if tmp.is_empty() {
+        tmp.resize(16 * 1024, 0);
+    }
     let Some(st) = c.streams.get_mut(&stream) else { return };
     loop {
         if st.full {

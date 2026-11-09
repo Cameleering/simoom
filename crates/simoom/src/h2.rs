@@ -44,6 +44,9 @@ struct RespPart {
     head_only: bool,
 }
 
+/// Finished streams kept per connection for reuse (their buffers keep their capacity).
+const FREE_STREAMS: usize = 64;
+
 #[derive(Default)]
 struct St {
     req: ReqPart,
@@ -71,6 +74,25 @@ pub(crate) struct H2Layer {
     stopping: bool,
     /// Close after the current streams (a panic, or `connection: close`).
     close_after: bool,
+    /// Finished streams for reuse: a new stream allocates nothing once its buffers grew.
+    free: Vec<Box<St>>,
+}
+
+impl St {
+    /// Clears a finished stream for reuse, keeping the capacity of its buffers.
+    fn recycle(mut self: Box<St>) -> Box<St> {
+        let mut head = std::mem::take(&mut self.req.head);
+        head.clear();
+        let mut body = std::mem::take(&mut self.req.body);
+        body.clear();
+        let mut pending = std::mem::take(&mut self.resp.pending);
+        pending.clear();
+        *self = St::default();
+        self.req.head = head;
+        self.req.body = body;
+        self.resp.pending = pending;
+        self
+    }
 }
 
 impl H2Layer {
@@ -89,6 +111,13 @@ impl H2Layer {
             idle_since: now,
             stopping: false,
             close_after: false,
+            free: Vec::new(),
+        }
+    }
+
+    fn release_stream(&mut self, st: Box<St>) {
+        if self.free.len() < FREE_STREAMS && st.req.body.capacity() <= 64 * 1024 && st.resp.pending.capacity() <= 64 * 1024 {
+            self.free.push(st.recycle());
         }
     }
 
@@ -151,6 +180,13 @@ impl H2Layer {
             let reason = simoom_http1::write::reason(code).as_bytes();
             self.hdrs.clear();
             respond(&mut self.conn, &self.hdrs, &mut st.resp, sh, io.now, id, code, BodyRef::Static(reason));
+        } else if io.shed {
+            // Admission control: the loop is behind; refuse the stream without the service.
+            bump(&sh.counters(io.li).shed);
+            self.hdrs.clear();
+            self.hdrs.push(b"retry-after", b"1");
+            self.hdrs.push(b"content-type", b"text/plain");
+            respond(&mut self.conn, &self.hdrs, &mut st.resp, sh, io.now, id, 503, BodyRef::Static(b"Service Unavailable"));
         } else {
             let streaming = !st.end;
             if streaming {
@@ -194,6 +230,7 @@ impl H2Layer {
                 }
             }
             self.conn.stream_finished(id);
+            self.release_stream(st);
         } else {
             self.streams.insert(id, st);
         }
@@ -216,6 +253,14 @@ impl H2Layer {
             let out = self.conn.output();
             if out.is_empty() || io.cx.queued() >= high {
                 break;
+            }
+            // Every stream's HEADERS and DATA of this turn are in one buffer: hand it over
+            // whole (no copy on plain TCP) and send once.
+            if io.out_is_empty() && io.plain() {
+                let fresh = io.cx.buffer(16 * 1024);
+                let v = self.conn.take_output(fresh);
+                io.cx.send(v);
+                continue;
             }
             let n = out.len();
             io.write(out);
@@ -245,12 +290,13 @@ impl H2Layer {
         let buffer = io.sh.limits.body_buffer;
         let max_body = io.sh.limits.max_body;
         let streams = &mut self.streams;
+        let free = &mut self.free;
         let ready = &mut self.ready;
         let resets = &mut self.resets;
         let touched = &mut self.touched;
         let n = self.conn.recv(data, now_ms, &mut |ev| match ev {
             Event::Headers { stream, headers, end_stream } => {
-                let mut st = Box::<St>::default();
+                let mut st = free.pop().unwrap_or_default();
                 let h = &mut st.req.head;
                 h.set_method(headers.method().unwrap_or(b"GET"));
                 h.set_target(headers.path().unwrap_or(b"/"));
@@ -359,16 +405,34 @@ fn respond(conn: &mut Connection, hdrs: &HeaderBuf, rs: &mut RespPart, sh: &Shar
 #[allow(clippy::too_many_arguments)]
 fn send_head(conn: &mut Connection, hdrs: &HeaderBuf, sh: &Shared, now: u64, id: u32, status: u16, len: Option<&[u8]>, end: bool) -> Result<(), simoom_h2::Error> {
     let date = with_date(now, |d| *d);
-    let mut fields: Vec<(&[u8], &[u8])> = Vec::with_capacity(hdrs.iter().size_hint().0 + 4);
-    fields.extend(hdrs.iter());
-    fields.push((b"date", &date));
+    // The field list on the stack for the usual handful of headers (no allocation).
+    const STACK: usize = 16;
+    let empty: (&[u8], &[u8]) = (b"", b"");
+    let mut stack = [empty; STACK];
+    let mut heap = Vec::new();
+    let n = hdrs.len() + 3;
+    let fields: &mut [(&[u8], &[u8])] = if n <= STACK {
+        &mut stack[..]
+    } else {
+        heap.resize(n, empty);
+        &mut heap[..]
+    };
+    let mut i = 0;
+    for f in hdrs.iter() {
+        fields[i] = f;
+        i += 1;
+    }
+    fields[i] = (b"date", &date);
+    i += 1;
     if let Some(l) = len {
-        fields.push((b"content-length", l));
+        fields[i] = (b"content-length", l);
+        i += 1;
     }
     if let Some(a) = sh.alt_svc_value() {
-        fields.push((b"alt-svc", a));
+        fields[i] = (b"alt-svc", a);
+        i += 1;
     }
-    conn.send_response(id, status, &fields, end)
+    conn.send_response(id, status, &fields[..i], end)
 }
 
 fn push_pending(conn: &mut Connection, id: u32, rs: &mut RespPart) {

@@ -10,7 +10,8 @@ use simoom_rt::{Backend, ConnInfo, Connection, Runtime, RuntimeHandle};
 use std::io;
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crate::watchdog::Watch;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -24,7 +25,10 @@ pub(crate) struct Counters {
     pub(crate) timeouts: AtomicU64,
     pub(crate) panics: AtomicU64,
     pub(crate) stalls: AtomicU64,
+    pub(crate) stall_checks: AtomicU64,
+    pub(crate) offloaded_routes: AtomicU64,
     pub(crate) overloaded: AtomicU64,
+    pub(crate) shed: AtomicU64,
     pub(crate) upgrades: AtomicU64,
     pub(crate) h2_connections: AtomicU64,
     pub(crate) h3_connections: AtomicU64,
@@ -51,10 +55,13 @@ pub(crate) struct Shared {
     /// `alt-svc: ...\r\n`, set once the UDP port is known.
     pub(crate) alt_svc: OnceLock<(Vec<u8>, Vec<u8>)>,
     counters: Box<[Counters]>,
-    offload_all: AtomicBool,
-    stalls: AtomicU64,
-    stall_logged: AtomicBool,
-    budget_ns: u64,
+    pub(crate) watchdog: crate::watchdog::Policy,
+    /// [`Limits::shed_lag`] in ns (0: off).
+    pub(crate) shed_ns: u64,
+    /// Watchdog state per path slot, for services without routes ([`Service::watch`] `None`).
+    slots: Box<[Arc<Watch>]>,
+    /// Slots that are suspect or offloaded: the path is hashed only while this is not 0.
+    slots_active: Arc<AtomicU32>,
     log: Arc<dyn Fn(&str) + Send + Sync>,
     #[cfg(feature = "tls")]
     pub(crate) tls: Option<Arc<simoom_tls::ServerConfig>>,
@@ -116,50 +123,101 @@ impl Shared {
         (self.log)(msg)
     }
 
-    fn stall(&self, req: &Request<'_>, took: Duration) {
-        bump(&self.counters(req.loop_index).stalls);
-        if self.service.on_stall(req) {
+    /// The watchdog slot of a request to a service without routes: its method and path.
+    fn slot(&self, req: &Request<'_>) -> &Arc<Watch> {
+        use std::hash::Hasher;
+        let mut h = crate::util::Fnv::default();
+        h.write(req.method());
+        h.write(req.path());
+        &self.slots[(h.finish() as usize) % self.slots.len()]
+    }
+
+    /// The watchdog's part after a call that overran the budget or was measured.
+    fn after_call(&self, req: &Request<'_>, took_ns: u64) {
+        let p = &self.watchdog;
+        let (w, k, name) = match self.service.watch(req) {
+            Some(r) => (r.watch, r.stalls.unwrap_or(p.stalls), std::borrow::Cow::Borrowed(r.name)),
+            None => (self.slot(req), p.stalls, String::from_utf8_lossy(req.path())),
+        };
+        let c = self.counters(req.loop_index);
+        let Some(s) = req.sample else {
+            if took_ns > p.budget_ns && w.wall_overrun() {
+                bump(&c.stall_checks);
+            }
+            return;
+        };
+        let ev = w.measured(took_ns, s, p, k, simoom_sys::time::now_ns());
+        if ev == crate::watchdog::Event::None {
             return;
         }
-        let n = self.stalls.fetch_add(1, Ordering::Relaxed) + 1;
-        if !self.stall_logged.swap(true, Ordering::Relaxed) {
+        bump(&c.stalls);
+        if !w.logged.swap(true, Ordering::Relaxed) {
             // Microseconds as integers: `Duration`'s Debug costs 2 KB of code.
             self.log(&format!(
-                "simoom: an inline handler took {} us on {} (budget {} us); slow handlers belong on the offload pool",
-                took.as_micros() as u64,
-                String::from_utf8_lossy(req.path()),
-                self.limits.inline_budget.unwrap_or_default().as_micros() as u64
+                "simoom: an inline handler on {name} took {} us ({} us of CPU; budget {} us); slow handlers belong on the offload pool",
+                took_ns / 1000,
+                s.cpu_ns / 1000,
+                p.budget_ns / 1000
             ));
         }
-        let k = self.limits.stalls_before_offload;
-        if k != 0 && n >= u64::from(k) && !self.offload_all.swap(true, Ordering::Relaxed) {
-            self.log(&format!("simoom: {n} stalls; the service now runs on the offload pool"));
+        if ev == crate::watchdog::Event::Offloaded {
+            bump(&c.offloaded_routes);
+            self.log(&format!("simoom: {name} stalled {k} times within {} ms and now runs on the offload pool", p.window_ns / 1_000_000));
         }
     }
 }
 
-/// Calls the service for one request: on the offload pool once the watchdog moved it there,
-/// else inline, timed, with panics caught. Returns `true` if the service panicked.
+/// Calls the service for one request: on the offload pool when the watchdog moved the
+/// request's path there, else inline, timed, with panics caught. Returns `true` if the service
+/// panicked. (A [`crate::Router`] does the same per route inside its own call.)
 ///
 /// `clock` carries the time the previous call of the same callback ended, so pipelined
 /// requests cost one clock read each instead of two.
 pub(crate) fn call(sh: &Shared, req: &mut Request<'_>, t: &mut dyn Target, clock: &mut Option<Instant>) -> bool {
-    if sh.offload_all.load(Ordering::Relaxed) {
-        let _ = Reply::new(t).offload_service(req, sh.service.clone());
-        return false;
+    let budget = sh.watchdog.budget_ns;
+    if budget == 0 {
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            let _ = sh.service.call(req, Reply::new(t));
+        }));
+        return finish_call(sh, req, r);
     }
-    let t0 = if sh.budget_ns != 0 { Some(clock.take().unwrap_or_else(Instant::now)) } else { None };
-    let r = catch_unwind(AssertUnwindSafe(|| {
-        let _ = sh.service.call(req, Reply::new(t));
-    }));
-    if let Some(t0) = t0 {
-        let t1 = Instant::now();
-        *clock = Some(t1);
-        let took = t1 - t0;
-        if took.as_nanos() as u64 > sh.budget_ns {
-            sh.stall(req, took);
+    let mut measure = false;
+    if sh.slots_active.load(Ordering::Relaxed) != 0 {
+        let w = sh.slot(req);
+        if w.offloaded() {
+            let w = w.clone();
+            let _ = Reply::new(t).offload_watched(req, sh.service.clone(), w);
+            return false;
         }
+        measure = w.suspect();
     }
+    let t0 = clock.take().unwrap_or_else(Instant::now);
+    let r = if measure {
+        let (r, s) = crate::watchdog::measured(|| {
+            catch_unwind(AssertUnwindSafe(|| {
+                let _ = sh.service.call(req, Reply::new(t));
+            }))
+        });
+        req.sample = s;
+        r
+    } else {
+        catch_unwind(AssertUnwindSafe(|| {
+            let _ = sh.service.call(req, Reply::new(t));
+        }))
+    };
+    let t1 = Instant::now();
+    *clock = Some(t1);
+    let took = (t1 - t0).as_nanos() as u64;
+    if took > budget || req.sample.is_some() {
+        sh.after_call(req, took);
+    }
+    finish_call(sh, req, r)
+}
+
+/// Path slots of the watchdog for services without routes.
+const WATCH_SLOTS: usize = 64;
+
+fn finish_call(sh: &Shared, req: &Request<'_>, r: std::thread::Result<()>) -> bool {
     if r.is_err() {
         bump(&sh.counters(req.loop_index).panics);
         return true;
@@ -187,10 +245,17 @@ pub struct Stats {
     pub timeouts: u64,
     /// Handlers that panicked.
     pub panics: u64,
-    /// Inline handlers over the time budget.
+    /// Inline handler calls the watchdog confirmed as stalls (over the CPU budget, or blocked).
     pub stalls: u64,
+    /// Calls over the budget on the wall clock that made their route suspect (and measured);
+    /// most are a preempted loop thread, not a slow handler.
+    pub stall_checks: u64,
+    /// Times a route moved to the offload pool.
+    pub offloaded_routes: u64,
     /// Requests answered 503 because the offload pool was full or overloaded.
     pub overloaded: u64,
+    /// Requests answered 503 by admission control ([`Limits::shed_lag`]).
+    pub shed: u64,
     /// WebSocket and h2c upgrades.
     pub upgrades: u64,
     /// HTTP/2 connections.
@@ -440,6 +505,7 @@ impl Builder {
             header_table_size: limits.header_table_size,
             ..simoom_h2::Config::default()
         };
+        let slots_active = Arc::new(AtomicU32::new(0));
         let shared = Arc::new(Shared {
             service,
             #[cfg(feature = "http1")]
@@ -449,10 +515,10 @@ impl Builder {
             h2,
             alt_svc: OnceLock::new(),
             counters: (0..COUNTER_SLOTS).map(|_| Counters::default()).collect(),
-            offload_all: AtomicBool::new(false),
-            stalls: AtomicU64::new(0),
-            stall_logged: AtomicBool::new(false),
-            budget_ns: limits.inline_budget.map_or(0, |d| (d.as_nanos() as u64).max(1)),
+            watchdog: limits.watchdog(),
+            shed_ns: limits.shed_lag.map_or(0, |d| (d.as_nanos() as u64).max(1)),
+            slots: (0..WATCH_SLOTS).map(|_| Arc::new(Watch::new(Some(slots_active.clone())))).collect(),
+            slots_active,
             log: self.log,
             per_ip: std::sync::Mutex::new(std::collections::HashMap::new()),
             #[cfg(feature = "tls")]
@@ -581,7 +647,10 @@ impl ServerHandle {
             s.timeouts += c.timeouts.load(r);
             s.panics += c.panics.load(r);
             s.stalls += c.stalls.load(r);
+            s.stall_checks += c.stall_checks.load(r);
+            s.offloaded_routes += c.offloaded_routes.load(r);
             s.overloaded += c.overloaded.load(r);
+            s.shed += c.shed.load(r);
             s.upgrades += c.upgrades.load(r);
             s.h2_connections += c.h2_connections.load(r);
             s.h3_connections += c.h3_connections.load(r);

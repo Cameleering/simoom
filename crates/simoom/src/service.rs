@@ -20,9 +20,10 @@ pub enum Outcome {
 /// (microseconds), or defer ([`Reply::defer`]), or move the work to the offload pool
 /// ([`Reply::offload`], [`blocking`]).
 ///
-/// Panics are caught: the request gets a 500 and its connection closes. A call that takes
-/// longer than [`crate::Limits::inline_budget`] is counted as a stall; after
-/// [`crate::Limits::stalls_before_offload`] stalls the service runs on the offload pool.
+/// Panics are caught: the request gets a 500 and its connection closes. A call that uses more
+/// CPU than [`crate::Limits::inline_budget`], or blocks, is a stall; after
+/// [`crate::Limits::stalls_before_offload`] stalls the route (of a [`crate::Router`]; else the
+/// requests with that path) runs on the offload pool until it is fast again.
 ///
 /// Any `Fn(&mut Request<'_>, Reply<'_>) -> Outcome + Send + Sync + 'static` closure is a
 /// service:
@@ -39,13 +40,23 @@ pub trait Service: Send + Sync + 'static {
     /// Answers one request.
     fn call(&self, req: &mut Request<'_>, reply: Reply<'_>) -> Outcome;
 
-    /// The stall watchdog saw a call exceed the inline budget. Return `true` if the service
-    /// handled it (the [`crate::Router`] moves just that route to the offload pool); the default
-    /// returns `false`, and the server counts stalls for the whole service.
-    fn on_stall(&self, req: &Request<'_>) -> bool {
+    /// The stall-watchdog state of the route that served `req` (implemented by
+    /// [`crate::Router`]); `None` lets the server track the request's path.
+    #[doc(hidden)]
+    fn watch(&self, req: &Request<'_>) -> Option<WatchRef<'_>> {
         let _ = req;
-        false
+        None
     }
+}
+
+/// The stall-watchdog state of one route ([`Service::watch`]). Opaque.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct WatchRef<'a> {
+    pub(crate) watch: &'a Arc<crate::watchdog::Watch>,
+    /// Overrides [`crate::Limits::stalls_before_offload`].
+    pub(crate) stalls: Option<u32>,
+    pub(crate) name: &'a str,
 }
 
 impl<F> Service for F
@@ -61,8 +72,8 @@ impl<S: Service + ?Sized> Service for Arc<S> {
     fn call(&self, req: &mut Request<'_>, reply: Reply<'_>) -> Outcome {
         (**self).call(req, reply)
     }
-    fn on_stall(&self, req: &Request<'_>) -> bool {
-        (**self).on_stall(req)
+    fn watch(&self, req: &Request<'_>) -> Option<WatchRef<'_>> {
+        (**self).watch(req)
     }
 }
 

@@ -450,3 +450,48 @@ fn requests_over_real_tls() {
         assert_eq!(cl.resp[id].body, format!("hello /tls/{i}").into_bytes());
     }
 }
+
+/// A server that writes only when told to (on `H3Event::Writable`), as an event loop does, must
+/// still finish a response larger than the peer's stream window: a frame that fills the window
+/// exactly used to leave the stream unregistered in QUIC, so MAX_STREAM_DATA never woke it.
+#[test]
+fn event_driven_response_larger_than_the_stream_window_finishes() {
+    let mut h = H3Pair::new(Link::default(), 21, Some(H3Config::default()), H3Config::default());
+    let req = get("/big");
+    let (h3, conn) = h.client_mut();
+    let id = h3.send_request(conn, &refs(&req), true).unwrap();
+    let body = pattern(3 << 20, 4);
+    let mut sent = 0usize;
+    let mut started = false;
+    let mut cl = Client::default();
+    let ok = h.run(LIMIT, |h| {
+        let events: Vec<H3Event> = h.sev.drain(..).collect();
+        let (h3, conn) = h.server_mut();
+        let mut write = false;
+        for e in events {
+            match e {
+                H3Event::Finished { stream } if stream == id => {
+                    h3.send_headers(conn, id, &[(b":status", b"200")], false).unwrap();
+                    started = true;
+                    write = true;
+                }
+                H3Event::Writable { stream } if stream == id => write = true,
+                _ => {}
+            }
+        }
+        if started && write {
+            // Write until blocked, then wait for the next Writable event.
+            while sent < body.len() {
+                let n = h3.send_body(conn, id, &body[sent..], true).unwrap();
+                if n == 0 {
+                    break;
+                }
+                sent += n;
+            }
+        }
+        cl.step(h);
+        cl.resp.get(&id).is_some_and(|m| m.finished)
+    });
+    assert!(ok, "server sent {sent} of {}; client got {}", body.len(), cl.resp.get(&id).map_or(0, |m| m.body.len()));
+    assert!(cl.resp[&id].body == body);
+}

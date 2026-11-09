@@ -3,9 +3,9 @@
 
 use crate::reply::Reply;
 use crate::request::{Param, Request};
-use crate::service::{Outcome, Service};
+use crate::service::{Outcome, Service, WatchRef};
 use crate::util::FastMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use crate::watchdog::Watch;
 use std::sync::Arc;
 
 struct RouteEntry {
@@ -13,9 +13,7 @@ struct RouteEntry {
     handler: Arc<dyn Service>,
     names: Vec<Arc<str>>,
     pattern: String,
-    stalls: AtomicU32,
-    offload: AtomicBool,
-    logged: AtomicBool,
+    watch: Arc<Watch>,
 }
 
 #[derive(Default)]
@@ -36,7 +34,8 @@ struct Node {
 /// - A path that matches with another method gets `405` with `allow`; no match gets `404`
 ///   (or the [`Router::fallback`]). `HEAD` falls back to a `GET` route.
 /// - Captured values: [`Request::param`]. Paths match as sent (not percent-decoded).
-/// - The stall watchdog moves a slow route, alone, to the offload pool.
+/// - The stall watchdog moves a slow route, alone, to the offload pool, and back once it is
+///   fast again.
 ///
 /// ```
 /// use simoom::{Router, Request, Reply, Outcome};
@@ -53,7 +52,7 @@ pub struct Router {
     trie: Node,
     routes: Vec<RouteEntry>,
     fallback: Option<Arc<dyn Service>>,
-    stalls_before_offload: u32,
+    stalls_before_offload: Option<u32>,
 }
 
 impl Default for Router {
@@ -75,7 +74,7 @@ fn is_template(seg: &[u8]) -> bool {
 impl Router {
     /// An empty router.
     pub fn new() -> Router {
-        Router { exact: FastMap::default(), trie: Node::default(), routes: Vec::new(), fallback: None, stalls_before_offload: 3 }
+        Router { exact: FastMap::default(), trie: Node::default(), routes: Vec::new(), fallback: None, stalls_before_offload: None }
     }
 
     /// Adds a route for `method` (`"*"` for any) and `path`.
@@ -113,9 +112,7 @@ impl Router {
             handler: Arc::new(handler),
             names,
             pattern: path.to_string(),
-            stalls: AtomicU32::new(0),
-            offload: AtomicBool::new(false),
-            logged: AtomicBool::new(false),
+            watch: Arc::new(Watch::new(None)),
         });
         self
     }
@@ -151,9 +148,10 @@ impl Router {
         self
     }
 
-    /// Stalls after which a route moves to the offload pool (default 3; 0 never).
+    /// Stalls (within [`crate::Limits::stall_window`]) after which a route moves to the offload
+    /// pool; 0 never. Default: [`crate::Limits::stalls_before_offload`].
     pub fn stalls_before_offload(mut self, n: u32) -> Router {
-        self.stalls_before_offload = n;
+        self.stalls_before_offload = Some(n);
         self
     }
 
@@ -236,23 +234,21 @@ impl Service for Router {
         // Query strings are not part of the path; offsets are into the target, which starts
         // with the path.
         req.params = ranges.iter().zip(&r.names).map(|(&(s, e), n)| -> Param { (n.clone(), s, e) }).collect();
-        if r.offload.load(Ordering::Relaxed) {
-            return reply.offload_service(req, r.handler.clone());
+        if r.watch.offloaded() {
+            return reply.offload_watched(req, r.handler.clone(), r.watch.clone());
+        }
+        if r.watch.suspect() {
+            // The wall clock saw this route overrun: measure it with the thread clocks.
+            let (o, s) = crate::watchdog::measured(|| r.handler.call(req, reply));
+            req.sample = s;
+            return o;
         }
         r.handler.call(req, reply)
     }
 
-    fn on_stall(&self, req: &Request<'_>) -> bool {
-        let Some(r) = (req.route as usize).checked_sub(1).and_then(|i| self.routes.get(i)) else { return false };
-        let n = r.stalls.fetch_add(1, Ordering::Relaxed) + 1;
-        if !r.logged.swap(true, Ordering::Relaxed) {
-            eprintln!("simoom: route {} took longer than the inline budget; slow handlers belong on the offload pool", r.pattern);
-        }
-        let k = self.stalls_before_offload;
-        if k != 0 && n >= k && !r.offload.swap(true, Ordering::Relaxed) {
-            eprintln!("simoom: route {} stalled {n} times and now runs on the offload pool", r.pattern);
-        }
-        true
+    fn watch(&self, req: &Request<'_>) -> Option<WatchRef<'_>> {
+        let r = (req.route as usize).checked_sub(1).and_then(|i| self.routes.get(i))?;
+        Some(WatchRef { watch: &r.watch, stalls: self.stalls_before_offload, name: &r.pattern })
     }
 }
 

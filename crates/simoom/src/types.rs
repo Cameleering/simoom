@@ -80,12 +80,19 @@ impl HeaderBuf {
     }
 
     pub(crate) fn push(&mut self, name: &[u8], value: &[u8]) -> Pushed {
-        if name.is_empty() || name.len() > u16::MAX as usize || !name.iter().all(|&b| is_tchar(b)) || !valid_value(value) {
+        if name.is_empty() || name.len() > u16::MAX as usize || !valid_value(value) {
             return Pushed::Invalid;
         }
         let value = trim(value);
         let start = self.bytes.len();
-        self.bytes.extend(name.iter().map(u8::to_ascii_lowercase));
+        self.bytes.reserve(name.len() + value.len());
+        for &b in name {
+            if !is_tchar(b) {
+                self.bytes.truncate(start);
+                return Pushed::Invalid;
+            }
+            self.bytes.push(b.to_ascii_lowercase());
+        }
         let lower = &self.bytes[start..];
         match lower {
             b"connection" => {
@@ -103,6 +110,12 @@ impl HeaderBuf {
         Pushed::Added
     }
 
+    /// Number of fields.
+    #[cfg_attr(not(feature = "http2"), allow(dead_code))]
+    pub(crate) fn len(&self) -> usize {
+        self.idx.len()
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&[u8], &[u8])> + '_ {
         self.idx.iter().map(move |&(s, n, v)| {
             let s = s as usize;
@@ -113,6 +126,11 @@ impl HeaderBuf {
 
     pub(crate) fn get(&self, name: &[u8]) -> Option<&[u8]> {
         self.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v)
+    }
+
+    /// Bytes of the `name: value\r\n` lines.
+    pub(crate) fn h1_len(&self) -> usize {
+        self.bytes.len() + 4 * self.idx.len()
     }
 
     /// Appends `name: value\r\n` lines.
@@ -277,6 +295,16 @@ pub(crate) struct OwnedHead {
 }
 
 impl OwnedHead {
+    /// Empties the head, keeping the capacity of its buffers.
+    #[cfg_attr(not(feature = "http2"), allow(dead_code))]
+    pub(crate) fn clear(&mut self) {
+        self.buf.clear();
+        self.fields.clear();
+        self.method = 0..0;
+        self.target = 0..0;
+        self.authority = None;
+    }
+
     fn put(&mut self, b: &[u8]) -> Range<u32> {
         let s = self.buf.len() as u32;
         self.buf.extend_from_slice(b);

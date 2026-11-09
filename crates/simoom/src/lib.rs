@@ -48,8 +48,10 @@
 //! - Every limit of [`Limits`] is enforced (head size, body size, timeouts, minimum body rate,
 //!   write deadline, connection caps).
 //! - A handler panic becomes a 500 and the connection closes.
-//! - The stall watchdog counts inline handlers over [`Limits::inline_budget`] and moves them to
-//!   the offload pool after [`Limits::stalls_before_offload`] stalls.
+//! - The stall watchdog finds inline handlers that use more than [`Limits::inline_budget`] of
+//!   CPU, or block, and moves just their route to the offload pool after
+//!   [`Limits::stalls_before_offload`] stalls within [`Limits::stall_window`]; a route comes
+//!   back after [`Limits::stall_recovery`] fast calls there.
 //! - Graceful stop ([`ServerHandle::stop`]): GOAWAY on HTTP/2 and HTTP/3, `Connection: close`
 //!   on HTTP/1.1.
 
@@ -76,6 +78,7 @@ mod server;
 mod service;
 mod types;
 mod util;
+mod watchdog;
 #[cfg(feature = "websocket")]
 mod ws;
 
@@ -86,6 +89,8 @@ pub use request::{OwnedRequest, Request};
 pub use router::Router;
 pub use server::{Builder, Server, ServerHandle, Stats};
 pub use service::{blocking, Blocking, Outcome, Service};
+#[doc(hidden)]
+pub use service::WatchRef;
 pub use simoom_rt::offload::OffloadStats;
 pub use simoom_rt::Backend;
 pub use types::{Body, Response, StaticReply, Version};

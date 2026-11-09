@@ -24,6 +24,20 @@ use simoom_quic::{Connection, Event, StreamError};
 use std::collections::VecDeque;
 use std::time::Instant;
 
+/// The DATA frame queued when a stream has room for less than a frame header and a byte
+/// ([`Http3::send_body`]).
+const SMALL_FRAME: usize = 16 * 1024;
+
+/// Registers with QUIC that a stream with no room left wants to write, so it reports
+/// [`Event::StreamWritable`] when credit arrives. Offering a byte to a stream with no room is
+/// refused (`Blocked`) and does exactly that; nothing is written.
+fn mark_blocked(conn: &mut Connection, stream: u64) {
+    if conn.stream_writable(stream) == Some(0) {
+        let r = conn.stream_send(stream, &[0], false);
+        debug_assert!(!matches!(r, Ok(n) if n > 0), "a stream with no room accepted data");
+    }
+}
+
 /// HTTP/3 error codes (RFC 9114 §8.1).
 pub mod code {
     pub const NO_ERROR: u64 = 0x100;
@@ -899,9 +913,29 @@ impl Http3 {
         }
         let room = conn.stream_writable(stream).unwrap_or(0) as usize;
         let hdr_len = 1 + varint_len(data.len() as u64);
-        if room <= hdr_len {
+        if room == 0 {
             r.want_writable = true;
+            mark_blocked(conn, stream);
             return Ok(0);
+        }
+        if room <= hdr_len {
+            // Room for less than a frame header and a byte: queue a small frame and offer it.
+            // QUIC takes what fits and remembers that the stream wants to write; the rest
+            // leaves from `out` when credit arrives.
+            let n = data.len().min(SMALL_FRAME);
+            let all = n == data.len() && fin;
+            let mut b = Vec::with_capacity(9 + n);
+            put_varint(&mut b, frame::DATA);
+            put_varint(&mut b, n as u64);
+            b.extend_from_slice(&data[..n]);
+            if n < data.len() {
+                r.want_writable = true;
+            }
+            self.write_frame(conn, stream, b, all)?;
+            if all {
+                self.maybe_drop(stream);
+            }
+            return Ok(n);
         }
         let n = data.len().min(room - hdr_len);
         let mut h = Vec::with_capacity(9);
@@ -914,7 +948,12 @@ impl Http3 {
             r.send_done = true;
             self.maybe_drop(stream);
         } else if n < data.len() {
+            // The frame used all the room. QUIC accepted everything it was offered, so it does
+            // not know the stream wants more: tell it, or MAX_STREAM_DATA (MAX_DATA, an ack
+            // freeing the send buffer) would never wake the stream and a response larger than
+            // the peer's window would stall for good.
             r.want_writable = true;
+            mark_blocked(conn, stream);
         }
         Ok(n)
     }

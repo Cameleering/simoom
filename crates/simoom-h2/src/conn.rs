@@ -338,6 +338,19 @@ impl Connection {
         &self.out[self.out_pos..]
     }
 
+    /// Takes every byte of [`Connection::output`] as an owned buffer (no copy), leaving
+    /// `empty` (cleared) to collect the next output. Same as reading `output()` and calling
+    /// `advance_output` with its length.
+    pub fn take_output(&mut self, mut empty: Vec<u8>) -> Vec<u8> {
+        empty.clear();
+        let mut v = std::mem::replace(&mut self.out, empty);
+        if self.out_pos > 0 {
+            v.drain(..self.out_pos);
+            self.out_pos = 0;
+        }
+        v
+    }
+
     /// Marks `n` bytes of [`Connection::output`] as written.
     pub fn advance_output(&mut self, n: usize) {
         self.out_pos = (self.out_pos + n).min(self.out.len());

@@ -489,51 +489,7 @@ fn slow_body_reader_pauses_the_client() {
     assert_eq!(c.read().text(), total.to_string());
 }
 
-#[test]
-fn stall_watchdog_moves_a_slow_service_to_the_offload_pool() {
-    let logs = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let l2 = logs.clone();
-    let limits = Limits { inline_budget: Some(Duration::from_millis(1)), stalls_before_offload: 3, ..Limits::default() };
-    let h = simoom::Server::builder()
-        .listen("127.0.0.1:0")
-        .threads(1)
-        .limits(limits)
-        .log(move |m| l2.lock().unwrap().push(m.to_string()))
-        .service(|_: &mut Request<'_>, reply: Reply<'_>| -> Outcome {
-            std::thread::sleep(Duration::from_millis(5)); // wrongly inline
-            let name = std::thread::current().name().unwrap_or("").to_string();
-            reply.body(name)
-        })
-        .start()
-        .unwrap();
-    let mut c = Client::new(&h);
-    for _ in 0..3 {
-        assert!(c.get("/").text().starts_with("simoom"));
-    }
-    assert!(c.get("/").text().starts_with("simoom-offload"), "the 4th call runs offloaded");
-    let s = h.stats();
-    assert!(s.stalls >= 3, "{s:?}");
-    let logs = logs.lock().unwrap();
-    assert_eq!(logs.iter().filter(|l| l.contains("took")).count(), 1, "logged once: {logs:?}");
-}
-
-#[test]
-fn router_moves_only_the_slow_route() {
-    let router = Router::new()
-        .get("/slow", |_: &mut Request<'_>, r: Reply<'_>| -> Outcome {
-            std::thread::sleep(Duration::from_millis(5));
-            r.body(std::thread::current().name().unwrap_or("").to_string())
-        })
-        .get("/fast", |_: &mut Request<'_>, r: Reply<'_>| -> Outcome { r.body(std::thread::current().name().unwrap_or("").to_string()) })
-        .stalls_before_offload(2);
-    let limits = Limits { inline_budget: Some(Duration::from_millis(1)), ..Limits::default() };
-    let h = serve_with(limits, router);
-    let mut c = Client::new(&h);
-    c.get("/slow");
-    c.get("/slow");
-    assert!(c.get("/slow").text().starts_with("simoom-offload"));
-    assert!(!c.get("/fast").text().starts_with("simoom-offload"));
-}
+// The stall watchdog has its own tests in tests/watchdog.rs.
 
 #[test]
 fn max_requests_per_connection() {

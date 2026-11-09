@@ -13,6 +13,8 @@ workspace = true
 
 [dependencies]
 simoom-rt = { path = "../simoom-rt", default-features = false }
+# Per-thread CPU time for the stall watchdog.
+simoom-sys = { path = "../simoom-sys", default-features = false }
 # Always linked for the Date header, header validation and base64; its request parser is linked
 # only with the `http1` feature, its WebSocket codec only with `websocket`.
 simoom-http1 = { path = "../simoom-http1", default-features = false }
@@ -45,4 +47,8 @@ io-uring = ["simoom-rt/io-uring"]
 
 [[example]]
 name = "h3_bulk"
+required-features = ["http3"]
+
+[[example]]
+name = "interop_server"
 required-features = ["http3"]

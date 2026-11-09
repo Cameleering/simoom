@@ -27,6 +27,8 @@ pub(crate) struct Io<'a, 'c> {
     pub(crate) abort: bool,
     /// When the last service call of this callback ended (for the stall watchdog).
     pub(crate) clock: Option<std::time::Instant>,
+    /// The loop is behind ([`crate::Limits::shed_lag`]): refuse new requests.
+    pub(crate) shed: bool,
 }
 
 /// Bodies at least this large go out as their own buffer (no copy) on plain TCP.
@@ -45,7 +47,13 @@ impl Io<'_, '_> {
         self.out().extend_from_slice(b);
     }
 
-    fn plain(&self) -> bool {
+    /// Nothing is waiting in this callback's output buffer.
+    #[cfg_attr(not(feature = "http2"), allow(dead_code))]
+    pub(crate) fn out_is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+
+    pub(crate) fn plain(&self) -> bool {
         #[cfg(feature = "tls")]
         {
             self.tls.is_none()
@@ -225,6 +233,8 @@ impl Conn {
             return;
         }
         let now = cx.now_ns();
+        // Loop lag: how long after this turn's events were ready the loop got here.
+        let shed = self.sh.shed_ns != 0 && simoom_sys::time::now_ns().saturating_sub(now) > self.sh.shed_ns;
         let (close, abort) = {
             let mut io = Io {
                 cx,
@@ -239,6 +249,7 @@ impl Conn {
                 close: false,
                 abort: false,
                 clock: None,
+                shed,
             };
             f(&mut *self.layer, &mut io);
             io.flush();

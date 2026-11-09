@@ -11,6 +11,7 @@ dependencies = [
  "simoom-http1",
  "simoom-quic",
  "simoom-rt",
+ "simoom-sys",
  "simoom-tls",
 ]
 
@@ -18,9 +19,13 @@ dependencies = [
 name = "simoom-bench"
 version = "0.1.0"
 dependencies = [
+ "simoom",
  "simoom-h2",
+ "simoom-h3",
+ "simoom-quic",
  "simoom-rt",
  "simoom-sys",
+ "simoom-tls",
 ]
 
 [[package]]

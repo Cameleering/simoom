@@ -230,8 +230,15 @@ impl<'a> Reply<'a> {
         })
     }
 
-    pub(crate) fn offload_service(self, req: &mut Request<'_>, svc: Arc<dyn Service>) -> Outcome {
-        self.offload(req, move |r, reply| svc.call(r, reply))
+    /// Runs a route the watchdog moved to the offload pool, timing each call there so the
+    /// route can come back inline once it is fast again.
+    pub(crate) fn offload_watched(self, req: &mut Request<'_>, svc: Arc<dyn Service>, watch: Arc<crate::watchdog::Watch>) -> Outcome {
+        self.offload(req, move |r, reply| {
+            let t0 = std::time::Instant::now();
+            let (o, s) = crate::watchdog::measured(|| svc.call(r, reply));
+            watch.offloaded_call(t0.elapsed().as_nanos() as u64, s);
+            o
+        })
     }
 
     fn submit(self, job: impl FnOnce(Responder) + Send + 'static) -> Outcome {
