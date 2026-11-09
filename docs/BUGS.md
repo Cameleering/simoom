@@ -47,3 +47,31 @@ Each item gets a regression test when it is fixed. Owner key: **C** is the confo
 - Facade: an access-log hook; HTTP/2 PING keepalive.
 - Platforms: macOS and kqueue are compile-checked only; the ARM SIMD and crypto paths have
   never run on ARM hardware.
+
+## Cameleer adoption backlog (from Cameleer's integration study, 2026-11-09)
+
+Source: `E:\Work\DataHQ\Code\Rust-camel\docs\design\simoom-integration\` (simoom-embedding-study.md,
+duplicate-code-map.md, plan.md §3). Cameleer starts embedding simoom only after the second
+campaign.
+
+| # | item | when | status |
+|---|---|---|---|
+| U1 | Connection info on the request: peer and local address, listener index, TLS version, cipher, SNI, ALPN, verified client certificate chain | before release | open |
+| U2 | Timeout for deferred replies, and cancellation (a signal to the `Responder` holder) when the client disconnects | before release | open |
+| U3 | Benchmark the deferred path (`defer()` → foreign thread → `Responder::send`/`stream`, `BodySource`), plus a 100 ms blocking handler with 500 clients against cameleer-http | in the second campaign | in progress |
+| U4 | A per-request completion hook (status, bytes in and out, duration, protocol) for access logs and metrics, with zero cost when unset | before release | open |
+| U5 | Response trailers on HTTP/2 and HTTP/3 (gRPC `grpc-status`), and on chunked HTTP/1.1 | before release | open |
+| U6 | Certificate reload without a restart (swap the `ServerConfig` atomically for new connections) | before release | open |
+| U7 | macOS and arm64 actually run in CI | owner decision (CI minutes on a private repository) | open |
+| U8 | API freeze and a 0.1 release | at release | open |
+| U9 | Size headroom: the full build has 8.5 KB left, http1 + io-uring 4.8 KB; get at least 5% headroom on every row | before release | open |
+| U10 | Blocking integration routes: the offload-pool and watchdog defaults produce 503s at about 160 req/s on 8 CPUs with 100 ms handlers, and a route blocking ≥ 250 ms per call may never trip the watchdog. Fix the defaults or add an explicit blocking mode, and document it | before release | open |
+| U11 | Missing test: a complete HTTP/2 response followed by RST_STREAM(NO_ERROR) must not be discarded by the client (RFC 9113 §8.1; Cameleer's `a_complete_response_survives_rst_stream_no_error`) | before release | open |
+
+Not planned for the first release (owner decision pending): TLS 1.2, PKCS#12/JKS keystores
+(Cameleer can bridge to `CertifiedKey::from_der`), CRL/OCSP, RSA-OAEP, SHA-1, WebSocket over
+HTTP/2, HTTP/2 PING keepalive, compression.
+
+Shared code: about 3,480 lines of simoom-tls and simoom-hpack are copies of Cameleer code (X.509,
+ASN.1, PEM, keys, certgen, RSA, the HPACK Huffman table). Until they share one home, a fix to
+those files must land in both repositories.
