@@ -89,6 +89,9 @@ impl CryptoSession for Session {
     fn is_handshaking(&self) -> bool {
         self.0.is_handshaking()
     }
+    fn set_version(&mut self, version: u32) {
+        self.0.set_version(version);
+    }
 }
 
 /// TLS-backed crypto for an endpoint. A server needs `server`, a client `client`; the

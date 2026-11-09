@@ -106,6 +106,34 @@ fn real_tls_handshake_and_transfer() {
     }
 }
 
+/// Compatible version negotiation (RFC 9368), the QUIC Interop Runner's `v2` case: the
+/// client starts in v1 and lists v2 in `version_information`; a server that prefers v2
+/// continues in v2 from its first Initial, and a server without v2 (or a client without it)
+/// stays in v1. Also with Retry and with loss, which retransmits Initials across the switch.
+#[test]
+fn compatible_version_negotiation_v1_to_v2() {
+    let cases: [(&[u32], &[u32], u32, bool, u32); 5] = [
+        (&[VERSION_1, VERSION_2], &[VERSION_2, VERSION_1], VERSION_2, false, 0),
+        (&[VERSION_1, VERSION_2], &[VERSION_2, VERSION_1], VERSION_2, true, 0),
+        (&[VERSION_1, VERSION_2], &[VERSION_2, VERSION_1], VERSION_2, false, 100_000),
+        (&[VERSION_1], &[VERSION_2, VERSION_1], VERSION_1, false, 0),
+        (&[VERSION_1, VERSION_2], &[VERSION_1], VERSION_1, false, 0),
+    ];
+    for (i, (cv, sv, expect, retry, loss)) in cases.into_iter().enumerate() {
+        let mut c = Config::new(client_provider(true));
+        let mut s = Config::new(server_provider());
+        c.versions = cv.to_vec();
+        s.versions = sv.to_vec();
+        s.retry = retry;
+        let link = Link { loss_ppm: loss, ..Link::default() };
+        let mut p = Pair::new(Arc::new(c), Arc::new(s), link, 40 + i as u64);
+        let (ch, sh) = common::handshake(&mut p);
+        assert_eq!(p.server.conn(sh).unwrap().version(), expect, "case {i}: server version");
+        assert_eq!(p.client.conn(ch).unwrap().version(), expect, "case {i}: client version");
+        echo_on(&mut p, ch, sh, 100_000, Duration::from_secs(120));
+    }
+}
+
 #[test]
 fn real_tls_under_loss_with_retry_and_key_updates() {
     let (c, s) = configs(|c| {

@@ -254,6 +254,13 @@ pub struct Connection {
     failed_decrypts: u64,
     any_packet_processed: bool,
     stats: Stats,
+    /// The connection ID the Initial keys are derived from (RFC 9001 §5.2).
+    initial_dcid: Cid,
+    /// Server with more than one version: the TLS session starts once the whole ClientHello
+    /// is in, so its version (RFC 9368) is known. Holds (odcid, retry_scid) until then.
+    deferred: Option<(Cid, Option<Cid>)>,
+    /// The ClientHello bytes buffered while `deferred` is set.
+    hello: Vec<u8>,
 }
 
 fn space_of(ty: PacketType) -> usize {
@@ -343,6 +350,9 @@ impl Connection {
             failed_decrypts: 0,
             any_packet_processed: false,
             stats: Stats::default(),
+            initial_dcid: orig_dcid,
+            deferred: None,
+            hello: Vec::new(),
             cfg,
         }
     }
@@ -368,6 +378,9 @@ impl Connection {
             active_connection_id_limit: t.active_connection_id_limit,
             initial_source_connection_id: Some(local),
             retry_source_connection_id: retry_scid,
+            // Compatible version negotiation (RFC 9368): only when more than one version is
+            // configured, so a v1-only endpoint sends exactly what it did before.
+            version_information: (self.cfg.versions.len() > 1).then(|| (self.version, self.cfg.versions.clone())),
         };
         let mut b = Vec::with_capacity(128);
         p.encode(&mut b);
@@ -416,8 +429,13 @@ impl Connection {
     ) -> Result<Self, TransportError> {
         let placeholder: Box<dyn CryptoSession> = Box::new(Placeholder);
         let mut c = Connection::new(cfg.clone(), true, version, now, remote, placeholder, local_cid, client_scid, client_dcid);
-        let tp = c.local_params(Some(odcid), retry_scid);
-        c.session = cfg.provider.server_session(version, tp)?;
+        if cfg.versions.len() > 1 {
+            // The version may still change (RFC 9368): start TLS after the ClientHello.
+            c.deferred = Some((odcid, retry_scid));
+        } else {
+            let tp = c.local_params(Some(odcid), retry_scid);
+            c.session = cfg.provider.server_session(version, tp)?;
+        }
         c.orig_dcid = odcid;
         c.retry_scid = retry_scid;
         c.peer_initial_scid = Some(client_scid);
@@ -696,7 +714,7 @@ impl Connection {
                 }
                 _ => {}
             }
-            if h.ty != PacketType::OneRtt && h.version != self.version {
+            if h.ty != PacketType::OneRtt && h.version != self.version && !self.follow_version(&h) {
                 break;
             }
             match self.recv_packet(now, remote, data, start, &h) {
@@ -726,6 +744,22 @@ impl Connection {
         if hit {
             self.drain_now(ConnectionError::StatelessReset);
         }
+    }
+
+    /// Client: the server answered our first Initial in another configured, compatible
+    /// version (compatible version negotiation, RFC 9368 §2.3); continue in it.
+    fn follow_version(&mut self, h: &packet::Header) -> bool {
+        let ok = !self.is_server
+            && !self.any_packet_processed
+            && h.ty == PacketType::Initial
+            && self.cfg.versions.contains(&h.version)
+            && crate::vn::compatible(self.version, h.version);
+        if ok {
+            self.version = h.version;
+            self.spaces[0].keys = Some(self.cfg.provider.initial_keys(h.version, &self.initial_dcid, false));
+            self.session.set_version(h.version);
+        }
+        ok
     }
 
     fn on_version_negotiation(&mut self, now: Instant, list: &[u8]) {
@@ -760,6 +794,7 @@ impl Connection {
         self.remote_cids[0].cid = scid;
         self.token = token.to_vec();
         self.spaces[0].keys = Some(self.cfg.provider.initial_keys(self.version, &scid, false));
+        self.initial_dcid = scid;
         // Everything sent in Initial packets is resent with the token.
         let s = &mut self.spaces[0];
         s.crypto_retx.clear();
@@ -1082,6 +1117,13 @@ impl Connection {
         let ci = &mut self.spaces[space].crypto_in;
         let end = offset + data.len() as u64;
         if end <= ci.read {
+            // A server that sees the client's ClientHello again during the handshake knows
+            // the client's PTO fired, so its own flight was most likely lost: resend it now
+            // rather than wait for its own (backed-off) PTO. Still subject to the
+            // anti-amplification limit and congestion control.
+            if self.is_server && space == 0 && !data.is_empty() && !self.handshake_complete {
+                self.resend_handshake_flight();
+            }
             return Ok(());
         }
         if offset > ci.read {
@@ -1099,7 +1141,7 @@ impl Connection {
         }
         let skip = (ci.read - offset) as usize;
         ci.read = end;
-        self.session.read_handshake(level, &data[skip..])?;
+        self.feed_handshake(level, &data[skip..])?;
         // Deliver buffered chunks that became contiguous.
         loop {
             let ci = &mut self.spaces[space].crypto_in;
@@ -1115,9 +1157,48 @@ impl Connection {
             }
             let skip = (ci.read - o) as usize;
             ci.read = e;
-            self.session.read_handshake(level, &chunk[skip..])?;
+            self.feed_handshake(level, &chunk[skip..])?;
         }
         self.drive_crypto()
+    }
+
+    /// Hands in-order handshake bytes to TLS. A server with more than one version first
+    /// collects the whole ClientHello, picks the version from the client's
+    /// `version_information` (RFC 9368), and only then starts its TLS session in that version.
+    fn feed_handshake(&mut self, level: Level, data: &[u8]) -> Result<(), TransportError> {
+        let Some((odcid, retry_scid)) = self.deferred else {
+            return Ok(self.session.read_handshake(level, data)?);
+        };
+        if level != Level::Initial {
+            return Err(TransportError::new(PROTOCOL_VIOLATION, "handshake data before the ClientHello"));
+        }
+        self.hello.extend_from_slice(data);
+        if self.hello.is_empty() {
+            return Ok(());
+        }
+        // Not a TLS ClientHello (a test crypto provider's handshake): no negotiation.
+        let tls = self.hello[0] == 1;
+        let need = if tls { crate::vn::hello_len(&self.hello) } else { Some(0) };
+        let Some(need) = need else { return Ok(()) };
+        if need > self.cfg.transport.crypto_buffer {
+            return Err(TransportError::new(CRYPTO_BUFFER_EXCEEDED, "ClientHello too large"));
+        }
+        if self.hello.len() < need {
+            return Ok(());
+        }
+        let client = if tls { crate::vn::client_versions(&self.hello[..need]) } else { None };
+        let chosen = crate::vn::choose(self.version, &self.cfg.versions, client.as_ref());
+        if chosen != self.version {
+            // Continue in the negotiated version: our Initial packets (and the client's from
+            // now on) use its keys, derived from the same connection ID.
+            self.version = chosen;
+            self.spaces[0].keys = Some(self.cfg.provider.initial_keys(chosen, &self.initial_dcid, true));
+        }
+        self.deferred = None;
+        let tp = self.local_params(Some(odcid), retry_scid);
+        self.session = self.cfg.provider.server_session(self.version, tp)?;
+        let hello = std::mem::take(&mut self.hello);
+        Ok(self.session.read_handshake(level, &hello)?)
     }
 
     /// Pulls handshake output and key changes from the TLS session.
@@ -1595,6 +1676,17 @@ impl Connection {
         }
     }
 
+    /// Server: queues the unacknowledged Initial and Handshake data again (see `on_crypto`).
+    fn resend_handshake_flight(&mut self) {
+        for space in 0..2 {
+            if self.spaces[space].keys.is_none() || self.spaces[space].discarded {
+                continue;
+            }
+            let frames: Vec<SentFrame> = self.recovery.spaces[space].sent.values().flat_map(|p| p.frames.iter().copied()).collect();
+            self.requeue(space, &frames);
+        }
+    }
+
     fn on_pto(&mut self, _now: Instant) {
         let active = self.active_spaces();
         let anti_deadlock = !self.is_server && !self.handshake_complete;
@@ -1784,9 +1876,13 @@ impl Connection {
             if used + 40 + tag >= limit_total {
                 break;
             }
-            // Congestion control: ack-only and close packets are not limited.
+            // Congestion control: ack-only and close packets are not limited, nor is the
+            // PATH_CHALLENGE that validates a new path (after a migration the bytes still in
+            // flight on the old path can fill the reset window, and the first packet on the
+            // new path must carry the challenge, RFC 9000 §9.3).
             let cc_limited = !closing && !probing && cwnd_room < self.mds;
-            if cc_limited && !ack {
+            let challenge = space == 2 && self.path.challenge_pending;
+            if cc_limited && !ack && !challenge {
                 continue;
             }
             if let Some(p) = pending.take() {
@@ -1918,6 +2014,16 @@ impl Connection {
             b.frames.push(SentFrame::Ping);
             return;
         }
+        // The PATH_CHALLENGE for a new path goes first and is not held back by congestion
+        // control (see `build_datagram`).
+        if space == 2 && self.path.challenge_pending && buf.len() + 9 <= limit {
+            if let Some((d, _)) = self.path.challenge {
+                frame::put_path(buf, false, &d);
+                self.path.challenge_pending = false;
+                b.eliciting = true;
+                b.frames.push(SentFrame::Ping);
+            }
+        }
         if cc_limited {
             return;
         }
@@ -1927,14 +2033,6 @@ impl Connection {
                 self.handshake_done_pending = false;
                 b.frames.push(SentFrame::HandshakeDone);
                 b.eliciting = true;
-            }
-            if self.path.challenge_pending && buf.len() + 9 <= limit {
-                if let Some((d, _)) = self.path.challenge {
-                    frame::put_path(buf, false, &d);
-                    self.path.challenge_pending = false;
-                    b.eliciting = true;
-                    b.frames.push(SentFrame::Ping);
-                }
             }
             while let Some(&(d, addr)) = self.path_responses.front() {
                 if addr != self.path.remote || buf.len() + 9 > limit {
@@ -2204,5 +2302,73 @@ mod tests {
             sent += 1;
             assert!(sent < 20, "poll_transmit keeps producing packets at one instant");
         }
+    }
+
+    /// Handshake under loss (interop `handshakeloss`): when the client's ClientHello arrives
+    /// again, the client's PTO fired, so the server's flight was probably lost; the server
+    /// queues it again at once instead of waiting for its own backed-off PTO.
+    #[test]
+    fn duplicate_client_hello_resends_the_server_flight() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let cfg = |seed| Arc::new(Config::new(Arc::new(NullProvider::new(seed))));
+        let mut p = Pair::new(cfg(5), cfg(6), Link::default(), 5);
+        // (client datagrams, server datagrams of at least 1200 bytes): everything the server
+        // sends is dropped, so the client's PTO fires and it resends its ClientHello.
+        let count: Rc<RefCell<(usize, usize)>> = Rc::default();
+        let c2 = count.clone();
+        p.tamper = Some(Box::new(move |to_server, d| {
+            let mut c = c2.borrow_mut();
+            if to_server {
+                c.0 += 1;
+            } else if d.len() >= 1200 {
+                c.1 += 1;
+            }
+            to_server
+        }));
+        p.connect();
+        p.run_until(Duration::from_millis(50), |p| p.server_conn().is_some());
+        p.run_for(Duration::from_millis(20));
+        let s = p.server_conn().expect("server connection");
+        assert!(count.borrow().1 > 0, "the server sent its flight");
+        // Push the server's own PTO far away, so only the repeated ClientHello can trigger a
+        // resend; then let the client's PTO resend its Initial (with a new packet number).
+        p.server.conn_mut(s).unwrap().recovery.pto_count = 12;
+        let (clients, flights) = *count.borrow();
+        let c3 = count.clone();
+        assert!(p.run_until(Duration::from_secs(5), |_| c3.borrow().0 > clients), "the client resent its Initial");
+        p.run_for(Duration::from_millis(30));
+        assert!(count.borrow().1 > flights, "a repeated ClientHello makes the server resend its flight at once");
+    }
+
+    /// The QUIC Interop Runner's rebind cases: after a NAT rebinding the first packet the
+    /// server sends on the new path must carry PATH_CHALLENGE, even when the bytes still in
+    /// flight on the old path fill the (reset) congestion window. Before the fix that packet
+    /// was ACK-only and the challenge waited for the window.
+    #[test]
+    fn first_packet_on_a_new_path_carries_the_challenge_when_cwnd_is_full() {
+        let cfg = |seed| Arc::new(Config::new(Arc::new(NullProvider::new(seed))));
+        let mut p = Pair::new(cfg(3), cfg(4), Link::default(), 3);
+        let c = p.connect();
+        let ok = p.run_until(Duration::from_secs(30), |p| {
+            p.client.conn(c).is_some_and(|x| x.is_established()) && p.server_conn().and_then(|s| p.server.conn(s)).is_some_and(|x| x.is_established())
+        });
+        assert!(ok);
+        p.run_for(Duration::from_millis(200));
+        let s = p.server_conn().unwrap();
+        let now = p.now;
+        let new: std::net::SocketAddr = "10.0.0.9:6000".parse().unwrap();
+        let conn = p.server.conn_mut(s).unwrap();
+        assert!(conn.handshake_confirmed);
+        conn.migrate(now, new);
+        // The old path's bytes in flight fill the window; an ACK is due.
+        conn.recovery.cc.in_flight = conn.recovery.cc.cwnd;
+        conn.spaces[2].ack_now = true;
+        let mut buf = Vec::new();
+        let t = conn.poll_transmit(now, &mut buf, 1).expect("a packet on the new path");
+        assert_eq!(t.destination, new);
+        assert!(!conn.path.challenge_pending, "the first packet on the new path carries PATH_CHALLENGE");
+        let last = conn.recovery.spaces[2].sent.values().last().unwrap();
+        assert!(last.ack_eliciting, "the packet is not ACK-only");
     }
 }

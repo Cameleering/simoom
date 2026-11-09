@@ -199,10 +199,11 @@ impl RecvStream {
     }
 }
 
-/// Out-of-order chunks one stream may buffer. Adjacent chunks are merged, so this bounds the
-/// number of holes, not the data: honest loss leaves a few holes per stream, while a peer that
-/// sends one byte at every other offset would otherwise cost a heap allocation and a tree node
-/// per byte of flow-control window.
+/// Out-of-order chunks a connection may buffer, over all its streams. Adjacent chunks are
+/// merged, so this bounds the number of holes, not the data: honest loss leaves a few holes per
+/// stream, while a peer that sends one byte at every other offset would otherwise cost a heap
+/// allocation and a tree node per byte of flow-control window. It is counted per connection, so
+/// opening many streams does not multiply it.
 pub const MAX_RECV_GAPS: usize = 1024;
 
 pub struct Stream {
@@ -244,6 +245,8 @@ pub struct Streams {
     recv_max_data: u64,
     recv_highest: u64,
     recv_consumed: u64,
+    /// Out-of-order chunks buffered over all streams (bounded by [`MAX_RECV_GAPS`]).
+    recv_gaps: usize,
     send_queue: VecDeque<u64>,
     pub control: VecDeque<Control>,
     pub events: VecDeque<StreamEvent>,
@@ -275,6 +278,7 @@ impl Streams {
             recv_max_data: cfg.conn_window,
             recv_highest: 0,
             recv_consumed: 0,
+            recv_gaps: 0,
             send_queue: VecDeque::new(),
             control: VecDeque::new(),
             events: VecDeque::new(),
@@ -384,6 +388,7 @@ impl Streams {
         }
         let conn_max = self.recv_max_data;
         let mut conn_highest = self.recv_highest;
+        let mut gaps_total = self.recv_gaps;
         let Some(s) = self.get_or_open(id, ty)? else { return Ok(()) };
         let r = s.recv.as_mut().unwrap();
         let end = off + data.len() as u64;
@@ -413,8 +418,10 @@ impl Streams {
             return Ok(());
         }
         let before = r.contiguous_end();
+        let gaps_before = r.gaps();
         r.insert(off, data);
-        if r.gaps() > MAX_RECV_GAPS {
+        gaps_total = gaps_total + r.gaps() - gaps_before;
+        if gaps_total > MAX_RECV_GAPS {
             return Err(TransportError::frame(PROTOCOL_VIOLATION, ty, "too many out-of-order stream fragments"));
         }
         let readable = r.contiguous_end() > before || (r.final_size == Some(r.contiguous_end()) && !r.fin_delivered);
@@ -423,6 +430,7 @@ impl Streams {
             self.events.push_back(StreamEvent::Readable(id));
         }
         self.recv_highest = conn_highest;
+        self.recv_gaps = gaps_total;
         Ok(())
     }
 
@@ -433,6 +441,7 @@ impl Streams {
         }
         let conn_max = self.recv_max_data;
         let mut conn_highest = self.recv_highest;
+        let mut gaps_total = self.recv_gaps;
         let Some(s) = self.get_or_open(id, ty)? else { return Ok(()) };
         let r = s.recv.as_mut().unwrap();
         if let Some(fs) = r.final_size {
@@ -458,9 +467,11 @@ impl Streams {
             // Unread bytes no longer count against the connection window.
             released = Some(final_size - r.read);
             r.data.clear();
+            gaps_total -= r.gaps();
             r.ooo.clear();
         }
         self.recv_highest = conn_highest;
+        self.recv_gaps = gaps_total;
         if let Some(rel) = released {
             self.recv_consumed += rel;
             self.events.push_back(StreamEvent::Reset(id, code));
@@ -668,6 +679,7 @@ impl Streams {
         r.stop = Some(code);
         let unread = r.data.len() as u64;
         r.data.clear();
+        self.recv_gaps -= r.gaps();
         r.ooo.clear();
         r.read = r.highest;
         self.recv_consumed += unread;
@@ -811,8 +823,13 @@ impl Streams {
 
     pub fn on_stream_acked(&mut self, id: u64, off: u64, len: u64, fin: bool) {
         let Some(snd) = self.map.get_mut(&id).and_then(|s| s.send.as_mut()) else { return };
-        if len > 0 {
-            snd.acked.insert(off, off + len);
+        // Only the part above `base` matters. An acknowledgement of bytes already released
+        // (the original packet and its retransmission both acknowledged, as after a blackout)
+        // must not be recorded: a range below `base` would stay first in `acked` forever, the
+        // prefix check below would never pass again, and the send buffer would stay full.
+        let lo = off.max(snd.base);
+        if off + len > lo {
+            snd.acked.insert(lo, off + len);
             // Release the acknowledged prefix.
             if let Some((s, e)) = snd.acked.first() {
                 if s <= snd.base && e > snd.base {
@@ -1066,6 +1083,36 @@ mod tests {
         assert_eq!(e.code, PROTOCOL_VIOLATION);
     }
 
+    /// The cap is per connection: spreading holes over many streams does not multiply it, and
+    /// a reset stream gives its holes back.
+    #[test]
+    fn out_of_order_gap_cap_is_per_connection() {
+        let mut st = wide();
+        let per = (MAX_RECV_GAPS / 4) as u64;
+        for id in [0u64, 4, 8, 12] {
+            for i in 0..per {
+                st.on_stream(id, 2 + 2 * i, b"x", false).unwrap();
+            }
+        }
+        assert_eq!(st.recv_gaps, MAX_RECV_GAPS);
+        let e = st.on_stream(4, 2 + 2 * per, b"x", false).unwrap_err();
+        assert_eq!(e.code, PROTOCOL_VIOLATION, "one more hole on any stream is over the connection's cap");
+        let mut st = wide();
+        for i in 0..per {
+            st.on_stream(0, 2 + 2 * i, b"x", false).unwrap();
+        }
+        st.on_reset(0, 0, 2 + 2 * per).unwrap();
+        assert_eq!(st.recv_gaps, 0, "a reset stream's holes no longer count");
+        // Filling holes merges chunks and lowers the count.
+        st.on_stream(4, 2, b"x", false).unwrap();
+        st.on_stream(4, 4, b"x", false).unwrap();
+        assert_eq!(st.recv_gaps, 2);
+        st.on_stream(4, 3, b"x", false).unwrap();
+        assert_eq!(st.recv_gaps, 1, "adjacent chunks merged into one hole");
+        st.on_stream(4, 0, b"xx", false).unwrap();
+        assert_eq!(st.recv_gaps, 0);
+    }
+
     #[test]
     fn send_side_credit_and_limits() {
         let mut s = server();
@@ -1097,6 +1144,17 @@ mod tests {
         assert_eq!(sent, vec![crate::recovery::SentFrame::Stream { id, off: 10, len: 20, fin: false }]);
         s.on_stream_acked(id, 0, 50, false);
         assert_eq!(s.unacked(id), Some(0));
+        // A late acknowledgement of the retransmission, for bytes already released, must not
+        // block later releases (found by the interop runner's blackhole case).
+        s.on_stream_acked(id, 10, 20, false);
+        s.on_max_data(1000);
+        s.on_max_stream_data(id, 1000).unwrap();
+        assert_eq!(s.write(id, &[2; 30], false), Ok(30));
+        out.clear();
+        sent.clear();
+        s.write_frames(&mut out, 1000, &mut sent);
+        s.on_stream_acked(id, 50, 30, false);
+        assert_eq!(s.unacked(id), Some(0), "the buffer is released after a stale acknowledgement");
     }
 
     #[test]

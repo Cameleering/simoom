@@ -74,6 +74,8 @@ pub struct TransportParams {
     pub active_connection_id_limit: u64,
     pub initial_source_connection_id: Option<Cid>,
     pub retry_source_connection_id: Option<Cid>,
+    /// `version_information` (RFC 9368 §3): the chosen version and the available versions.
+    pub version_information: Option<(u32, Vec<u32>)>,
 }
 
 impl Default for TransportParams {
@@ -97,6 +99,7 @@ impl Default for TransportParams {
             active_connection_id_limit: 2,
             initial_source_connection_id: None,
             retry_source_connection_id: None,
+            version_information: None,
         }
     }
 }
@@ -152,6 +155,9 @@ impl TransportParams {
         }
         if let Some(c) = &self.retry_source_connection_id {
             put_bytes(out, 0x10, c);
+        }
+        if let Some((chosen, available)) = &self.version_information {
+            put_bytes(out, crate::vn::VERSION_INFORMATION, &crate::vn::encode(*chosen, available));
         }
     }
 
@@ -253,6 +259,12 @@ impl TransportParams {
                 }
                 0x0f => p.initial_source_connection_id = Some(cid()?),
                 0x10 => p.retry_source_connection_id = Some(cid()?),
+                crate::vn::VERSION_INFORMATION => {
+                    if p.version_information.is_some() {
+                        return Err(err("duplicate parameter"));
+                    }
+                    p.version_information = Some(crate::vn::decode(v).ok_or(err("bad version_information"))?);
+                }
                 _ => {} // Unknown and reserved parameters are ignored (RFC 9000 §18.1).
             }
         }
@@ -295,6 +307,7 @@ mod tests {
             active_connection_id_limit: 4,
             initial_source_connection_id: Some(Cid::new(&[5; 8])),
             retry_source_connection_id: Some(Cid::new(&[6; 8])),
+            version_information: Some((crate::VERSION_2, vec![crate::VERSION_2, crate::VERSION_1])),
         };
         let mut b = Vec::new();
         p.encode(&mut b);
@@ -318,5 +331,7 @@ mod tests {
         assert!(bad(&[0x0c, 0x01, 0]).is_err());
         assert!(bad(&[0x7f, 0xff, 0x02, 1, 2]).is_ok()); // unknown ignored
         assert!(TransportParams::decode(&[], false).is_err()); // no initial_source_connection_id
+        assert!(bad(&[0x11, 0x05, 0, 0, 0, 1, 2]).is_err()); // version_information not 4-aligned
+        assert!(bad(&[0x11, 0x04, 0, 0, 0, 0]).is_err()); // chosen version 0
     }
 }

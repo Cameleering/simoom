@@ -459,3 +459,50 @@ fn rfc9001_appendix_a2_unprotected_client_initial_header() {
     assert_eq!(h.end, 18 + 0x049e);
     assert_eq!(u32::from_be_bytes(d[18..22].try_into().unwrap()), 2);
 }
+
+/// The QUIC Interop Runner's `blackhole` case: a 10 MB download at 10 Mbit/s with a 25-packet
+/// queue while the link goes dark in both directions for 2 s after every 5 s. The transfer must
+/// recover after each blackout (PTO probes, then normal sending) and finish.
+#[test]
+fn transfer_survives_repeated_blackouts() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let link = Link { delay: Duration::from_millis(15), bandwidth: Some(10_000_000 / 8), queue: 25 * 1500, ..Link::default() };
+    for seed in [90, 91] {
+        let mut p = Pair::new(
+            config(seed, |c| c.transport.max_idle_timeout = Duration::from_secs(30)),
+            config(seed + 1, |c| c.transport.max_idle_timeout = Duration::from_secs(30)),
+            link.clone(),
+            seed,
+        );
+        let (c, s) = handshake(&mut p);
+        let dark = Rc::new(Cell::new(false));
+        let d2 = dark.clone();
+        p.tamper = Some(Box::new(move |_, _| !d2.get()));
+        let data = pattern(10 << 20, 7);
+        let id = p.client.conn_mut(c).unwrap().open_bi().unwrap();
+        p.client.conn_mut(c).unwrap().stream_finish(id).unwrap();
+        let t0 = p.now;
+        let mut off = 0;
+        let mut got = Vec::new();
+        let mut opened = false;
+        let ok = p.run_until(Duration::from_secs(120), |p| {
+            let t = (p.now - t0).as_millis() % 7000;
+            dark.set(t >= 5000);
+            if !opened {
+                let mut buf = [0u8; 16];
+                opened = matches!(p.server.conn_mut(s).unwrap().stream_recv(id, &mut buf), Ok((_, true)));
+            }
+            if opened {
+                write_some(&mut p.server, s, id, &data, &mut off);
+            }
+            let mut closed = None;
+            let fin = read_all(&mut p.client, c, id, &mut got);
+            closed_event(&mut p.client, c, &mut closed);
+            assert!(closed.is_none(), "seed {seed}: client connection closed after {} bytes: {closed:?}", got.len());
+            fin
+        });
+        assert!(ok, "seed {seed}: download stalled at {} of {} bytes after {:?}", got.len(), data.len(), p.now - t0);
+        assert!(got == data, "seed {seed}: corrupted download");
+    }
+}

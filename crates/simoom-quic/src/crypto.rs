@@ -90,6 +90,9 @@ pub trait CryptoSession: Send {
     /// The negotiated ALPN protocol.
     fn alpn_protocol(&self) -> Option<&[u8]>;
     fn is_handshaking(&self) -> bool;
+    /// Client: the connection continues in another QUIC version (compatible version
+    /// negotiation, RFC 9368) before any Handshake keys exist; later keys use its labels.
+    fn set_version(&mut self, _version: u32) {}
 }
 
 /// Endpoint-wide crypto services.

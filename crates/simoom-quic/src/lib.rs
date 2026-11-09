@@ -22,6 +22,7 @@ pub mod sim;
 pub mod stream;
 pub mod tls;
 pub mod token;
+pub mod vn;
 
 pub use config::{Config, TransportConfig};
 pub use connection::{Connection, ConnectionError, EndpointEvent, Event, Stats, Transmit};
