@@ -1,0 +1,9 @@
+
+
+@[tracepoint:syscalls:sys_enter_madvise]: 4
+@[tracepoint:syscalls:sys_enter_shutdown]: 64
+@[tracepoint:syscalls:sys_enter_write]: 4580
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 235517
+@[tracepoint:syscalls:sys_enter_futex]: 385899
+@[tracepoint:syscalls:sys_enter_writev]: 1015773
+@[tracepoint:syscalls:sys_enter_recvfrom]: 1019345

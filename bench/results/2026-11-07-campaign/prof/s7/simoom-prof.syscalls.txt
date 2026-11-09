@@ -1,0 +1,11 @@
+
+
+@[tracepoint:syscalls:sys_enter_getrandom]: 9
+@[tracepoint:syscalls:sys_enter_futex]: 555
+@[tracepoint:syscalls:sys_enter_close]: 31523
+@[tracepoint:syscalls:sys_enter_epoll_ctl]: 32076
+@[tracepoint:syscalls:sys_enter_sendto]: 34721
+@[tracepoint:syscalls:sys_enter_sendmsg]: 34724
+@[tracepoint:syscalls:sys_enter_accept4]: 57528
+@[tracepoint:syscalls:sys_enter_recvfrom]: 79756
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 190502

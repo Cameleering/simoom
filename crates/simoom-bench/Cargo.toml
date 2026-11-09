@@ -16,3 +16,8 @@ workspace = true
 simoom-rt = { path = "../simoom-rt" }
 simoom-sys = { path = "../simoom-sys" }
 simoom-h2 = { path = "../simoom-h2" }
+simoom-tls = { path = "../simoom-tls" }
+simoom-quic = { path = "../simoom-quic" }
+simoom-h3 = { path = "../simoom-h3" }
+# The campaign server (src/bin/simoom-server.rs): every route, TLS, h2 and HTTP/3.
+simoom = { path = "../simoom", features = ["full"] }

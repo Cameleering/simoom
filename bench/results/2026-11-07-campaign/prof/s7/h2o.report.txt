@@ -1,0 +1,30 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 63K of event 'cycles:P'
+# Event count (approx.): 52990211228
+#
+# Overhead  Shared Object                                                Symbol                                                           IPC   [IPC Coverage]
+# ........  ...........................................................  ...............................................................  ....................
+#
+     1.40%  libcrypto.so.3                                               [.] OPENSSL_LH_doall_arg                                         -      -            
+     1.28%  libcrypto.so.3                                               [.] 0x000000000021f90b                                           -      -            
+     0.93%  [kernel.kallsyms]                                            [k] trace_call_bpf                                               -      -            
+     0.88%  libc.so.6                                                    [.] malloc                                                       -      -            
+     0.73%  h2o                                                          [.] hmac_apply_key                                               -      -            
+     0.72%  libc.so.6                                                    [.] pthread_rwlock_rdlock                                        -      -            
+     0.65%  [kernel.kallsyms]                                            [k] perf_syscall_enter                                           -      -            
+     0.49%  libc.so.6                                                    [.] cfree                                                        -      -            
+     0.48%  libcrypto.so.3                                               [.] OPENSSL_cleanse                                              -      -            
+     0.45%  libc.so.6                                                    [.] pthread_rwlock_unlock                                        -      -            
+     0.45%  libcrypto.so.3                                               [.] 0x00000000001c8793                                           -      -            
+     0.45%  libcrypto.so.3                                               [.] 0x000000000016a05d                                           -      -            
+     0.44%  [kernel.kallsyms]                                            [k] lookup_nulls_elem_raw                                        -      -            
+     0.43%  libcrypto.so.3                                               [.] 0x000000000016a012                                           -      -            
+     0.42%  [kernel.kallsyms]                                            [k] clear_bhb_loop                                               -      -            
+     0.41%  libcrypto.so.3                                               [.] 0x000000000016a035                                           -      -            
+#
+# (Cannot load tips.txt file, please install perf!)
+#

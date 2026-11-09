@@ -64,6 +64,18 @@ fn trim(mut v: &[u8]) -> &[u8] {
 /// Frames the response at the front of `d`. `Ok(None)` means more bytes are needed.
 /// `head_request` is true when the request was HEAD (no body whatever the headers say).
 pub fn frame(d: &[u8], head_request: bool) -> Result<Option<Framed>, FrameError> {
+    frame_impl(d, head_request, false).map(|o| o.map(|(f, _)| f))
+}
+
+/// Like [`frame`], but a response with a `Content-Length` body that is only partly buffered is
+/// returned at once: `Framed::len` covers what is buffered and the second value is how many body
+/// bytes are still to come (S4: large bodies are counted as they stream instead of being held
+/// in memory whole). A complete response has 0 left.
+pub fn frame_partial(d: &[u8], head_request: bool) -> Result<Option<(Framed, usize)>, FrameError> {
+    frame_impl(d, head_request, true)
+}
+
+fn frame_impl(d: &[u8], head_request: bool, partial: bool) -> Result<Option<(Framed, usize)>, FrameError> {
     if d.len() < 12 {
         if d.len() >= 5 && &d[..5] != b"HTTP/" {
             return Err(FrameError::Malformed);
@@ -106,7 +118,7 @@ pub fn frame(d: &[u8], head_request: bool) -> Result<Option<Framed>, FrameError>
         }
     }
     if (100..200).contains(&status) || status == 204 || status == 304 || head_request {
-        return Ok(Some(Framed { len: head, status, close }));
+        return Ok(Some((Framed { len: head, status, close }, 0)));
     }
     if chunked {
         let mut pos = head;
@@ -130,7 +142,7 @@ pub fn frame(d: &[u8], head_request: bool) -> Result<Option<Framed>, FrameError>
                     let empty = trim(&d[pos..pos + eol]).is_empty();
                     pos += eol + 1;
                     if empty {
-                        return Ok(Some(Framed { len: pos, status, close }));
+                        return Ok(Some((Framed { len: pos, status, close }, 0)));
                     }
                 }
             }
@@ -143,7 +155,9 @@ pub fn frame(d: &[u8], head_request: bool) -> Result<Option<Framed>, FrameError>
     match clen {
         Some(n) => {
             if d.len() >= head + n {
-                Ok(Some(Framed { len: head + n, status, close }))
+                Ok(Some((Framed { len: head + n, status, close }, 0)))
+            } else if partial {
+                Ok(Some((Framed { len: d.len(), status, close }, head + n - d.len())))
             } else {
                 Ok(None)
             }
@@ -192,6 +206,17 @@ mod tests {
         assert_eq!(frame(b"HTTP/1.1 200 OK\r\n\r\nabc", false), Err(FrameError::UntilClose));
         assert_eq!(frame(b"GARBAGE/1.1 200 OK\r\n\r\n", false), Err(FrameError::Malformed));
         assert_eq!(frame(b"HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n", false), Err(FrameError::Malformed));
+    }
+
+    #[test]
+    fn frames_partial_bodies() {
+        let r = b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabcd";
+        let (f, left) = frame_partial(r, false).unwrap().unwrap();
+        assert_eq!((f.len, f.status, left), (r.len(), 200, 6));
+        let full = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nokHTTP";
+        let (f, left) = frame_partial(full, false).unwrap().unwrap();
+        assert_eq!((f.len, left), (full.len() - 4, 0));
+        assert_eq!(frame_partial(b"HTTP/1.1 200 OK\r\nContent-Len", false), Ok(None));
     }
 
     #[test]

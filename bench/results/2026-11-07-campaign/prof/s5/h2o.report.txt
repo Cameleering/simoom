@@ -1,0 +1,42 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 64K of event 'cycles:P'
+# Event count (approx.): 39789360772
+#
+# Overhead  Shared Object                                                Symbol                                                           IPC   [IPC Coverage]
+# ........  ...........................................................  ...............................................................  ....................
+#
+     1.60%  [kernel.kallsyms]                                            [k] trace_call_bpf                                               -      -            
+     1.28%  [kernel.kallsyms]                                            [k] perf_syscall_enter                                           -      -            
+     1.25%  [kernel.kallsyms]                                            [k] native_queued_spin_lock_slowpath                             -      -            
+     1.10%  [kernel.kallsyms]                                            [k] _raw_spin_lock                                               -      -            
+     0.98%  [kernel.kallsyms]                                            [k] memset_orig                                                  -      -            
+     0.89%  [kernel.kallsyms]                                            [k] iowrite16                                                    -      -            
+     0.87%  [kernel.kallsyms]                                            [k] kmem_cache_free                                              -      -            
+     0.86%  [kernel.kallsyms]                                            [k] kmem_cache_alloc                                             -      -            
+     0.74%  [kernel.kallsyms]                                            [k] clear_bhb_loop                                               -      -            
+     0.68%  [kernel.kallsyms]                                            [k] __tcp_transmit_skb                                           -      -            
+     0.68%  [kernel.kallsyms]                                            [k] __memcg_slab_post_alloc_hook                                 -      -            
+     0.68%  [kernel.kallsyms]                                            [k] lookup_nulls_elem_raw                                        -      -            
+     0.60%  [kernel.kallsyms]                                            [k] __fdget                                                      -      -            
+     0.59%  [kernel.kallsyms]                                            [k] __memcg_slab_free_hook                                       -      -            
+     0.58%  [kernel.kallsyms]                                            [k] __rcu_read_unlock                                            -      -            
+     0.56%  [kernel.kallsyms]                                            [k] __rcu_read_lock                                              -      -            
+     0.54%  [kernel.kallsyms]                                            [k] pvclock_clocksource_read_nowd                                -      -            
+     0.53%  [kernel.kallsyms]                                            [k] x64_sys_call                                                 -      -            
+     0.53%  [kernel.kallsyms]                                            [k] clear_page_erms                                              -      -            
+     0.52%  [kernel.kallsyms]                                            [k] _raw_spin_lock_bh                                            -      -            
+     0.52%  [kernel.kallsyms]                                            [k] __irqentry_text_start                                        -      -            
+     0.46%  [kernel.kallsyms]                                            [k] kmem_cache_alloc_node                                        -      -            
+     0.45%  [kernel.kallsyms]                                            [k] virtqueue_get_buf_ctx_split                                  -      -            
+     0.44%  [kernel.kallsyms]                                            [k] perf_tp_event                                                -      -            
+     0.43%  [kernel.kallsyms]                                            [k] virtqueue_add_split                                          -      -            
+     0.43%  [kernel.kallsyms]                                            [k] tcp_sendmsg_locked                                           -      -            
+     0.42%  [kernel.kallsyms]                                            [k] bpf_get_current_cgroup_id                                    -      -            
+     0.41%  [kernel.kallsyms]                                            [k] arch_exit_to_user_mode_prepare.isra.0                        -      -            
+#
+# (Cannot load tips.txt file, please install perf!)
+#

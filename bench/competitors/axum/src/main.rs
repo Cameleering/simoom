@@ -6,11 +6,16 @@ use axum::routing::{get, post};
 use axum::serve::ListenerExt;
 use axum::Router;
 
+static B64K: [u8; 64 * 1024] = [b'x'; 64 * 1024];
+static B1M: [u8; 1024 * 1024] = [b'x'; 1024 * 1024];
+
 #[tokio::main]
 async fn main() {
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
     let app = Router::new()
         .route("/", get(|| async { ([(CONTENT_TYPE, "text/plain")], "Hello, World!") }))
+        .route("/64k", get(|| async { ([(CONTENT_TYPE, "application/octet-stream")], Bytes::from_static(&B64K)) }))
+        .route("/1m", get(|| async { ([(CONTENT_TYPE, "application/octet-stream")], Bytes::from_static(&B1M)) }))
         .route("/echo", post(|body: Bytes| async move { ([(CONTENT_TYPE, "application/json")], body) }));
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.expect("bind").tap_io(|tcp| {
         let _ = tcp.set_nodelay(true);

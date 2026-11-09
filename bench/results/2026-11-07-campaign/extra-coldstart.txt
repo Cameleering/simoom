@@ -1,0 +1,5 @@
+0
+COLDSTART server=simoom variant=bench_server min_ms=1.13 median_ms=1.42 max_ms=1.68 runs=10
+COLDSTART server=simoom variant=server-no-tls min_ms=1.69 median_ms=2.15 max_ms=2.50 runs=10
+COLDSTART server=simoom variant=server-tls-no-quic min_ms=2.41 median_ms=2.86 max_ms=3.03 runs=10
+COLDSTART server=simoom variant=bench_server-1thread min_ms=0.91 median_ms=1.03 max_ms=1.20 runs=10

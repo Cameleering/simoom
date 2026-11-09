@@ -1,0 +1,80 @@
+simoom head: 33ee716
+simoom diff --stat:
+ Cargo.lock                                     |   4 +
+ bench/cloud/node.sh                            |  14 +
+ bench/competitors/actix/src/main.rs            |   8 +
+ bench/competitors/axum/src/main.rs             |   5 +
+ bench/competitors/caddy/Caddyfile              |  53 +-
+ bench/competitors/caddy/run.sh                 |   1 +
+ bench/competitors/go-nethttp/main.go           |  21 +
+ bench/competitors/h2o/h2o.conf                 |   2 +
+ bench/competitors/h2o/run.sh                   |   1 +
+ bench/competitors/hyper/src/main.rs            |   8 +
+ bench/competitors/kestrel/bench-kestrel.csproj |   1 +
+ bench/competitors/kestrel/run.sh               |   1 +
+ bench/competitors/lib.sh                       |   8 +
+ bench/competitors/nginx/nginx.conf             |   3 +
+ bench/competitors/nginx/run.sh                 |  13 +-
+ bench/competitors/simoom/run.sh                |  24 +-
+ bench/competitors/simoom/setup.sh              |   9 +-
+ bench/competitors/uws/server.mjs               |   5 +-
+ crates/simoom-bench/Cargo.toml                 |   5 +
+ crates/simoom-bench/src/coldstart.rs           |   9 +-
+ crates/simoom-bench/src/h1.rs                  |  31 +-
+ crates/simoom-bench/src/lib.rs                 |   3 +
+ crates/simoom-bench/src/load.rs                | 671 +++++++++++++++++++------
+ crates/simoom-bench/src/main.rs                |  82 ++-
+ crates/simoom-bench/src/sweep.rs               |   4 +-
+ crates/simoom-h2/src/conn.rs                   |  14 +-
+ crates/simoom-h2/tests/dos.rs                  |  33 +-
+ crates/simoom-http1/Cargo.toml                 |   2 +
+ crates/simoom-http1/src/parse.rs               |   8 +
+ crates/simoom-http1/tests/fuzz.rs              | 118 ++++-
+ crates/simoom-http1/tests/reference/mod.rs     |   7 +
+ crates/simoom-http1/tests/request.rs           |   6 +-
+ crates/simoom-quic/src/connection.rs           | 136 ++++-
+ crates/simoom-quic/src/endpoint.rs             |   6 +-
+ crates/simoom-quic/src/recovery.rs             |  10 +-
+ crates/simoom-quic/src/stream.rs               |  94 +++-
+ crates/simoom-sys/Cargo.toml                   |   3 +
+ crates/simoom-sys/src/lib.rs                   |   3 +
+ crates/simoom-tls/Cargo.toml                   |   4 +
+ crates/simoom-tls/src/tls/client.rs            |   8 +
+ crates/simoom-tls/src/tls/conn.rs              | 169 ++++++-
+ crates/simoom/src/conn.rs                      |   5 +-
+ crates/simoom/src/h1.rs                        |  23 +-
+ crates/simoom/src/limits.rs                    |   5 +
+ crates/simoom/src/server.rs                    |  43 +-
+ 45 files changed, 1441 insertions(+), 242 deletions(-)
+untracked:
+bench/cloud/campaign-ctl.sh
+bench/cloud/campaign.sh
+bench/cloud/check-servers.sh
+bench/cloud/fold.py
+bench/cloud/profile.sh
+bench/cloud/summarize-campaign.py
+bench/competitors/simoom-builder-uring/run.sh
+bench/competitors/simoom-builder-uring/setup.sh
+bench/competitors/simoom-builder/run.sh
+bench/competitors/simoom-builder/setup.sh
+bench/competitors/simoom-prof/run.sh
+bench/competitors/simoom-prof/setup.sh
+bench/competitors/simoom-uring/run.sh
+bench/competitors/simoom-uring/setup.sh
+crates/simoom-bench/src/attack.rs
+crates/simoom-bench/src/bin/simoom-server.rs
+crates/simoom-bench/src/h3load.rs
+crates/simoom-bench/src/newconn.rs
+crates/simoom-quic/tests/adversarial.rs
+crates/simoom-sys/src/sancov.rs
+crates/simoom-tls/tests/hardening.rs
+crates/simoom/examples/conformance_server.rs
+crates/simoom/examples/tls_probe_server.rs
+crates/simoom/tests/desync.rs
+crates/simoom/tests/h2_live.rs
+crates/simoom/tests/limits.rs
+crates/simoom/tests/tls_hardening.rs
+docs/SECURITY.md
+scripts/bench-modes.sh
+scripts/desync/desync.py
+cameleer head: 9f79976 (agent-action-layer, committed tree)

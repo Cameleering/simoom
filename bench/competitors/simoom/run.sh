@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
-# simoom side. The facade's bench_server example is used once it can bind a non-loopback address
-# (an `--addr` option) and run without a time limit; until then the simoom-rt raw responder
-# (`simoom-bench raw`) is the simoom side. SIMOOM_SIDE=raw|bench_server forces one.
+# simoom side: simoom-bench's campaign server (crates/simoom-bench/src/bin/simoom-server.rs), the
+# facade with every route of the campaign: GET / (13 bytes), POST /echo, GET /64k and /1m;
+# HTTP/1.1 and h2c on 8080, TLS 1.3 (h2, http/1.1) on 8443 and HTTP/3 on 8443/udp.
+# Variants (the simoom-* directories): SIMOOM_BACKEND=epoll|io_uring, SIMOOM_MODE=fixed|builder.
 . "$(dirname "$0")/../lib.sh"
+ensure_cert
 T=/root/simoom/target/release
-EX=/root/simoom/crates/simoom/examples/bench_server.rs
-side="${SIMOOM_SIDE:-auto}"
-if [ "$side" = auto ]; then
-  side=raw
-  [ -x "$T/examples/bench_server" ] && grep -q '"--addr"' "$EX" 2>/dev/null && side=bench_server
-fi
-if [ "$side" = bench_server ]; then
-  BIN="$T/examples/bench_server"; CMD=("$BIN" --addr 0.0.0.0:8080 --secs 1000000000 --backend "${SIMOOM_BACKEND:-epoll}")
-else
-  BIN="$T/simoom-bench"; CMD=("$BIN" raw --addr 0.0.0.0:8080 --backend "${SIMOOM_BACKEND:-epoll}")
-fi
-VERSION="echo simoom $(cat /root/simoom/REVISION 2>/dev/null) side=$side"
+BIN="$T/simoom-server"
+CMD=("$BIN" --addr 0.0.0.0:8080 --tls-addr 0.0.0.0:8443 --quic-addr 0.0.0.0:8443 --cert "$OPT/cert/cert.pem" --key "$OPT/cert/key.pem"
+     --backend "${SIMOOM_BACKEND:-epoll}" --mode "${SIMOOM_MODE:-fixed}" --keepalive-s 120 ${SIMOOM_EXTRA:-})
+VERSION="echo simoom $(cat /root/simoom/REVISION 2>/dev/null) backend=${SIMOOM_BACKEND:-epoll} mode=${SIMOOM_MODE:-fixed} ${SIMOOM_EXTRA:-}"
 dispatch "$@"

@@ -60,5 +60,19 @@ case "$1" in
     e=$(ss -Htn state established '( sport = :8080 )' | wc -l)
     echo "IDLE server=$2 conns=$3 established=$e pss0_kb=$p0 pss_kb=$p mem_kb=$m per_conn_b=$(( (p - p0) * 1024 / (e > 0 ? e : 1) ))"
     ;;
+  profile)
+    # profile NAME SECS OUTDIR: perf call graphs of the server's processes, folded stacks for flame
+    # graphs, and a syscall histogram by name (bpftrace), while a load runs
+    n=$2; secs=$3; o=$4; mkdir -p "$o"
+    pids=$(cat $CG/cgroup.procs | paste -sd, -)
+    timeout $((secs + 20)) bpftrace -q -e "tracepoint:syscalls:sys_enter_* /cgroup == cgroupid(\"$CG\")/ { @[probe] = count(); } interval:s:$secs { exit(); }" > "$o/$n.syscalls.txt" 2>&1 &
+    perf record -q -F 1999 -g -p "$pids" -o "$o/$n.perf.data" -- sleep "$secs" 2>/dev/null
+    wait
+    perf report -i "$o/$n.perf.data" --stdio --no-children --percent-limit 0.4 --sort dso,symbol -g none 2>/dev/null | grep -v '^$' | head -250 > "$o/$n.report.txt"
+    perf report -i "$o/$n.perf.data" --stdio --children --percent-limit 2 --sort symbol -g none 2>/dev/null | grep -v '^$' | head -120 > "$o/$n.children.txt"
+    perf script -i "$o/$n.perf.data" 2>/dev/null | python3 /root/simoom/bench/cloud/fold.py > "$o/$n.folded.txt"
+    rm -f "$o/$n.perf.data"
+    echo "PROFILE server=$n secs=$secs dir=$o"
+    ;;
   *) echo "usage: see the header of $0" >&2; exit 1 ;;
 esac

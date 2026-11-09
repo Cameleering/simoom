@@ -1,0 +1,52 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 109K of event 'cycles:P'
+# Event count (approx.): 108000864842
+#
+# Overhead  Shared Object                                                Symbol                                                           IPC   [IPC Coverage]
+# ........  ...........................................................  ...............................................................  ....................
+#
+     4.28%  [kernel.kallsyms]                                            [k] native_queued_spin_lock_slowpath                             -      -            
+     1.17%  [kernel.kallsyms]                                            [k] memset_orig                                                  -      -            
+     1.07%  [kernel.kallsyms]                                            [k] __tcp_transmit_skb                                           -      -            
+     1.04%  [kernel.kallsyms]                                            [k] clear_page_erms                                              -      -            
+     1.02%  [kernel.kallsyms]                                            [k] trace_call_bpf                                               -      -            
+     1.01%  [kernel.kallsyms]                                            [k] _raw_spin_lock                                               -      -            
+     0.99%  [kernel.kallsyms]                                            [k] iowrite16                                                    -      -            
+     0.95%  [kernel.kallsyms]                                            [k] pvclock_clocksource_read_nowd                                -      -            
+     0.94%  [kernel.kallsyms]                                            [k] tcp_sendmsg_locked                                           -      -            
+     0.92%  [kernel.kallsyms]                                            [k] __irqentry_text_start                                        -      -            
+     0.89%  [kernel.kallsyms]                                            [k] perf_syscall_enter                                           -      -            
+     0.84%  [kernel.kallsyms]                                            [k] skb_release_data                                             -      -            
+     0.70%  [kernel.kallsyms]                                            [k] virtqueue_get_buf_ctx_split                                  -      -            
+     0.68%  [kernel.kallsyms]                                            [k] clear_bhb_loop                                               -      -            
+     0.63%  [kernel.kallsyms]                                            [k] virtqueue_add_split                                          -      -            
+     0.61%  [kernel.kallsyms]                                            [k] __rcu_read_unlock                                            -      -            
+     0.61%  [kernel.kallsyms]                                            [k] kmem_cache_alloc_node                                        -      -            
+     0.60%  [kernel.kallsyms]                                            [k] __fq_codel_dequeue                                           -      -            
+     0.59%  [kernel.kallsyms]                                            [k] __raw_spin_lock_irqsave                                      -      -            
+     0.57%  [kernel.kallsyms]                                            [k] slab_update_freelist.isra.0                                  -      -            
+     0.57%  [kernel.kallsyms]                                            [k] kmem_cache_free                                              -      -            
+     0.56%  [kernel.kallsyms]                                            [k] __inet_lookup_established                                    -      -            
+     0.53%  [kernel.kallsyms]                                            [k] __rcu_read_lock                                              -      -            
+     0.52%  [kernel.kallsyms]                                            [k] tcp_clean_rtx_queue.constprop.0                              -      -            
+     0.49%  h2o                                                          [.] handle_incoming_request                                      -      -            
+     0.48%  [kernel.kallsyms]                                            [k] ip_finish_output2                                            -      -            
+     0.47%  [kernel.kallsyms]                                            [k] native_apic_msr_eoi                                          -      -            
+     0.46%  [kernel.kallsyms]                                            [k] rep_movs_alternative                                         -      -            
+     0.46%  [kernel.kallsyms]                                            [k] __fdget                                                      -      -            
+     0.46%  [kernel.kallsyms]                                            [k] bpf_get_current_cgroup_id                                    -      -            
+     0.45%  [kernel.kallsyms]                                            [k] __slab_free                                                  -      -            
+     0.43%  [kernel.kallsyms]                                            [k] aa_inet_msg_perm                                             -      -            
+     0.43%  [kernel.kallsyms]                                            [k] x64_sys_call                                                 -      -            
+     0.43%  [kernel.kallsyms]                                            [k] _raw_spin_lock_bh                                            -      -            
+     0.42%  [kernel.kallsyms]                                            [k] splice_to_socket                                             -      -            
+     0.41%  [kernel.kallsyms]                                            [k] tcp_wfree                                                    -      -            
+     0.41%  [kernel.kallsyms]                                            [k] kfree                                                        -      -            
+     0.40%  [kernel.kallsyms]                                            [k] do_syscall_64                                                -      -            
+#
+# (Cannot load tips.txt file, please install perf!)
+#

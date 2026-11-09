@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 . "$(dirname "$0")/../lib.sh"
+ensure_files
 BIN="$OPT/caddy/caddy"
 VERSION="$OPT/caddy/caddy version"
 CMD=("$OPT/caddy/caddy" run --config "$COMP/caddy/Caddyfile" --adapter caddyfile)

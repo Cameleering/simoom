@@ -1,20 +1,45 @@
-# Fixed 13-byte reply. HTTP/1.1 and h2c on 8080; HTTP/1.1, HTTP/2 and HTTP/3 with TLS on 8443.
+# Fixed 13-byte reply with `respond` (Caddy's static response handler), S4 bodies from files,
+# no admin endpoint, no automatic HTTPS. HTTP/1.1 and h2c on 8080; TLS 1.3 (h1, h2) and HTTP/3
+# on 8443 with the bench certificate.
 {
-    admin off
-    auto_https off
-    servers :8080 {
-        protocols h1 h2c
-    }
-    servers :8443 {
-        protocols h1 h2 h3
-    }
+	admin off
+	auto_https off
+	servers :8080 {
+		protocols h1 h2c
+		timeouts {
+			idle 120s
+		}
+	}
+	servers :8443 {
+		protocols h1 h2 h3
+		timeouts {
+			idle 120s
+		}
+	}
 }
+
+(routes) {
+	handle /64k {
+		root * /opt/bench/files
+		file_server
+	}
+	handle /1m {
+		root * /opt/bench/files
+		file_server
+	}
+	handle {
+		header Content-Type text/plain
+		respond "Hello, World!" 200
+	}
+}
+
 :8080 {
-    header Content-Type text/plain
-    respond "Hello, World!" 200
+	import routes
 }
+
 https://:8443 {
-    tls /opt/bench/cert/cert.pem /opt/bench/cert/key.pem
-    header Content-Type text/plain
-    respond "Hello, World!" 200
+	tls /opt/bench/cert/cert.pem /opt/bench/cert/key.pem {
+		protocols tls1.3
+	}
+	import routes
 }

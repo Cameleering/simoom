@@ -1,7 +1,10 @@
 // uWebSockets.js (pinned by commit: tag v20.71.0). One process per CPU, each with its own
 // listener on the shared port (uWS listens with SO_REUSEPORT on Linux), as uWS's docs suggest
 // for multi-core use; Node's cluster module is not used.
-import uWS from 'uWebSockets.js';
+// The package's ESM wrapper imports ./index.js, which this release does not ship; load the
+// CommonJS entry (uws.js) instead.
+import { createRequire } from 'node:module';
+const uWS = createRequire(import.meta.url)('uWebSockets.js');
 import { availableParallelism } from 'node:os';
 import { fork } from 'node:child_process';
 

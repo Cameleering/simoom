@@ -22,8 +22,16 @@ USAGE
   simoom-bench hist merge OUT.hlog IN.hlog...           merge interval logs (by interval index)
 
 TARGET
-  --url http://HOST:PORT/PATH    or --addr HOST:PORT [--path /PATH]
-  --proto h1|h2c                 HTTP/1.1 (default) or HTTP/2 prior knowledge, cleartext
+  --url http[s]://HOST:PORT/PATH or --addr HOST:PORT [--path /PATH]
+  --proto h1|h2c|h2|h3           HTTP/1.1 (default), HTTP/2 prior knowledge (cleartext), HTTP/2
+                                 over TLS (ALPN h2), HTTP/3 over QUIC
+  --tls                          TLS 1.3 (implied by https:// and --proto h2)
+  --cacert FILE                  PEM roots the server certificate must chain to (TLS, h3; the
+                                 certificate is always verified)
+  --sni NAME                     server name for SNI and the certificate check
+  --tls-resume                   resume TLS sessions (default: a full handshake per connection)
+  --new-conn                     S5: a new connection per request (Connection: close); --conns is
+                                 then the number of concurrent workers per run
   --method GET|POST|...          --body-size N (a JSON document of N bytes) | --body-file F
   --header 'Name: value'         repeatable
 
@@ -44,8 +52,17 @@ LOAD
                      to milliseconds (default 20; 0 = off)
   --label 'k=v ...'  prefix for the RESULT line
 
+ATTACK (S10, run alongside a load)
+  simoom-bench attack --addr HOST:PORT [--slowloris N] [--slowread N] [--path /64k]
+                      [--interval-s 10] [--duration S] [--label ...]
+    slowloris: N connections that send a request head one header line per interval and
+    never finish it; slow read: N connections that pipeline 16 requests for --path and read
+    1 KB a second. Reopens what the server closes; prints an ATTACK line with the counts.
+
 SWEEP (SLO throughput: highest rate with p99 <= limit, no errors, rate achieved)
   --slo-us 1000  --probe S  --step-warmup S  --step S  --point-warmup S  --point S  --steps N
+  --points 0.5,0.8,0.95   fractions of the SLO throughput measured after the search (repeat a
+                          fraction to measure it more than once)
 
 OUTPUT
   One `RESULT key=value ...` line per run on stdout (latencies in microseconds; gen_cpu_pct is the
@@ -61,7 +78,7 @@ struct Args {
     tail: Vec<String>,
 }
 
-const SWITCHES: &[&str] = &["--idle", "--batch", "--help", "-h"];
+const SWITCHES: &[&str] = &["--idle", "--batch", "--help", "-h", "--tls", "--new-conn", "--tls-resume"];
 
 fn parse_args(v: &[String]) -> Args {
     let mut a = Args { flags: Vec::new(), switches: Vec::new(), pos: Vec::new(), tail: Vec::new() };
@@ -131,8 +148,15 @@ fn json_body(n: usize) -> Vec<u8> {
 
 fn spec_from(a: &Args) -> Result<Spec, String> {
     let mut s = Spec::default();
+    let mut https = false;
     let (target, path) = if let Some(url) = a.get("--url") {
-        let rest = url.strip_prefix("http://").ok_or("--url must start with http:// (TLS is not in this build yet)")?;
+        let rest = match url.strip_prefix("https://") {
+            Some(r) => {
+                https = true;
+                r
+            }
+            None => url.strip_prefix("http://").ok_or("--url must start with http:// or https://")?,
+        };
         match rest.find('/') {
             Some(i) => (rest[..i].to_string(), rest[i..].to_string()),
             None => (rest.to_string(), "/".to_string()),
@@ -143,11 +167,20 @@ fn spec_from(a: &Args) -> Result<Spec, String> {
     s.addr = load::resolve(&target)?;
     s.host = target;
     s.path = path;
-    s.proto = match a.get("--proto").unwrap_or("h1") {
-        "h1" | "http1" => Proto::H1,
-        "h2c" | "h2" => Proto::H2c,
-        p => return Err(format!("unknown --proto {p} (h1, h2c)")),
-    };
+    s.proto = Proto::parse(a.get("--proto").unwrap_or("h1"))?;
+    s.tls = https || a.has("--tls") || s.proto == Proto::H2;
+    if s.proto == Proto::H2c && s.tls {
+        s.proto = Proto::H2;
+    }
+    if let Some(f) = a.get("--cacert") {
+        s.ca = std::fs::read(f).map_err(|e| format!("{f}: {e}"))?;
+    }
+    s.sni = a.get("--sni").unwrap_or("").to_string();
+    s.new_conn = a.has("--new-conn");
+    s.slo_us = a.num("--slo-us", 1000)?;
+    if a.has("--tls-resume") {
+        s.headers.push(("X-Bench-Resume".into(), "1".into()));
+    }
     s.method = a.get("--method").unwrap_or("GET").to_string();
     for h in a.all("--header") {
         let (k, v) = h.split_once(':').ok_or("--header must be 'Name: value'")?;
@@ -194,13 +227,15 @@ fn spec_from(a: &Args) -> Result<Spec, String> {
 fn label(a: &Args, s: &Spec) -> String {
     let mut l = a.get("--label").map(|x| format!("{x} ")).unwrap_or_default();
     l.push_str(&format!(
-        "proto={} mode={} depth={}{} dist={} ",
-        match s.proto {
-            Proto::H1 => "h1",
-            Proto::H2c => "h2c",
-        },
+        "proto={}{} mode={} depth={}{} dist={} ",
+        s.proto.name(),
+        if s.tls && s.proto == Proto::H1 { " tls=1" } else { "" },
         if s.idle {
             "idle"
+        } else if s.new_conn && s.rate > 0.0 {
+            "newconn-open"
+        } else if s.new_conn {
+            "newconn-closed"
         } else if s.rate > 0.0 {
             "open"
         } else {
@@ -297,6 +332,10 @@ fn cmd_sweep(a: &Args) -> Result<(), String> {
         max_steps: a.num("--steps", 8)?,
         ..sweep::Plan::default()
     };
+    let mut plan = plan;
+    if let Some(p) = a.get("--points") {
+        plan.points = p.split(',').map(|x| x.trim().parse::<f64>().map_err(|_| format!("bad --points {p}"))).collect::<Result<_, _>>()?;
+    }
     let base_label = label(a, &s);
     let out = a.get("--out").map(String::from);
     let mut runner = |sp: &Spec| run_once(&ag, sp);
@@ -304,7 +343,7 @@ fn cmd_sweep(a: &Args) -> Result<(), String> {
         human(r);
         println!("{}", r.result_line(&format!("{base_label}{tag}")));
         if let (Some(p), true) = (&out, tag.starts_with("phase=point")) {
-            let pct = tag.split("pct=").nth(1).unwrap_or("x").trim().to_string();
+            let pct = tag.split("pct=").nth(1).unwrap_or("x").trim().replace(" idx=", "-");
             let _ = write_outputs(p, r, &format!(".p{pct}"));
         }
     };
@@ -389,6 +428,19 @@ fn main() {
         Some("agent") => dist::agent(a.get("--listen").unwrap_or("0.0.0.0:7070")),
         Some("coldstart") => cmd_coldstart(&a),
         Some("raw") => cmd_raw(&a),
+        Some("attack") => simoom_bench::attack::run(
+            a.get("--addr").ok_or_else(|| "--addr is required".to_string()).and_then(load::resolve).unwrap_or_else(|e| {
+                eprintln!("simoom-bench: {e}");
+                std::process::exit(1)
+            }),
+            a.get("--addr").unwrap_or(""),
+            a.num("--slowloris", 0usize).unwrap_or(0),
+            a.num("--slowread", 0usize).unwrap_or(0),
+            a.get("--path").unwrap_or("/64k"),
+            Duration::from_secs_f64(a.num("--interval-s", 10.0).unwrap_or(10.0)),
+            Duration::from_secs_f64(a.num("--duration", 60.0).unwrap_or(60.0)),
+            a.get("--label").unwrap_or(""),
+        ),
         Some("hist") => cmd_hist(&a),
         Some("version") => {
             println!("simoom-bench {}", env!("CARGO_PKG_VERSION"));

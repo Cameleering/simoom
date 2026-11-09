@@ -1,0 +1,8 @@
+
+
+@[tracepoint:syscalls:sys_enter_close]: 126244
+@[tracepoint:syscalls:sys_enter_epoll_ctl]: 128395
+@[tracepoint:syscalls:sys_enter_writev]: 134439
+@[tracepoint:syscalls:sys_enter_recvfrom]: 135018
+@[tracepoint:syscalls:sys_enter_accept4]: 231036
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 233064

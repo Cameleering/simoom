@@ -1,0 +1,26 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 64K of event 'cycles:P'
+# Event count (approx.): 75801597941
+#
+# Overhead  Shared Object                                                Symbol                                                           IPC   [IPC Coverage]
+# ........  ...........................................................  ...............................................................  ....................
+#
+     1.70%  libc.so.6                                                    [.] malloc                                                       -      -            
+     1.19%  libcrypto.so.3                                               [.] OPENSSL_LH_doall_arg                                         -      -            
+     1.17%  libc.so.6                                                    [.] pthread_rwlock_unlock                                        -      -            
+     1.17%  libcrypto.so.3                                               [.] 0x000000000021f90b                                           -      -            
+     1.12%  libcrypto.so.3                                               [.] OPENSSL_cleanse                                              -      -            
+     1.08%  libc.so.6                                                    [.] cfree                                                        -      -            
+     0.98%  libc.so.6                                                    [.] pthread_rwlock_rdlock                                        -      -            
+     0.60%  libcrypto.so.3                                               [.] OSSL_PARAM_locate                                            -      -            
+     0.58%  libcrypto.so.3                                               [.] ASN1_item_ex_i2d                                             -      -            
+     0.48%  libc.so.6                                                    [.] 0x000000000019b43c                                           -      -            
+     0.45%  [kernel.kallsyms]                                            [k] trace_call_bpf                                               -      -            
+     0.41%  libcrypto.so.3                                               [.] OPENSSL_strcasecmp                                           -      -            
+#
+# (Cannot load tips.txt file, please install perf!)
+#

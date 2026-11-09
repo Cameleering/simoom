@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"crypto/tls"
 	"io"
 	"net/http"
 	"os"
@@ -10,6 +12,8 @@ import (
 )
 
 var hello = []byte("Hello, World!")
+var b64k = bytes.Repeat([]byte("x"), 64*1024)
+var b1m = bytes.Repeat([]byte("x"), 1024*1024)
 
 func main() {
 	port := os.Getenv("PORT")
@@ -21,6 +25,14 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write(hello)
 	})
+	mux.HandleFunc("GET /64k", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(b64k)
+	})
+	mux.HandleFunc("GET /1m", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(b1m)
+	})
 	mux.HandleFunc("POST /echo", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		io.Copy(w, r.Body)
@@ -29,6 +41,15 @@ func main() {
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)
 	srv := &http.Server{Addr: ":" + port, Handler: mux, Protocols: &p, IdleTimeout: 120 * time.Second}
+	// TLS 1.3 on 8443 with ALPN h2 and http/1.1 when the bench certificate exists
+	if _, err := os.Stat("/opt/bench/cert/cert.pem"); err == nil {
+		ts := &http.Server{Addr: ":8443", Handler: mux, IdleTimeout: 120 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}
+		go func() {
+			if err := ts.ListenAndServeTLS("/opt/bench/cert/cert.pem", "/opt/bench/cert/key.pem"); err != nil {
+				panic(err)
+			}
+		}()
+	}
 	if err := srv.ListenAndServe(); err != nil {
 		panic(err)
 	}

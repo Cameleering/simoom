@@ -1,0 +1,112 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 63K of event 'cycles:P'
+# Event count (approx.): 52990211228
+#
+# Children      Self  Symbol                                                           IPC   [IPC Coverage]
+# ........  ........  ...............................................................  ....................
+#
+    30.78%     0.07%  [k] entry_SYSCALL_64_after_hwframe                               -      -            
+    30.25%     0.25%  [k] do_syscall_64                                                -      -            
+    22.69%     0.23%  [k] x64_sys_call                                                 -      -            
+    18.28%     0.02%  [.] evp_keyex_create                                             -      -            
+    16.07%     0.01%  [.] EVP_PKEY_generate                                            -      -            
+    14.84%     0.00%  [.] 0x000078cbbc003ea8                                           -      -            
+    14.04%     0.00%  [.] 0x000078cbbc1cbcc1                                           -      -            
+    12.05%     0.00%  [.] 0000000000000000                                             -      -            
+    11.58%     0.00%  [.] 0x000078cbbbf6f8a7                                           -      -            
+     8.23%     0.05%  [.] digestsign_stub                                              -      -            
+     6.91%     0.05%  [.] write_vecs                                                   -      -            
+     6.86%     0.06%  [.] sendmsg                                                      -      -            
+     6.43%     0.08%  [.] epoll_wait                                                   -      -            
+     6.17%     0.01%  [.] evp_keyex_on_exchange                                        -      -            
+     6.14%     0.00%  [.] 0x0000000000000020                                           -      -            
+     5.82%     0.02%  [k] __x64_sys_sendmsg                                            -      -            
+     5.79%     0.04%  [k] __sys_sendmsg                                                -      -            
+     5.63%     0.04%  [k] ___sys_sendmsg                                               -      -            
+     5.52%     0.18%  [k] syscall_trace_enter                                          -      -            
+     5.41%     0.11%  [.] evloop_do_proceed                                            -      -            
+     5.40%     0.09%  [k] ____sys_sendmsg                                              -      -            
+     5.09%     0.05%  [k] __x64_sys_epoll_wait                                         -      -            
+     5.06%     0.06%  [k] __traceiter_sys_enter                                        -      -            
+     4.92%     0.04%  [k] do_epoll_wait                                                -      -            
+     4.86%     0.03%  [.] EVP_DigestSignFinal                                          -      -            
+     4.83%     0.07%  [k] handle_softirqs                                              -      -            
+     4.82%     0.00%  [.] 0x000078cbbc1d79ff                                           -      -            
+     4.75%     0.11%  [k] ep_poll                                                      -      -            
+     4.75%     0.01%  [k] asm_common_interrupt                                         -      -            
+     4.72%     0.04%  [k] common_interrupt                                             -      -            
+     4.59%     0.01%  [k] irq_exit_rcu                                                 -      -            
+     4.57%     0.02%  [k] __irq_exit_rcu                                               -      -            
+     4.47%     0.00%  [.] 0x000078cbbc1d7947                                           -      -            
+     4.37%     0.09%  [k] net_rx_action                                                -      -            
+     4.33%     0.07%  [k] schedule                                                     -      -            
+     4.26%     0.01%  [k] __napi_poll                                                  -      -            
+     4.22%     0.03%  [k] inet_sendmsg                                                 -      -            
+     4.18%     0.08%  [k] __schedule                                                   -      -            
+     4.15%     0.01%  [k] tcp_sendmsg                                                  -      -            
+     4.15%     0.00%  [.] 0x000078cbbbf8257b                                           -      -            
+     4.02%     0.15%  [k] tcp_sendmsg_locked                                           -      -            
+     3.85%     0.02%  [k] virtnet_poll                                                 -      -            
+     3.85%     0.02%  [k] schedule_hrtimeout_range                                     -      -            
+     3.82%     0.00%  [.] 0x000078cbbbf82769                                           -      -            
+     3.80%     0.05%  [k] schedule_hrtimeout_range_clock                               -      -            
+     3.72%     0.01%  [k] __tcp_push_pending_frames                                    -      -            
+     3.72%     0.07%  [k] tcp_write_xmit                                               -      -            
+     3.61%     0.06%  [.] read                                                         -      -            
+     3.56%     0.00%  [.] 0x000078cbbc010b73                                           -      -            
+     3.48%     0.65%  [k] perf_syscall_enter                                           -      -            
+     3.31%     0.00%  [.] 0x000078cbbc1be715                                           -      -            
+     3.28%     0.00%  [.] 0x000078cbbbf6f815                                           -      -            
+     3.26%     0.06%  [.] EVP_CipherInit_ex                                            -      -            
+     3.25%     0.05%  [.] EVP_RAND_generate                                            -      -            
+     3.19%     0.20%  [k] __tcp_transmit_skb                                           -      -            
+     3.14%     0.00%  [.] 0x000078cbbc01fb23                                           -      -            
+     3.03%     0.04%  [k] napi_complete_done                                           -      -            
+     2.99%     0.03%  [k] netif_receive_skb_list_internal                              -      -            
+     2.97%     0.01%  [k] tcp_push                                                     -      -            
+     2.90%     0.02%  [k] __netif_receive_skb_list_core                                -      -            
+     2.84%     0.01%  [k] ip_list_rcv                                                  -      -            
+     2.83%     0.02%  [k] ip_queue_xmit                                                -      -            
+     2.80%     0.00%  [.] 0x000078cbbbfff059                                           -      -            
+     2.80%     0.01%  [k] ip_sublist_rcv                                               -      -            
+     2.79%     0.02%  [.] h2o_evloop_socket_accept                                     -      -            
+     2.77%     0.09%  [k] __ip_queue_xmit                                              -      -            
+     2.77%     0.02%  [.] accept4                                                      -      -            
+     2.67%     0.01%  [.] EVP_DigestSignInit                                           -      -            
+     2.66%     0.04%  [.] wait_for_data.isra.0                                         -      -            
+     2.63%     0.06%  [k] ip_output                                                    -      -            
+     2.63%     0.04%  [k] ip_local_out                                                 -      -            
+     2.55%     0.03%  [k] ip_finish_output                                             -      -            
+     2.50%     0.01%  [k] ip_sublist_rcv_finish                                        -      -            
+     2.49%     0.03%  [k] __ip_finish_output                                           -      -            
+     2.49%     0.02%  [.] __close                                                      -      -            
+     2.49%     0.02%  [k] ip_local_deliver                                             -      -            
+     2.47%     0.01%  [k] ip_local_deliver_finish                                      -      -            
+     2.47%     0.08%  [k] vfs_read                                                     -      -            
+     2.46%     0.02%  [k] ip_protocol_deliver_rcu                                      -      -            
+     2.42%     0.16%  [k] ip_finish_output2                                            -      -            
+     2.41%     0.00%  [.] 0x000078cbbbf6f917                                           -      -            
+     2.37%     0.93%  [k] trace_call_bpf                                               -      -            
+     2.35%     0.01%  [k] __x64_sys_read                                               -      -            
+     2.34%     0.06%  [k] __fput                                                       -      -            
+     2.32%     0.13%  [k] perf_call_bpf_enter.isra.0                                   -      -            
+     2.30%     0.02%  [k] ksys_read                                                    -      -            
+     2.28%     0.00%  [.] 0x0000000000000031                                           -      -            
+     2.26%     0.00%  [k] 0x073c3705c10ff0ff                                           -      -            
+     2.25%     0.03%  [.] dispose_socket                                               -      -            
+     2.25%     0.02%  [k] neigh_hh_output                                              -      -            
+     2.21%     0.07%  [k] __dev_queue_xmit                                             -      -            
+     2.18%     0.00%  [.] 0x000078cbbbffaae4                                           -      -            
+     2.18%     0.00%  [.] 0x0000000c00000010                                           -      -            
+     2.13%     0.03%  [k] tcp_v4_rcv                                                   -      -            
+     2.11%     0.03%  [.] aead_setup_crypto                                            -      -            
+     2.10%     0.05%  [.] epoll_ctl                                                    -      -            
+     2.08%     0.02%  [k] __x64_sys_close                                              -      -            
+     2.02%     0.02%  [.] ptls_openssl_random_bytes                                    -      -            
+#
+# (Cannot load tips.txt file, please install perf!)
+#

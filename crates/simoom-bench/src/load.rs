@@ -35,6 +35,36 @@ pub enum Proto {
     H1,
     /// HTTP/2 over cleartext TCP with prior knowledge (RFC 9113 §3.3).
     H2c,
+    /// HTTP/2 over TLS 1.3 (ALPN h2).
+    H2,
+    /// HTTP/3 over QUIC (the `h3load` engine).
+    H3,
+}
+
+impl Proto {
+    pub fn name(self) -> &'static str {
+        match self {
+            Proto::H1 => "h1",
+            Proto::H2c => "h2c",
+            Proto::H2 => "h2",
+            Proto::H3 => "h3",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Proto, String> {
+        Ok(match s {
+            "h1" | "http1" => Proto::H1,
+            "h2c" => Proto::H2c,
+            "h2" => Proto::H2,
+            "h3" | "http3" => Proto::H3,
+            p => return Err(format!("unknown --proto {p} (h1, h2c, h2, h3)")),
+        })
+    }
+
+    /// HTTP/2 framing (cleartext or TLS).
+    pub fn is_h2(self) -> bool {
+        matches!(self, Proto::H2c | Proto::H2)
+    }
 }
 
 /// Inter-arrival distribution of the open-loop schedule.
@@ -82,6 +112,17 @@ pub struct Spec {
     /// Threads opening connections in parallel.
     pub connect_threads: usize,
     pub seed: u64,
+    /// TLS 1.3 on the TCP connections (h1 over TLS, or h2 with ALPN).
+    pub tls: bool,
+    /// TLS/QUIC server name (SNI and certificate check); the certificate must match it.
+    pub sni: String,
+    /// PEM root certificates that the server's certificate must chain to (verification is
+    /// never turned off).
+    pub ca: Vec<u8>,
+    /// S5: a new connection for every request (`Connection: close`, connect time included).
+    pub new_conn: bool,
+    /// Latency bound for `goodput_slo` (requests answered within it, from the intended time).
+    pub slo_us: u64,
 }
 
 impl Default for Spec {
@@ -111,8 +152,17 @@ impl Default for Spec {
             interval: Duration::from_secs(1),
             connect_threads: 32,
             seed: 0x5eed,
+            tls: false,
+            sni: String::new(),
+            ca: Vec::new(),
+            new_conn: false,
+            slo_us: 1000,
         }
     }
+}
+
+pub(crate) fn backend_label(b: Backend) -> &'static str {
+    backend_name(b)
 }
 
 fn backend_name(b: Backend) -> &'static str {
@@ -146,13 +196,10 @@ impl Spec {
     /// Serializes as `key=value` words (the agent protocol).
     pub fn to_kv(&self) -> String {
         let mut s = format!(
-            "addr={} host={} proto={} method={} path={} conns={} threads={} rate={} dist={} depth={} batch={} warmup_ms={} duration_ms={} idle={} backend={} tick_us={} ticker_us={} drain_ms={} interval_ms={} connect_threads={} seed={} body={}",
+            "addr={} host={} proto={} method={} path={} conns={} threads={} rate={} dist={} depth={} batch={} warmup_ms={} duration_ms={} idle={} backend={} tick_us={} ticker_us={} drain_ms={} interval_ms={} connect_threads={} seed={} tls={} new_conn={} slo_us={} sni={} ca={} body={}",
             self.addr,
             self.host,
-            match self.proto {
-                Proto::H1 => "h1",
-                Proto::H2c => "h2c",
-            },
+            self.proto.name(),
             self.method,
             self.path,
             self.conns,
@@ -174,6 +221,11 @@ impl Spec {
             self.interval.as_millis(),
             self.connect_threads,
             self.seed,
+            self.tls,
+            self.new_conn,
+            self.slo_us,
+            if self.sni.is_empty() { "-" } else { &self.sni },
+            crate::hdr::base64_encode(&self.ca),
             crate::hdr::base64_encode(&self.body),
         );
         if let Some(c) = &self.cpus {
@@ -193,7 +245,12 @@ impl Spec {
             match k {
                 "addr" => s.addr = v.parse().map_err(|_| "bad addr")?,
                 "host" => s.host = v.into(),
-                "proto" => s.proto = if v == "h2c" { Proto::H2c } else { Proto::H1 },
+                "proto" => s.proto = Proto::parse(v)?,
+                "tls" => s.tls = v == "true",
+                "new_conn" => s.new_conn = v == "true",
+                "slo_us" => s.slo_us = num(v)?,
+                "sni" => s.sni = if v == "-" { String::new() } else { v.into() },
+                "ca" => s.ca = crate::hdr::base64_decode(v)?,
                 "method" => s.method = v.into(),
                 "path" => s.path = v.into(),
                 "conns" => s.conns = num(v)? as usize,
@@ -243,6 +300,15 @@ pub struct Report {
     pub reconnects: u64,
     pub incomplete: u64,
     pub bytes_in: u64,
+    /// 2xx responses to requests intended inside the window (goodput), and those of them
+    /// answered within `slo_us` of their intended time.
+    pub ok: u64,
+    pub ok_fast: u64,
+    /// Latency of the 2xx responses timed from when the request was actually written (the
+    /// "admitted" latency of S9: what the server did with the requests it took).
+    pub ok_hist: Histogram,
+    /// New connections opened during the run (S5).
+    pub connects: u64,
     pub hist: Histogram,
     /// How late the generator's timers fired (its own scheduling slop).
     pub lag: Histogram,
@@ -285,6 +351,10 @@ impl Report {
         self.reconnects += o.reconnects;
         self.incomplete += o.incomplete;
         self.bytes_in += o.bytes_in;
+        self.ok += o.ok;
+        self.ok_fast += o.ok_fast;
+        self.connects += o.connects;
+        self.ok_hist.merge(&o.ok_hist);
         self.hist.merge(&o.hist);
         self.lag.merge(&o.lag);
         for (i, h) in &o.intervals {
@@ -320,7 +390,8 @@ impl Report {
         format!(
             "RESULT {label}rate={:.0} achieved={:.0} conns={} connected={} received={} samples={} errors={} non2xx={} conn_errors={} incomplete={} \
              p50_us={} p90_us={} p99_us={} p999_us={} p9999_us={} max_us={} mean_us={:.1} lag_p99_us={} lag_max_us={} \
-             gen_cpu_pct={} gen_thread_max_pct={} node_cpu_pct={} softirq_pct={} gen_syscalls_per_req={:.2} window_s={:.1} nodes={} backend={}{flag}",
+             gen_cpu_pct={} gen_thread_max_pct={} node_cpu_pct={} softirq_pct={} gen_syscalls_per_req={:.2} window_s={:.1} nodes={} backend={} \
+             ok={} goodput={:.0} goodput_slo={:.0} ok_p50_us={} ok_p99_us={} ok_p999_us={} connects={} mbit_in={:.1}{flag}",
             self.spec_rate,
             self.achieved(),
             self.conns,
@@ -348,13 +419,21 @@ impl Report {
             self.window_s,
             self.nodes.max(1),
             if self.backend.is_empty() { "-" } else { &self.backend },
+            self.ok,
+            if self.window_s > 0.0 { self.ok as f64 / self.window_s } else { 0.0 },
+            if self.window_s > 0.0 { self.ok_fast as f64 / self.window_s } else { 0.0 },
+            us(self.ok_hist.percentile(50.0)),
+            us(self.ok_hist.percentile(99.0)),
+            us(self.ok_hist.percentile(99.9)),
+            self.connects,
+            if self.window_s > 0.0 { self.bytes_in as f64 * 8.0 / self.window_s / 1e6 } else { 0.0 },
         )
     }
 
     /// Wire form for the agent protocol: the RESULT-like counters, then the histograms.
     pub fn to_wire(&self) -> String {
         let mut s = format!(
-            "REPORT spec_rate={} conns={} connected={} connect_failed={} window_s={} received={} completed={} non2xx={} conn_errors={} reconnects={} incomplete={} bytes_in={} syscalls={} backend={} gen_pct={} node_pct={} thread_pct={} softirq_pct={}\n",
+            "REPORT spec_rate={} conns={} connected={} connect_failed={} window_s={} received={} completed={} non2xx={} conn_errors={} reconnects={} incomplete={} bytes_in={} syscalls={} backend={} gen_pct={} node_pct={} thread_pct={} softirq_pct={} ok={} ok_fast={} connects={}\n",
             self.spec_rate,
             self.conns,
             self.connected,
@@ -373,8 +452,12 @@ impl Report {
             self.cpu.node_pct.map(|x| x.to_string()).unwrap_or("-".into()),
             self.cpu.max_thread_pct.map(|x| x.to_string()).unwrap_or("-".into()),
             self.cpu.softirq_pct.map(|x| x.to_string()).unwrap_or("-".into()),
+            self.ok,
+            self.ok_fast,
+            self.connects,
         );
         s.push_str(&format!("HIST {}\n", self.hist.to_base64()));
+        s.push_str(&format!("OKHIST {}\n", self.ok_hist.to_base64()));
         s.push_str(&format!("LAG {}\n", self.lag.to_base64()));
         for (i, h) in &self.intervals {
             s.push_str(&format!("INTERVAL {i} {}\n", h.to_base64()));
@@ -413,11 +496,15 @@ impl Report {
                             "node_pct" => r.cpu.node_pct = f(),
                             "thread_pct" => r.cpu.max_thread_pct = f(),
                             "softirq_pct" => r.cpu.softirq_pct = f(),
+                            "ok" => r.ok = u(),
+                            "ok_fast" => r.ok_fast = u(),
+                            "connects" => r.connects = u(),
                             _ => {}
                         }
                     }
                 }
                 "HIST" => r.hist = Histogram::from_base64(rest)?,
+                "OKHIST" => r.ok_hist = Histogram::from_base64(rest)?,
                 "LAG" => r.lag = Histogram::from_base64(rest)?,
                 "INTERVAL" => {
                     let (i, b) = rest.split_once(' ').ok_or("bad INTERVAL")?;
@@ -436,38 +523,86 @@ impl Report {
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Default)]
-struct LoopStats {
+pub(crate) struct LoopStats {
+    ok: u64,
+    ok_fast: u64,
+    ok_hist: Histogram,
+    pub(crate) connects: u64,
     hist: Histogram,
-    lag: Histogram,
+    pub(crate) lag: Histogram,
     received: u64,
     completed: u64,
     non2xx: u64,
-    conn_errors: u64,
+    pub(crate) conn_errors: u64,
     reconnects: u64,
-    incomplete: u64,
-    bytes_in: u64,
-    inflight: i64,
+    pub(crate) incomplete: u64,
+    pub(crate) bytes_in: u64,
+    pub(crate) inflight: i64,
     cur_interval: Option<(u64, Histogram)>,
     intervals: Vec<(u64, Histogram)>,
 }
 
 thread_local! {
-    static STATS: RefCell<LoopStats> = RefCell::new(LoopStats::default());
+    pub(crate) static STATS: RefCell<LoopStats> = RefCell::new(LoopStats::default());
+}
+
+impl LoopStats {
+    /// Adds this thread's statistics to a report.
+    pub(crate) fn add_to(mut self, rep: &mut Report) {
+        if let Some(c) = self.cur_interval.take() {
+            self.intervals.push(c);
+        }
+        rep.received += self.received;
+        rep.completed += self.completed;
+        rep.non2xx += self.non2xx;
+        rep.conn_errors += self.conn_errors;
+        rep.reconnects += self.reconnects;
+        rep.incomplete += self.incomplete;
+        rep.bytes_in += self.bytes_in;
+        rep.ok += self.ok;
+        rep.ok_fast += self.ok_fast;
+        rep.connects += self.connects;
+        rep.ok_hist.merge(&self.ok_hist);
+        rep.hist.merge(&self.hist);
+        rep.lag.merge(&self.lag);
+        for (i, h) in self.intervals {
+            match rep.intervals.iter_mut().find(|(j, _)| *j == i) {
+                Some((_, mine)) => mine.merge(&h),
+                None => rep.intervals.push((i, h)),
+            }
+        }
+        rep.intervals.sort_by_key(|x| x.0);
+    }
+
+    /// A request that was due in the window but never answered (open loop): charged with its
+    /// latency so far.
+    pub(crate) fn record_lost(&mut self, lat: u64) {
+        self.completed += 1;
+        self.hist.record(lat);
+    }
+
+    /// Takes the calling thread's statistics.
+    pub(crate) fn take() -> LoopStats {
+        STATS.with(|s| std::mem::take(&mut *s.borrow_mut()))
+    }
 }
 
 /// Window boundaries, shared by every connection (set when the run starts).
-struct Shared {
-    t0: AtomicU64,
-    mstart: AtomicU64,
-    mend: AtomicU64,
+pub(crate) struct Shared {
+    pub(crate) t0: AtomicU64,
+    pub(crate) mstart: AtomicU64,
+    pub(crate) mend: AtomicU64,
     hard_end: AtomicU64,
-    interval_ns: u64,
-    open: bool,
+    pub(crate) interval_ns: u64,
+    pub(crate) slo_ns: u64,
+    tls: Option<Arc<simoom_tls::ClientConfig>>,
+    sni: String,
+    pub(crate) open: bool,
     idle: bool,
-    depth: usize,
+    pub(crate) depth: usize,
     batch: bool,
     per_conn_rate: f64,
-    dist: Dist,
+    pub(crate) dist: Dist,
     req: Vec<u8>,
     head: bool,
     h2: Option<H2Req>,
@@ -485,18 +620,57 @@ struct H2Req {
 }
 
 impl Shared {
-    fn window(&self) -> (u64, u64) {
+    /// A window holder for the threaded engines (S5, HTTP/3).
+    pub(crate) fn for_engine(spec: &Spec) -> Shared {
+        Shared {
+            t0: AtomicU64::new(u64::MAX),
+            mstart: AtomicU64::new(u64::MAX),
+            mend: AtomicU64::new(u64::MAX),
+            hard_end: AtomicU64::new(u64::MAX),
+            interval_ns: spec.interval.as_nanos() as u64,
+            slo_ns: spec.slo_us * 1000,
+            tls: None,
+            sni: String::new(),
+            open: spec.rate > 0.0,
+            idle: false,
+            depth: spec.depth.max(1),
+            batch: false,
+            per_conn_rate: 0.0,
+            dist: spec.dist,
+            req: Vec::new(),
+            head: spec.method == "HEAD",
+            h2: None,
+            addr: spec.addr,
+            reconnect_tx: Mutex::new(None),
+            loops: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Sets the run's window: sending starts at `t0`, measuring at `t0 + warmup`.
+    pub(crate) fn set_window(&self, t0: u64, spec: &Spec) -> (u64, u64) {
+        let mstart = t0 + spec.warmup.as_nanos() as u64;
+        let mend = mstart + spec.duration.as_nanos() as u64;
+        self.t0.store(t0, Ordering::Relaxed);
+        self.mstart.store(mstart, Ordering::Relaxed);
+        self.mend.store(mend, Ordering::Relaxed);
+        self.hard_end.store(mend + spec.drain.as_nanos() as u64, Ordering::Relaxed);
+        (mstart, mend)
+    }
+
+    pub(crate) fn window(&self) -> (u64, u64) {
         (self.mstart.load(Ordering::Relaxed), self.mend.load(Ordering::Relaxed))
     }
 }
 
-/// Records one completed request.
-fn record(sh: &Shared, t_start: u64, now: u64, status: u16) {
+/// Records one completed request: `t_start` is its start time for latency (intended in open
+/// loop), `t_sent` when it was actually written.
+pub(crate) fn record(sh: &Shared, t_start: u64, t_sent: u64, now: u64, status: u16) {
     let (ms, me) = sh.window();
     STATS.with(|s| {
         let mut s = s.borrow_mut();
         s.inflight -= 1;
-        if !(200..300).contains(&status) {
+        let good = (200..300).contains(&status);
+        if !good {
             s.non2xx += 1;
         }
         if now >= ms && now < me {
@@ -506,6 +680,13 @@ fn record(sh: &Shared, t_start: u64, now: u64, status: u16) {
             let lat = now.saturating_sub(t_start);
             s.completed += 1;
             s.hist.record(lat);
+            if good && now < me {
+                s.ok += 1;
+                if lat <= sh.slo_ns {
+                    s.ok_fast += 1;
+                }
+                s.ok_hist.record(now.saturating_sub(t_sent));
+            }
             if sh.interval_ns > 0 {
                 let idx = (now.saturating_sub(ms)) / sh.interval_ns;
                 let rotate = !matches!(&s.cur_interval, Some((i, _)) if *i == idx);
@@ -521,7 +702,7 @@ fn record(sh: &Shared, t_start: u64, now: u64, status: u16) {
     });
 }
 
-fn sent(n: usize) {
+pub(crate) fn sent(n: usize) {
     STATS.with(|s| s.borrow_mut().inflight += n as i64);
 }
 
@@ -530,17 +711,17 @@ fn sent(n: usize) {
 // ---------------------------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
-struct Sched {
+pub(crate) struct Sched {
     base: u64,
     k: u64,
     interval: f64,
     poisson: bool,
-    next: u64,
+    pub(crate) next: u64,
     rng: u64,
 }
 
 impl Sched {
-    fn new(rate: f64, dist: Dist, seed: u64) -> Sched {
+    pub(crate) fn new(rate: f64, dist: Dist, seed: u64) -> Sched {
         let interval = if rate > 0.0 { 1e9 / rate } else { f64::INFINITY };
         Sched { base: 0, k: 0, interval, poisson: dist == Dist::Poisson, next: u64::MAX, rng: seed | 1 }
     }
@@ -554,7 +735,7 @@ impl Sched {
     }
 
     /// Starts at `t0` with a random phase inside the first interval (no synchronized bursts).
-    fn start(&mut self, t0: u64) {
+    pub(crate) fn start(&mut self, t0: u64) {
         if !self.interval.is_finite() {
             return;
         }
@@ -564,7 +745,7 @@ impl Sched {
         self.next = self.base;
     }
 
-    fn advance(&mut self) {
+    pub(crate) fn advance(&mut self) {
         if self.poisson {
             self.next += (-self.rand().ln() * self.interval) as u64;
         } else {
@@ -579,7 +760,7 @@ impl Sched {
 // ---------------------------------------------------------------------------------------------
 
 enum Msg {
-    /// Flush anything the protocol wants to send first (the HTTP/2 preface).
+    /// Flush anything the protocol wants to send first (the TLS ClientHello, the HTTP/2 preface).
     Hello,
     Start,
     /// Re-adopted after a reconnect: carry on with the schedule.
@@ -595,15 +776,60 @@ struct Reconnect {
 /// Protocol state of one connection.
 enum Wire {
     H1,
-    H2(Box<simoom_h2::Connection>, Vec<(u32, u64, u16)>),
+    /// HTTP/2 and its open streams: (id, start time, send time, status seen so far).
+    H2(Box<simoom_h2::Connection>, Vec<(u32, u64, u64, u16)>),
+}
+
+/// Builds the TLS client configuration of a run (roots from the PEM in `spec.ca`).
+pub fn tls_config(spec: &Spec, alpn: &[&[u8]], resume: bool) -> Result<Arc<simoom_tls::ClientConfig>, String> {
+    let mut roots = simoom_tls::x509::RootStore::empty();
+    let blocks = simoom_tls::pem::parse_pem(&spec.ca).map_err(|e| format!("--cacert: {e}"))?;
+    let mut n = 0;
+    for b in blocks.iter().filter(|b| b.label == "CERTIFICATE") {
+        roots.add_der(&b.der).map_err(|e| format!("--cacert: {e}"))?;
+        n += 1;
+    }
+    if n == 0 {
+        return Err("TLS needs --cacert FILE (PEM): the server certificate is always verified".into());
+    }
+    let mut cfg = simoom_tls::ClientConfig::new(roots).with_alpn(alpn);
+    if !resume {
+        cfg.sessions = None;
+    }
+    Ok(Arc::new(cfg))
+}
+
+/// Whether a run resumes TLS sessions (S7 resumed handshakes): the `X-Bench-Resume` pseudo
+/// header in the spec turns it on, so the agent protocol needs no new field.
+pub(crate) fn wants_resume(spec: &Spec) -> bool {
+    spec.headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("x-bench-resume") && v == "1")
+}
+
+/// The server name for TLS and QUIC: `--sni`, else the host part of the target.
+pub(crate) fn server_name(spec: &Spec) -> String {
+    if !spec.sni.is_empty() {
+        return spec.sni.clone();
+    }
+    match spec.host.rsplit_once(':') {
+        Some((h, _)) => h.trim_start_matches('[').trim_end_matches(']').to_string(),
+        None => spec.host.clone(),
+    }
 }
 
 struct Client {
     sh: Arc<Shared>,
     sched: Sched,
     wire: Wire,
-    /// Start times of outstanding requests (intended time in open loop, send time in closed).
-    inflight: VecDeque<u64>,
+    /// Outstanding requests: (start time for latency, time actually written). The start time is
+    /// the intended time in open loop and the send time in closed loop.
+    inflight: VecDeque<(u64, u64)>,
+    tls: Option<Box<simoom_tls::ClientConnection>>,
+    /// Decrypted bytes not yet framed (TLS only).
+    pt: Vec<u8>,
+    /// HTTP/1.1: body bytes of the current response still to come, and its status and close
+    /// flag (large bodies are counted as they stream).
+    body_left: usize,
+    pending: (u16, bool),
     timer_armed: bool,
     timer_at: u64,
     started: bool,
@@ -620,8 +846,23 @@ impl Client {
                 Wire::H2(Box::new(simoom_h2::Connection::client(cfg)), Vec::new())
             }
         };
+        let tls = sh.tls.as_ref().and_then(|cfg| simoom_tls::ClientConnection::new(cfg.clone(), &sh.sni).ok().map(Box::new));
         let sched = Sched::new(sh.per_conn_rate, sh.dist, seed);
-        Client { sh, sched, wire, inflight: VecDeque::new(), timer_armed: false, timer_at: 0, started: false, finished: false, dead: false }
+        Client {
+            sh,
+            sched,
+            wire,
+            inflight: VecDeque::new(),
+            tls,
+            pt: Vec::new(),
+            body_left: 0,
+            pending: (0, false),
+            timer_armed: false,
+            timer_at: 0,
+            started: false,
+            finished: false,
+            dead: false,
+        }
     }
 
     /// Fresh protocol state for a new connection, keeping the schedule.
@@ -632,13 +873,43 @@ impl Client {
         c
     }
 
+    /// Queues plaintext for the peer (encrypted when the connection uses TLS).
+    fn emit(&mut self, cx: &mut Ctx<'_>, bytes: &[u8]) {
+        match &mut self.tls {
+            None => {
+                let mut b = cx.buffer(bytes.len());
+                b.extend_from_slice(bytes);
+                cx.send(b);
+            }
+            Some(t) => {
+                if t.write_plaintext(bytes).is_err() {
+                    self.dead = true;
+                }
+            }
+        }
+    }
+
     fn flush(&mut self, cx: &mut Ctx<'_>) {
         if let Wire::H2(c, _) = &mut self.wire {
             let n = c.output().len();
             if n > 0 {
-                let mut b = cx.buffer(n);
-                b.extend_from_slice(c.output());
+                match &mut self.tls {
+                    None => {
+                        let mut b = cx.buffer(n);
+                        b.extend_from_slice(c.output());
+                        cx.send(b);
+                    }
+                    Some(t) => {
+                        let _ = t.write_plaintext(c.output());
+                    }
+                }
                 c.advance_output(n);
+            }
+        }
+        if let Some(t) = &mut self.tls {
+            if t.wants_write() {
+                let mut b = cx.buffer(t.tls_output().len());
+                t.write_tls_into(&mut b);
                 cx.send(b);
             }
         }
@@ -647,23 +918,24 @@ impl Client {
     /// Sends one request; `t` is its start time for latency. Returns false if the protocol
     /// cannot open another stream now.
     fn send_one(&mut self, cx: &mut Ctx<'_>, t: u64) -> bool {
+        let now = cx.now_ns();
         match &mut self.wire {
             Wire::H1 => {
-                let mut b = cx.buffer(self.sh.req.len());
-                b.extend_from_slice(&self.sh.req);
-                cx.send(b);
-                self.inflight.push_back(t);
+                let sh = self.sh.clone();
+                self.emit(cx, &sh.req);
+                self.inflight.push_back((t, now));
             }
             Wire::H2(c, streams) => {
                 let r = self.sh.h2.as_ref().unwrap();
                 let fields: Vec<(&[u8], &[u8])> = r.headers.iter().map(|(a, b)| (&a[..], &b[..])).collect();
-                match c.send_request(&r.method, b"http", &r.authority, &r.path, &fields, r.body.is_empty()) {
+                let scheme: &[u8] = if self.tls.is_some() { b"https" } else { b"http" };
+                match c.send_request(&r.method, scheme, &r.authority, &r.path, &fields, r.body.is_empty()) {
                     Ok(id) => {
                         if !r.body.is_empty() {
                             let _ = c.send_data(id, &r.body, true);
                         }
-                        streams.push((id, t, 0));
-                        self.inflight.push_back(t);
+                        streams.push((id, t, now, 0));
+                        self.inflight.push_back((t, now));
                     }
                     Err(_) => return false,
                 }
@@ -715,7 +987,7 @@ impl Client {
         STATS.with(|s| {
             let mut s = s.borrow_mut();
             // requests sent but not answered
-            for &t in &self.inflight {
+            for &(t, _) in &self.inflight {
                 s.inflight -= 1;
                 if t >= ms && t < me {
                     s.incomplete += 1;
@@ -747,6 +1019,109 @@ impl Client {
         STATS.with(|s| s.borrow_mut().conn_errors += 1);
         self.dead = true;
         cx.abort();
+    }
+
+    /// Frames plaintext responses. Returns (bytes consumed, the server closes, a protocol error).
+    fn on_plain(&mut self, now: u64, data: &[u8]) -> (usize, bool, bool) {
+        let mut pos = 0;
+        let mut close = false;
+        match &mut self.wire {
+            Wire::H1 => loop {
+                if self.body_left > 0 {
+                    let take = self.body_left.min(data.len() - pos);
+                    pos += take;
+                    self.body_left -= take;
+                    if self.body_left > 0 {
+                        break;
+                    }
+                    let (status, c) = self.pending;
+                    match self.inflight.pop_front() {
+                        Some((t, ts)) => record(&self.sh, t, ts, now, status),
+                        None => return (data.len(), false, true),
+                    }
+                    if c {
+                        close = true;
+                        break;
+                    }
+                    continue;
+                }
+                if pos >= data.len() {
+                    break;
+                }
+                match h1::frame_partial(&data[pos..], self.sh.head) {
+                    Ok(Some((f, left))) => {
+                        pos += f.len;
+                        if left > 0 {
+                            self.body_left = left;
+                            self.pending = (f.status, f.close);
+                            break;
+                        }
+                        match self.inflight.pop_front() {
+                            Some((t, ts)) => record(&self.sh, t, ts, now, f.status),
+                            None => return (data.len(), false, true),
+                        }
+                        if f.close {
+                            close = true;
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(_) => return (data.len(), false, true),
+                }
+            },
+            Wire::H2(c, streams) => {
+                let mut done: Vec<(u32, u16)> = Vec::new();
+                let mut status: Vec<(u32, u16)> = Vec::new();
+                let mut release: Vec<(u32, usize)> = Vec::new();
+                let mut closed = false;
+                pos = c.recv(data, now / 1_000_000, &mut |ev| match ev {
+                    simoom_h2::Event::Headers { stream, headers, end_stream } => {
+                        let st = headers.status().unwrap_or(0);
+                        if st >= 200 {
+                            if end_stream {
+                                done.push((stream, st));
+                            } else {
+                                status.push((stream, st));
+                            }
+                        }
+                    }
+                    simoom_h2::Event::Data { stream, data, end_stream } => {
+                        release.push((stream, data.len()));
+                        if end_stream {
+                            let st = status.iter().find(|x| x.0 == stream).map(|x| x.1).unwrap_or(0);
+                            done.push((stream, st));
+                        }
+                    }
+                    simoom_h2::Event::Trailers { stream, .. } => done.push((stream, 200)),
+                    simoom_h2::Event::Reset { stream, .. } => done.push((stream, 0)),
+                    simoom_h2::Event::Closed { .. } | simoom_h2::Event::GoAway { .. } => closed = true,
+                    _ => {}
+                });
+                for (s, n) in release {
+                    c.release(s, n);
+                }
+                for (s, st) in &status {
+                    // a status whose stream did not end in this batch is kept on the stream
+                    if let Some(e) = streams.iter_mut().find(|x| x.0 == *s) {
+                        e.3 = *st;
+                    }
+                }
+                for (s, st) in done {
+                    if let Some(i) = streams.iter().position(|x| x.0 == s) {
+                        let (_, t, ts, kept) = streams.swap_remove(i);
+                        let st = if st == 0 { kept } else { st };
+                        if let Some(j) = self.inflight.iter().position(|&x| x.0 == t && x.1 == ts) {
+                            self.inflight.remove(j);
+                        }
+                        record(&self.sh, t, ts, now, st);
+                    }
+                }
+                if closed {
+                    close = true;
+                }
+            }
+        }
+        (pos, close, false)
     }
 }
 
@@ -795,83 +1170,44 @@ impl Connection for Client {
     fn on_data(&mut self, cx: &mut Ctx<'_>, data: &[u8]) -> usize {
         let now = cx.now_ns();
         STATS.with(|s| s.borrow_mut().bytes_in += data.len() as u64);
-        let mut pos = 0;
-        let mut close = false;
-        match &mut self.wire {
-            Wire::H1 => loop {
-                match h1::frame(&data[pos..], self.sh.head) {
-                    Ok(Some(f)) => {
-                        pos += f.len;
-                        match self.inflight.pop_front() {
-                            Some(t) => record(&self.sh, t, now, f.status),
-                            None => {
-                                self.fail(cx);
-                                return data.len();
-                            }
-                        }
-                        if f.close {
-                            close = true;
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(_) => {
-                        self.fail(cx);
-                        return data.len();
-                    }
+        let (consumed, close, err) = if let Some(t) = &mut self.tls {
+            // decrypt everything offered, then frame the plaintext
+            let mut off = 0;
+            let mut bad = false;
+            while off < data.len() {
+                let n = t.read_tls(&data[off..]);
+                off += n;
+                if t.process_new_packets().is_err() {
+                    bad = true;
+                    break;
                 }
-            },
-            Wire::H2(c, streams) => {
-                let mut done: Vec<(u32, u16)> = Vec::new();
-                let mut status: Vec<(u32, u16)> = Vec::new();
-                let mut release: Vec<(u32, usize)> = Vec::new();
-                let mut closed = false;
-                pos = c.recv(data, now / 1_000_000, &mut |ev| match ev {
-                    simoom_h2::Event::Headers { stream, headers, end_stream } => {
-                        let st = headers.status().unwrap_or(0);
-                        if st >= 200 {
-                            if end_stream {
-                                done.push((stream, st));
-                            } else {
-                                status.push((stream, st));
-                            }
-                        }
-                    }
-                    simoom_h2::Event::Data { stream, data, end_stream } => {
-                        release.push((stream, data.len()));
-                        if end_stream {
-                            let st = status.iter().find(|x| x.0 == stream).map(|x| x.1).unwrap_or(0);
-                            done.push((stream, st));
-                        }
-                    }
-                    simoom_h2::Event::Trailers { stream, .. } => done.push((stream, 200)),
-                    simoom_h2::Event::Reset { stream, .. } => done.push((stream, 0)),
-                    simoom_h2::Event::Closed { .. } | simoom_h2::Event::GoAway { .. } => closed = true,
-                    _ => {}
-                });
-                for (s, n) in release {
-                    c.release(s, n);
+                let p = t.plaintext();
+                if !p.is_empty() {
+                    self.pt.extend_from_slice(p);
+                    let k = p.len();
+                    t.consume_plaintext(k);
                 }
-                for (s, st) in &status {
-                    // a status whose stream did not end in this batch is kept on the stream
-                    if let Some(e) = streams.iter_mut().find(|x| x.0 == *s) {
-                        e.2 = *st;
-                    }
-                }
-                for (s, st) in done {
-                    if let Some(i) = streams.iter().position(|x| x.0 == s) {
-                        let (_, t, kept) = streams.swap_remove(i);
-                        let st = if st == 0 { kept } else { st };
-                        if let Some(j) = self.inflight.iter().position(|&x| x == t) {
-                            self.inflight.remove(j);
-                        }
-                        record(&self.sh, t, now, st);
-                    }
-                }
-                if closed {
-                    close = true;
+                if n == 0 && t.plaintext().is_empty() {
+                    break;
                 }
             }
+            let peer_closed = t.peer_has_closed();
+            if bad {
+                (data.len(), false, true)
+            } else {
+                let buf = std::mem::take(&mut self.pt);
+                let (used, close, err) = self.on_plain(now, &buf);
+                let mut buf = buf;
+                buf.drain(..used.min(buf.len()));
+                self.pt = buf;
+                (off, close || peer_closed, err)
+            }
+        } else {
+            self.on_plain(now, data)
+        };
+        if err {
+            self.fail(cx);
+            return data.len();
         }
         if close {
             self.flush(cx);
@@ -880,7 +1216,7 @@ impl Connection for Client {
         }
         self.pump(cx);
         self.flush(cx);
-        pos
+        consumed
     }
 
     fn on_close(&mut self, reason: CloseReason) {
@@ -918,8 +1254,8 @@ thread_local! {
 // Running
 // ---------------------------------------------------------------------------------------------
 
-/// A prepared run: the runtime is up and the connections are open, waiting for [`Prepared::go`].
-pub struct Prepared {
+/// The event-driven engine's prepared run: the runtime is up and the connections are open.
+struct RtPrepared {
     spec: Spec,
     rt: RuntimeHandle,
     sh: Arc<Shared>,
@@ -940,21 +1276,73 @@ fn clock_now() -> u64 {
     simoom_sys::time::now_ns()
 }
 
-/// Opens the connections. Fails only if no connection could be opened.
+/// A run prepared by one of the threaded engines (S5 connection per request, HTTP/3).
+pub(crate) trait Engine: Send {
+    fn connected(&self) -> usize;
+    fn go(self: Box<Self>, delay: Duration) -> Report;
+}
+
+/// A prepared run: the connections are open (or the workers ready), waiting for [`Prepared::go`].
+pub struct Prepared {
+    inner: Inner,
+}
+
+enum Inner {
+    Rt(RtPrepared),
+    Engine(Box<dyn Engine>),
+}
+
+impl Prepared {
+    pub fn connected(&self) -> usize {
+        match &self.inner {
+            Inner::Rt(p) => p.connected(),
+            Inner::Engine(e) => e.connected(),
+        }
+    }
+
+    /// Starts sending `delay` from now, runs warm-up, window and drain, and reports.
+    pub fn go(self, delay: Duration) -> Report {
+        match self.inner {
+            Inner::Rt(p) => p.go(delay),
+            Inner::Engine(e) => e.go(delay),
+        }
+    }
+}
+
+/// Prepares a run on the engine its spec needs.
 pub fn prepare(spec: Spec) -> Result<Prepared, String> {
+    let inner = if spec.proto == Proto::H3 {
+        Inner::Engine(crate::h3load::prepare(spec)?)
+    } else if spec.new_conn {
+        Inner::Engine(crate::newconn::prepare(spec)?)
+    } else {
+        Inner::Rt(prepare_rt(spec)?)
+    };
+    Ok(Prepared { inner })
+}
+
+/// Opens the connections. Fails only if no connection could be opened.
+fn prepare_rt(spec: Spec) -> Result<RtPrepared, String> {
     let threads = if spec.threads == 0 { std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) } else { spec.threads };
     let conns = spec.conns.max(1);
     let open = spec.rate > 0.0 && !spec.idle;
     let depth = if spec.idle { 1 } else { spec.depth.max(1) };
     let h2 = match spec.proto {
-        Proto::H1 => None,
-        Proto::H2c => {
-            let mut headers: Vec<(Vec<u8>, Vec<u8>)> = spec.headers.iter().map(|(k, v)| (k.to_ascii_lowercase().into_bytes(), v.clone().into_bytes())).collect();
+        Proto::H1 | Proto::H3 => None,
+        Proto::H2c | Proto::H2 => {
+            let mut headers: Vec<(Vec<u8>, Vec<u8>)> = request_headers(&spec).iter().map(|(k, v)| (k.to_ascii_lowercase().into_bytes(), v.clone().into_bytes())).collect();
             if !spec.body.is_empty() {
                 headers.push((b"content-length".to_vec(), spec.body.len().to_string().into_bytes()));
             }
             Some(H2Req { method: spec.method.clone().into_bytes(), authority: spec.host.clone().into_bytes(), path: spec.path.clone().into_bytes(), headers, body: spec.body.clone() })
         }
+    };
+    let use_tls = spec.tls || spec.proto == Proto::H2;
+    let tls = if use_tls {
+        let alpn: &[&[u8]] = if spec.proto.is_h2() { &[b"h2"] } else { &[b"http/1.1"] };
+        Some(tls_config(&spec, alpn, wants_resume(&spec))?)
+    } else {
+        None
     };
     let sh = Arc::new(Shared {
         t0: AtomicU64::new(u64::MAX),
@@ -962,13 +1350,16 @@ pub fn prepare(spec: Spec) -> Result<Prepared, String> {
         mend: AtomicU64::new(u64::MAX),
         hard_end: AtomicU64::new(u64::MAX),
         interval_ns: spec.interval.as_nanos() as u64,
+        slo_ns: spec.slo_us * 1000,
+        tls,
+        sni: server_name(&spec),
         open,
         idle: spec.idle,
         depth,
         batch: spec.batch,
         per_conn_rate: if open { spec.rate / conns as f64 } else { 0.0 },
         dist: spec.dist,
-        req: h1::build_request(&spec.method, &spec.path, &spec.host, &spec.headers, &spec.body),
+        req: h1::build_request(&spec.method, &spec.path, &spec.host, &request_headers(&spec), &spec.body),
         head: spec.method == "HEAD",
         h2,
         addr: spec.addr,
@@ -987,7 +1378,7 @@ pub fn prepare(spec: Spec) -> Result<Prepared, String> {
             c.thread_name = "gen".into();
             c.driver.backend = backend;
             c.timer_tick = tick;
-            c.max_input = 1 << 20;
+            c.max_input = 4 << 20;
             c.driver.uring_fixed_files = false;
             // an empty list means: do not pin
             if let Some(cpus) = cpus.filter(|c| !c.is_empty()) {
@@ -1099,7 +1490,7 @@ pub fn prepare(spec: Spec) -> Result<Prepared, String> {
             });
         }
     });
-    Ok(Prepared { spec, rt, sh, handles, connect_failed, reconnect_thread: Some(reconnect_thread) })
+    Ok(RtPrepared { spec, rt, sh, handles, connect_failed, reconnect_thread: Some(reconnect_thread) })
 }
 
 static STATS_FAILS: AtomicU64 = AtomicU64::new(0);
@@ -1115,22 +1506,21 @@ fn simoom_sys_cpus() -> Vec<usize> {
     simoom_sys::cpu::allowed_cpus()
 }
 
-impl Prepared {
-    pub fn connected(&self) -> usize {
+/// The request headers sent on the wire (the generator's own pseudo headers removed).
+pub(crate) fn request_headers(spec: &Spec) -> Vec<(String, String)> {
+    spec.headers.iter().filter(|(k, _)| !k.eq_ignore_ascii_case("x-bench-resume")).cloned().collect()
+}
+
+impl RtPrepared {
+    fn connected(&self) -> usize {
         self.handles.len()
     }
 
-    /// Starts sending `delay` from now, runs warm-up, window and drain, and reports.
-    pub fn go(mut self, delay: Duration) -> Report {
+    fn go(mut self, delay: Duration) -> Report {
         let spec = self.spec.clone();
         let now = runtime_now(&self.rt);
         let t0 = now + delay.as_nanos() as u64;
-        let mstart = t0 + spec.warmup.as_nanos() as u64;
-        let mend = mstart + spec.duration.as_nanos() as u64;
-        self.sh.t0.store(t0, Ordering::Relaxed);
-        self.sh.mstart.store(mstart, Ordering::Relaxed);
-        self.sh.mend.store(mend, Ordering::Relaxed);
-        self.sh.hard_end.store(mend + spec.drain.as_nanos() as u64, Ordering::Relaxed);
+        let (mstart, mend) = self.sh.set_window(t0, &spec);
         for h in &self.handles {
             h.send(Box::new(Msg::Start));
         }
@@ -1186,11 +1576,7 @@ impl Prepared {
         for l in self.rt.loops() {
             let tx = tx.clone();
             l.run(move |_| {
-                let mut s = STATS.with(|s| std::mem::take(&mut *s.borrow_mut()));
-                if let Some(c) = s.cur_interval.take() {
-                    s.intervals.push(c);
-                }
-                let _ = tx.send(s);
+                let _ = tx.send(LoopStats::take());
             });
         }
         drop(tx);
@@ -1207,23 +1593,8 @@ impl Prepared {
             ..Report::default()
         };
         for s in rx.iter() {
-            rep.received += s.received;
-            rep.completed += s.completed;
-            rep.non2xx += s.non2xx;
-            rep.conn_errors += s.conn_errors;
-            rep.reconnects += s.reconnects;
-            rep.incomplete += s.incomplete;
-            rep.bytes_in += s.bytes_in;
-            rep.hist.merge(&s.hist);
-            rep.lag.merge(&s.lag);
-            for (i, h) in s.intervals {
-                match rep.intervals.iter_mut().find(|(j, _)| *j == i) {
-                    Some((_, mine)) => mine.merge(&h),
-                    None => rep.intervals.push((i, h)),
-                }
-            }
+            s.add_to(&mut rep);
         }
-        rep.intervals.sort_by_key(|x| x.0);
         rep.conn_errors += STATS_FAILS.swap(0, Ordering::Relaxed);
         self.rt.stop(Duration::from_millis(200));
         self.rt.join();

@@ -90,3 +90,11 @@ dispatch() {
 
 # The locked version of a crate: lock_version Cargo.lock NAME
 lock_version() { awk -v n="$2" '$1=="name" && $3=="\""n"\"" {getline; gsub(/"/,"",$3); print n" "$3; exit}' "$1"; }
+
+# Fixed bodies for S4 (64 KiB and 1 MiB of 'x'), for the servers that serve them from files.
+ensure_files() {
+  [ -f "$OPT/files/1m" ] && return 0
+  mkdir -p "$OPT/files"
+  head -c 65536 /dev/zero | tr '\0' x > "$OPT/files/64k"
+  head -c 1048576 /dev/zero | tr '\0' x > "$OPT/files/1m"
+}

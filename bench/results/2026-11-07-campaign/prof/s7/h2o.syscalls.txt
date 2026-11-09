@@ -1,0 +1,19 @@
+
+
+@[tracepoint:syscalls:sys_enter_mmap]: 4
+@[tracepoint:syscalls:sys_enter_poll]: 7872
+@[tracepoint:syscalls:sys_enter_futex]: 10241
+@[tracepoint:syscalls:sys_enter_writev]: 34365
+@[tracepoint:syscalls:sys_enter_setsockopt]: 34483
+@[tracepoint:syscalls:sys_enter_clock_nanosleep]: 34656
+@[tracepoint:syscalls:sys_enter_newfstat]: 50976
+@[tracepoint:syscalls:sys_enter_openat]: 58959
+@[tracepoint:syscalls:sys_enter_accept4]: 63961
+@[tracepoint:syscalls:sys_enter_close]: 67807
+@[tracepoint:syscalls:sys_enter_pread64]: 93856
+@[tracepoint:syscalls:sys_enter_fcntl]: 103878
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 153874
+@[tracepoint:syscalls:sys_enter_epoll_ctl]: 191712
+@[tracepoint:syscalls:sys_enter_getpid]: 250060
+@[tracepoint:syscalls:sys_enter_sendmsg]: 284852
+@[tracepoint:syscalls:sys_enter_read]: 287680

@@ -1,0 +1,6 @@
+
+
+@[tracepoint:syscalls:sys_enter_write]: 122
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 427672
+@[tracepoint:syscalls:sys_enter_writev]: 1009441
+@[tracepoint:syscalls:sys_enter_recvfrom]: 2366246

@@ -1,0 +1,14 @@
+
+
+@[tracepoint:syscalls:sys_enter_futex]: 7282
+@[tracepoint:syscalls:sys_enter_openat]: 116546
+@[tracepoint:syscalls:sys_enter_newfstat]: 116566
+@[tracepoint:syscalls:sys_enter_setsockopt]: 138054
+@[tracepoint:syscalls:sys_enter_sendmsg]: 138137
+@[tracepoint:syscalls:sys_enter_sendfile64]: 138142
+@[tracepoint:syscalls:sys_enter_read]: 138294
+@[tracepoint:syscalls:sys_enter_getpid]: 138734
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 214603
+@[tracepoint:syscalls:sys_enter_accept4]: 222671
+@[tracepoint:syscalls:sys_enter_close]: 232403
+@[tracepoint:syscalls:sys_enter_epoll_ctl]: 257300

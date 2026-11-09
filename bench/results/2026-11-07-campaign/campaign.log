@@ -1,0 +1,298 @@
+==> 14:38:02 campaign start: rounds [1 2 3], servers [simoom simoom-uring simoom-builder simoom-builder-uring nginx h2o haproxy envoy caddy hyper axum actix may-minihttp xitca ntex go-nethttp fasthttp netty vertx uws kestrel cameleer]
+==> 14:38:04 round 1 on srvA: simoom (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 14:38:22   simoom S1
+==> 14:44:57   simoom S3
+==> 14:46:22   simoom S4
+==> 14:48:23   simoom S5
+==> 14:49:47   simoom S6
+==> 14:51:23   simoom S7
+==> 14:53:25   simoom S8
+==> 14:54:50   simoom S9
+==> 14:55:26   simoom S10
+==> 14:57:19   simoom H3
+==> 14:59:26   simoom COLD
+==> 14:59:28 round 1 on srvA: simoom-uring (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 14:59:46   simoom-uring S1
+==> 15:06:29   simoom-uring S3
+==> 15:07:53   simoom-uring S4
+==> 15:09:54   simoom-uring S5
+==> 15:11:18   simoom-uring S6
+==> 15:13:08   simoom-uring S7
+==> 15:15:09   simoom-uring S8
+==> 15:15:49   simoom-uring S9
+==> 15:16:25   simoom-uring S10
+==> 15:18:17   simoom-uring H3
+==> 15:20:22   simoom-uring COLD
+==> 15:20:25 round 1 on srvA: simoom-builder (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 15:20:43   simoom-builder S1
+==> 15:27:25   simoom-builder S3
+==> 15:28:50   simoom-builder S4
+==> 15:30:52   simoom-builder S5
+==> 15:32:16   simoom-builder S6
+==> 15:33:52   simoom-builder S7
+==> 15:35:54   simoom-builder S8
+==> 15:36:34   simoom-builder S9
+==> 15:37:11   simoom-builder S10
+==> 15:39:03   simoom-builder H3
+==> 15:41:12   simoom-builder COLD
+==> 15:41:14 round 1 on srvA: simoom-builder-uring (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 15:41:32   simoom-builder-uring S1
+==> 15:48:16   simoom-builder-uring S3
+==> 15:49:41   simoom-builder-uring S4
+==> 15:51:42   simoom-builder-uring S5
+==> 15:53:06   simoom-builder-uring S6
+==> 15:54:56   simoom-builder-uring S7
+==> 15:56:59   simoom-builder-uring S8
+==> 15:58:23   simoom-builder-uring S9
+==> 15:59:00   simoom-builder-uring S10
+==> 16:00:54   simoom-builder-uring H3
+==> 16:03:04   simoom-builder-uring COLD
+==> 16:03:06 round 1 on srvA: nginx (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 16:03:24   nginx S1
+==> 16:10:13   nginx S3
+==> 16:10:13   nginx S4
+==> 16:12:15   nginx S5
+==> 16:13:39   nginx S6
+==> 16:15:14   nginx S7
+==> 16:17:17   nginx S8
+==> 16:18:42   nginx S9
+==> 16:19:19   nginx S10
+==> 16:21:12   nginx H3
+==> 16:21:12   nginx COLD
+==> 16:21:14 round 1 on srvA: h2o (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 16:21:32   h2o S1
+==> 16:28:15   h2o S3
+==> 16:28:15   h2o S4
+==> 16:30:17   h2o S5
+==> 16:31:41   h2o S6
+==> 16:34:37   h2o S7
+==> 16:36:41   h2o S8
+==> 16:38:05   h2o S9
+==> 16:38:42   h2o S10
+==> 16:40:42   h2o H3
+==> 16:42:46   h2o COLD
+==> 16:43:17 round 1 on srvA: haproxy (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 16:43:35   haproxy S1
+==> 16:50:20   haproxy S3
+==> 16:50:20   haproxy S4
+==> 16:50:20   haproxy S5
+==> 16:51:45   haproxy S6
+==> 16:53:20   haproxy S7
+==> 16:55:24   haproxy S8
+==> 16:56:49   haproxy S9
+==> 16:57:26   haproxy S10
+==> 16:59:19   haproxy H3
+==> 16:59:19   haproxy COLD
+==> 16:59:23 round 1 on srvA: envoy (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 16:59:41   envoy S1
+==> 17:06:24   envoy S3
+==> 17:06:24   envoy S4
+==> 17:06:24   envoy S5
+==> 17:07:47   envoy S6
+==> 17:09:24   envoy S7
+==> 17:09:24   envoy S8
+==> 17:10:48   envoy S9
+==> 17:11:25   envoy S10
+==> 17:13:18   envoy H3
+==> 17:13:18   envoy COLD
+==> 17:13:21 round 1 on srvA: caddy (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 17:13:39   caddy S1
+==> 17:20:19   caddy S3
+==> 17:20:19   caddy S4
+==> 17:22:20   caddy S5
+==> 17:23:44   caddy S6
+==> 17:25:20   caddy S7
+==> 17:27:22   caddy S8
+==> 17:28:46   caddy S9
+==> 17:29:21   caddy S10
+==> 17:31:15   caddy H3
+==> 17:33:17   caddy COLD
+==> 17:33:49 round 1 on srvA: hyper (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 17:34:07   hyper S1
+==> 17:40:47   hyper S3
+==> 17:42:14   hyper S4
+==> 17:43:57   hyper S5
+==> 17:45:22   hyper S6
+==> 17:47:06   hyper S7
+==> 17:47:06   hyper S8
+==> 17:48:30   hyper S9
+==> 17:49:09   hyper S10
+==> 17:51:02   hyper H3
+==> 17:51:02   hyper COLD
+==> 17:51:04 round 1 on srvA: axum (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 17:51:22   axum S1
+==> 17:58:11   axum S3
+==> 17:59:35   axum S4
+==> 18:01:19   axum S5
+==> 18:02:00   axum S6
+==> 18:03:46   axum S7
+==> 18:03:46   axum S8
+==> 18:05:10   axum S9
+==> 18:05:49   axum S10
+==> 18:07:45   axum H3
+==> 18:07:45   axum COLD
+==> 18:07:47 round 1 on srvA: actix (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 18:08:05   actix S1
+==> 18:14:49   actix S3
+==> 18:16:15   actix S4
+==> 18:17:58   actix S5
+==> 18:19:24   actix S6
+==> 18:21:31   actix S7
+==> 18:21:31   actix S8
+==> 18:22:55   actix S9
+==> 18:23:32   actix S10
+==> 18:25:25   actix H3
+==> 18:25:25   actix COLD
+==> 18:25:27 round 1 on srvA: may-minihttp (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 18:25:45   may-minihttp S1
+==> 18:32:22   may-minihttp S3
+==> 18:33:47   may-minihttp S4
+==> 18:33:47   may-minihttp S5
+==> 18:35:13   may-minihttp S6
+==> 18:36:57   may-minihttp S7
+==> 18:36:57   may-minihttp S8
+==> 18:36:57   may-minihttp S9
+==> 18:37:34   may-minihttp S10
+==> 18:39:30   may-minihttp H3
+==> 18:39:30   may-minihttp COLD
+==> 18:39:31 round 1 on srvA: xitca (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 18:39:49   xitca S1
+==> 18:46:34   xitca S3
+==> 18:46:34   xitca S4
+==> 18:46:34   xitca S5
+==> 18:47:58   xitca S6
+==> 18:49:37   xitca S7
+==> 18:49:37   xitca S8
+==> 18:49:37   xitca S9
+==> 18:50:15   xitca S10
+==> 18:52:07   xitca H3
+==> 18:52:07   xitca COLD
+==> 18:52:09 round 1 on srvA: ntex (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 18:52:27   ntex S1
+==> 18:59:12   ntex S3
+==> 19:00:38   ntex S4
+==> 19:00:38   ntex S5
+==> 19:02:02   ntex S6
+==> 19:03:35   ntex S7
+==> 19:03:35   ntex S8
+==> 19:03:35   ntex S9
+==> 19:04:13   ntex S10
+==> 19:06:05   ntex H3
+==> 19:06:05   ntex COLD
+==> 19:06:07 round 1 on srvA: go-nethttp (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 19:06:25   go-nethttp S1
+==> 19:13:05   go-nethttp S3
+==> 19:14:29   go-nethttp S4
+==> 19:16:31   go-nethttp S5
+==> 19:17:55   go-nethttp S6
+==> 19:19:30   go-nethttp S7
+==> 19:21:32   go-nethttp S8
+==> 19:22:56   go-nethttp S9
+==> 19:23:31   go-nethttp S10
+==> 19:25:25   go-nethttp H3
+==> 19:25:25   go-nethttp COLD
+==> 19:25:27 round 1 on srvA: fasthttp (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 19:25:45   fasthttp S1
+==> 19:32:25   fasthttp S3
+==> 19:33:49   fasthttp S4
+==> 19:33:49   fasthttp S5
+==> 19:35:13   fasthttp S6
+==> 19:36:49   fasthttp S7
+==> 19:36:49   fasthttp S8
+==> 19:36:49   fasthttp S9
+==> 19:37:26   fasthttp S10
+==> 19:39:20   fasthttp H3
+==> 19:39:20   fasthttp COLD
+==> 19:39:21 round 1 on srvA: netty (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 19:39:40   netty S1
+==> 19:46:13   netty S3
+==> 19:47:38   netty S4
+==> 19:47:38   netty S5
+==> 19:49:03   netty S6
+==> 19:50:41   netty S7
+==> 19:50:41   netty S8
+==> 19:50:41   netty S9
+==> 19:51:19   netty S10
+==> 19:53:13   netty H3
+==> 19:53:13   netty COLD
+==> 19:53:15 round 1 on srvA: vertx (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 19:53:34   vertx S1
+==> 20:00:21   vertx S3
+==> 20:01:47   vertx S4
+==> 20:01:47   vertx S5
+==> 20:03:13   vertx S6
+==> 20:04:52   vertx S7
+==> 20:04:52   vertx S8
+==> 20:06:16   vertx S9
+==> 20:06:53   vertx S10
+==> 20:08:47   vertx H3
+==> 20:08:47   vertx COLD
+==> 20:08:50 round 1 on srvA: uws (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 20:09:08   uws S1
+==> 20:15:51   uws S3
+==> 20:17:16   uws S4
+==> 20:17:16   uws S5
+==> 20:18:40   uws S6
+==> 20:20:22   uws S7
+==> 20:20:22   uws S8
+==> 20:20:22   uws S9
+==> 20:20:59   uws S10
+==> 20:22:52   uws H3
+==> 20:22:52   uws COLD
+==> 20:22:55 round 1 on srvA: kestrel (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 20:23:15   kestrel S1
+==> 20:30:01   kestrel S3
+==> 20:31:25   kestrel S4
+==> 20:31:25   kestrel S5
+==> 20:32:50   kestrel S6
+==> 20:34:44   kestrel S7
+==> 20:34:44   kestrel S8
+==> 20:36:08   kestrel S9
+==> 20:36:44   kestrel S10
+==> 20:38:43   kestrel H3
+==> 20:38:43   kestrel COLD
+==> 20:38:46 round 1 on srvA: cameleer (S1 S3 S4 S5 S6 S7 S8 S9 S10 H3 COLD)
+==> 20:39:05   cameleer S1
+==> 20:45:53   cameleer S3
+==> 20:47:19   cameleer S4
+==> 20:47:19   cameleer S5
+==> 20:48:42   cameleer S6
+==> 20:50:29   cameleer S7
+==> 20:50:29   cameleer S8
+==> 20:50:29   cameleer S9
+==> 20:51:07   cameleer S10
+==> 20:53:02   cameleer H3
+==> 20:53:02   cameleer COLD
+==> 20:53:07 round 2 on srvB: simoom (S1 S5)
+==> 20:53:25   simoom S1
+==> 20:59:59   simoom S5
+==> 21:01:24 round 2 on srvB: simoom-uring (S1 S5)
+==> 21:01:42   simoom-uring S1
+==> 21:08:25   simoom-uring S5
+==> 21:09:50 round 2 on srvB: simoom-builder (S1 S5)
+==> 21:10:08   simoom-builder S1
+==> 21:16:51   simoom-builder S5
+==> 21:18:15 round 2 on srvB: simoom-builder-uring (S1 S5)
+==> 21:18:33   simoom-builder-uring S1
+==> 21:25:14   simoom-builder-uring S5
+==> 21:26:39 round 2 on srvB: nginx (S1 S5)
+==> 21:26:57   nginx S1
+==> 21:33:45   nginx S5
+==> 21:35:13 round 3 on srvA: simoom (S1 S5)
+==> 21:35:31   simoom S1
+==> 21:42:06   simoom S5
+==> 21:43:30 round 3 on srvA: simoom-uring (S1 S5)
+==> 21:43:48   simoom-uring S1
+==> 21:50:31   simoom-uring S5
+==> 21:51:56 round 3 on srvA: simoom-builder (S1 S5)
+==> 21:52:14   simoom-builder S1
+==> 21:58:56   simoom-builder S5
+==> 22:00:20 round 3 on srvA: simoom-builder-uring (S1 S5)
+==> 22:00:39   simoom-builder-uring S1
+==> 22:07:21   simoom-builder-uring S5
+==> 22:08:45 round 3 on srvA: nginx (S1 S5)
+==> 22:09:03   nginx S1
+==> 22:15:48   nginx S5
+==> 22:17:14 profiles: simoom-prof nginx hyper xitca h2o 
+==> 22:34:05 campaign done
+CAMPAIGN DONE 2026-11-07T22:34:05Z

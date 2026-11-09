@@ -1,0 +1,46 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 57K of event 'cycles:P'
+# Event count (approx.): 26681814321
+#
+# Overhead  Shared Object                                                Symbol                                                           IPC   [IPC Coverage]
+# ........  ...........................................................  ...............................................................  ....................
+#
+     1.32%  [kernel.kallsyms]                                            [k] _raw_spin_lock                                               -      -            
+     1.13%  [kernel.kallsyms]                                            [k] trace_call_bpf                                               -      -            
+     1.10%  [kernel.kallsyms]                                            [k] iowrite16                                                    -      -            
+     0.99%  [kernel.kallsyms]                                            [k] perf_syscall_enter                                           -      -            
+     0.95%  [kernel.kallsyms]                                            [k] kmem_cache_alloc                                             -      -            
+     0.87%  [kernel.kallsyms]                                            [k] native_queued_spin_lock_slowpath                             -      -            
+     0.86%  [kernel.kallsyms]                                            [k] __memcg_slab_post_alloc_hook                                 -      -            
+     0.84%  [kernel.kallsyms]                                            [k] kmem_cache_free                                              -      -            
+     0.84%  [kernel.kallsyms]                                            [k] memset_orig                                                  -      -            
+     0.83%  [kernel.kallsyms]                                            [k] __tcp_transmit_skb                                           -      -            
+     0.77%  nginx                                                        [.] ngx_event_accept                                             -      -            
+     0.69%  [kernel.kallsyms]                                            [k] clear_bhb_loop                                               -      -            
+     0.66%  [kernel.kallsyms]                                            [k] __irqentry_text_start                                        -      -            
+     0.65%  [kernel.kallsyms]                                            [k] lookup_nulls_elem_raw                                        -      -            
+     0.65%  [kernel.kallsyms]                                            [k] __fdget                                                      -      -            
+     0.64%  [kernel.kallsyms]                                            [k] __memcg_slab_free_hook                                       -      -            
+     0.62%  nginx                                                        [.] ngx_http_parse_request_line                                  -      -            
+     0.62%  [kernel.kallsyms]                                            [k] pvclock_clocksource_read_nowd                                -      -            
+     0.60%  [kernel.kallsyms]                                            [k] __rcu_read_lock                                              -      -            
+     0.56%  [kernel.kallsyms]                                            [k] __rcu_read_unlock                                            -      -            
+     0.54%  [kernel.kallsyms]                                            [k] kmem_cache_alloc_node                                        -      -            
+     0.50%  [kernel.kallsyms]                                            [k] _raw_spin_lock_bh                                            -      -            
+     0.49%  [kernel.kallsyms]                                            [k] kmem_cache_alloc_lru                                         -      -            
+     0.49%  [kernel.kallsyms]                                            [k] x64_sys_call                                                 -      -            
+     0.49%  [kernel.kallsyms]                                            [k] virtqueue_add_split                                          -      -            
+     0.47%  [kernel.kallsyms]                                            [k] virtqueue_get_buf_ctx_split                                  -      -            
+     0.47%  [kernel.kallsyms]                                            [k] clear_page_erms                                              -      -            
+     0.46%  [kernel.kallsyms]                                            [k] ip_finish_output2                                            -      -            
+     0.45%  libc.so.6                                                    [.] malloc                                                       -      -            
+     0.43%  nginx                                                        [.] ngx_time_update                                              -      -            
+     0.43%  nginx                                                        [.] ngx_http_init_connection                                     -      -            
+     0.40%  [kernel.kallsyms]                                            [k] bpf_get_current_cgroup_id                                    -      -            
+#
+# (Cannot load tips.txt file, please install perf!)
+#

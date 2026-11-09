@@ -39,7 +39,12 @@ pub fn measure(addr: SocketAddr, path: &str, cmd: &[String], repeat: usize, time
             std::thread::sleep(Duration::from_millis(20));
         }
         let t = Instant::now();
-        let mut child = Command::new(prog).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| format!("{prog}: {e}"))?;
+        let mut cmd = Command::new(prog);
+        cmd.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        // its own process group, so forked workers (nginx, HAProxy, H2O) are stopped with it
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        let mut child = cmd.spawn().map_err(|e| format!("{prog}: {e}"))?;
         let mut ok = None;
         while t.elapsed() < timeout {
             if probe(addr, path) {
@@ -51,6 +56,8 @@ pub fn measure(addr: SocketAddr, path: &str, cmd: &[String], repeat: usize, time
             }
             std::thread::sleep(Duration::from_micros(100));
         }
+        #[cfg(unix)]
+        let _ = Command::new("kill").args(["-9", "--", &format!("-{}", child.id())]).stderr(Stdio::null()).status();
         let _ = child.kill();
         let _ = child.wait();
         out.push(ok.ok_or_else(|| format!("{prog}: no response within {timeout:?}"))?);

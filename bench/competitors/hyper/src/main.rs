@@ -9,10 +9,18 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use std::convert::Infallible;
 
+static B64K: [u8; 64 * 1024] = [b'x'; 64 * 1024];
+static B1M: [u8; 1024 * 1024] = [b'x'; 1024 * 1024];
+
 async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
     if req.method() == Method::POST {
         let body = req.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default();
         return Ok(Response::builder().header("content-type", "application/json").body(Full::new(body)).unwrap());
+    }
+    match req.uri().path() {
+        "/64k" => return Ok(Response::builder().header("content-type", "application/octet-stream").body(Full::new(Bytes::from_static(&B64K))).unwrap()),
+        "/1m" => return Ok(Response::builder().header("content-type", "application/octet-stream").body(Full::new(Bytes::from_static(&B1M))).unwrap()),
+        _ => {}
     }
     Ok(Response::builder().header("content-type", "text/plain").body(Full::new(Bytes::from_static(b"Hello, World!"))).unwrap())
 }

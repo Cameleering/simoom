@@ -1,0 +1,4 @@
+
+
+@[tracepoint:syscalls:sys_enter_write]: 190
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 392

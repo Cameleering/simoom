@@ -119,13 +119,13 @@ pub fn sweep(base: &Spec, plan: &Plan, run: &mut dyn FnMut(&Spec) -> Result<Repo
     }
     out.slo_rps = lo;
     if lo > 0.0 {
-        for &pct in &plan.points {
+        for (idx, &pct) in plan.points.iter().enumerate() {
             let mut s = base.clone();
             s.rate = (lo * pct).round().max(1.0);
             s.warmup = plan.point_warmup;
             s.duration = plan.point;
             let r = run(&s)?;
-            emit(&format!("phase=point pct={:.0} ", pct * 100.0), &r);
+            emit(&format!("phase=point pct={:.0} idx={idx} ", pct * 100.0), &r);
             out.points.push((pct, r));
         }
     }
