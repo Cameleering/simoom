@@ -62,16 +62,34 @@ campaign.
 | U4 | A per-request completion hook (status, bytes in and out, duration, protocol) for access logs and metrics, with zero cost when unset | before release | open |
 | U5 | Response trailers on HTTP/2 and HTTP/3 (gRPC `grpc-status`), and on chunked HTTP/1.1 | before release | open |
 | U6 | Certificate reload without a restart (swap the `ServerConfig` atomically for new connections) | before release | open |
-| U7 | macOS and arm64 actually run in CI | owner decision (CI minutes on a private repository) | open |
+| U7 | macOS and arm64 actually run in CI | deferred by the owner (2026-11-09: "not yet") | deferred |
 | U8 | API freeze and a 0.1 release | at release | open |
 | U9 | Size headroom: the full build has 8.5 KB left, http1 + io-uring 4.8 KB; get at least 5% headroom on every row | before release | open |
 | U10 | Blocking integration routes: the offload-pool and watchdog defaults produce 503s at about 160 req/s on 8 CPUs with 100 ms handlers, and a route blocking ≥ 250 ms per call may never trip the watchdog. Fix the defaults or add an explicit blocking mode, and document it | before release | open |
 | U11 | Missing test: a complete HTTP/2 response followed by RST_STREAM(NO_ERROR) must not be discarded by the client (RFC 9113 §8.1; Cameleer's `a_complete_response_survives_rst_stream_no_error`) | before release | open |
 
-Not planned for the first release (owner decision pending): TLS 1.2, PKCS#12/JKS keystores
-(Cameleer can bridge to `CertifiedKey::from_der`), CRL/OCSP, RSA-OAEP, SHA-1, WebSocket over
-HTTP/2, HTTP/2 PING keepalive, compression.
-
 Shared code: about 3,480 lines of simoom-tls and simoom-hpack are copies of Cameleer code (X.509,
 ASN.1, PEM, keys, certgen, RSA, the HPACK Huffman table). Until they share one home, a fix to
 those files must land in both repositories.
+
+## Complete HTTP stack for Cameleer (owner, 2026-11-09: all in the first release)
+
+Goal: Cameleer can delete `cameleer-http`'s server and client, `cameleer-grpc`'s HTTP/2, its
+WebSocket code and (for HTTP) `cameleer-tls`, once simoom passes parity tests, verification and
+benchmarks. Each item is a cargo feature.
+
+| # | item | status |
+|---|---|---|
+| C1 | TLS 1.2, client and server: ECDHE with AES-GCM and ChaCha20-Poly1305, RSA and ECDSA certificates, extended master secret, session resumption, secure renegotiation refused; also used by Cameleer's non-HTTP protocols | open |
+| C2 | Keystores: PKCS#12 (PBES2 and the legacy PBE schemes), JKS and JCEKS, PEM bundles; a configuration type equivalent to Camel's `SSLContextParameters` | open |
+| C3 | Revocation: CRL checking, OCSP client checking, OCSP stapling on the server | open |
+| C4 | The crypto these need: SHA-1 (certificates and OCSP), RSA-OAEP if any keystore or Cameleer use requires it | open |
+| C5 | HTTP client: HTTP/1.1, HTTP/2 and HTTP/3, connection pooling, TLS, HTTP CONNECT proxies, streaming bodies both ways, timeouts, response decompression, Cameleer `http`/`netty-http`/REST producer parity | open |
+| C6 | WebSocket client (RFC 6455), and WebSocket over HTTP/2 (RFC 8441) for server and client | open |
+| C7 | HTTP/2 PING keepalive (server and client) | open |
+| C8 | Content compression: gzip and deflate, encode and decode, `Accept-Encoding` negotiation, size thresholds; brotli/zstd decode as an option if Cameleer needs it | open |
+| C9 | gRPC parity: everything `cameleer-grpc` needs from HTTP/2, client and server (trailers, `grpc-timeout`, flow control) | open |
+| C10 | Parity audit: a checklist of every feature of `cameleer-http`, `cameleer-tls` (HTTP use) and `cameleer-grpc` (HTTP/2) mapped to simoom, with a test for each row | open |
+| C11 | A blocking `Read`/`Write` TLS stream adapter, so Cameleer's non-HTTP protocols (SMTP, AMQP, ...) can move to simoom-tls later | open |
+
+Still out of scope: a static-file server and a reverse proxy.

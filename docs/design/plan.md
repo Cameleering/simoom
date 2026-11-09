@@ -6,6 +6,18 @@ _Internal design note, 2026-11-07. Evidence and sources are in [research.md](res
 
 These decisions take precedence over anything later in this note that disagrees with them.
 
+0. **Scope change (owner, 2026-11-09): a complete HTTP stack replacement for Cameleer in the
+   first release.** Cameleer will delete its own HTTP server and client, HTTP/2, WebSocket and
+   TLS code once simoom is tested, verified and benchmarked. So the first release includes, besides
+   the server: an HTTP client (HTTP/1.1, HTTP/2, HTTP/3, pooling, proxies, streaming,
+   decompression), a WebSocket client, WebSocket over HTTP/2 (RFC 8441), HTTP/2 PING keepalive,
+   content compression (gzip and deflate), TLS 1.2 next to TLS 1.3 (client and server), PKCS#12 and
+   JKS/JCEKS keystores, CRL and OCSP (client checking and server stapling), and everything gRPC
+   needs. Each is a cargo feature, so the server size budgets below still hold for builds that
+   leave them out. Feature parity is checked item by item against Cameleer's code
+   (`cameleer-http`, `cameleer-tls`, `cameleer-grpc`). This supersedes "not a full web-server
+   replacement" in item 1 as far as Cameleer's needs go (static files and a reverse proxy are
+   still out of scope).
 1. **Not a full web-server replacement.** simoom is an embeddable HTTP engine. It does what
    Cameleer needs as a whole, and it is also usable by other services:
    - serve routes, REST and MCP, including streaming (SSE and chunked) and WebSocket upgrades;
