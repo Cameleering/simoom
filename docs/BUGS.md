@@ -30,6 +30,7 @@ Each item gets a regression test when it is fixed. Owner key: **C** is the confo
 | 15 | facade | HTTP/2 frame budgets (RST/PING/SETTINGS/...) cannot be configured through `Limits` | S | open |
 | 16 | facade | admission control (`shed_lag`) is off by default and unvalidated; decide a safe default from measurement | S | open |
 | 17 | facade | slowloris: idle half-requests still hold a buffer; hold partial heads without one | S | open |
+| 19 | cold start | the full server with TLS and HTTP/3 measured 27–30 ms and 5.3 MB to its first response, against 2.5 ms without TLS. It must not slow Cameleer's start-up (Cameleer's HTTP route is ready in about 1–8 ms depending on build and OS). Target: TLS + HTTP/3 ready in ≤ 3 ms and ≤ 3 MB; find out where the time goes (PEM/key parsing, `ServerConfig` set-up, ticket keys, P-256 comb table or other tables built on first use, the first handshake, QUIC endpoints) and fix it | S | open |
 | 18 | docs | `SECURITY.md` and `plan.md` list the old watchdog defaults; `stall_window`, `stall_recovery` and `shed_lag` are missing | S | open |
 
 ## Known gaps (features not built; not bugs, listed so nothing is forgotten)
