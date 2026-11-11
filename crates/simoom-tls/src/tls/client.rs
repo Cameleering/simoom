@@ -2,13 +2,13 @@
 
 use super::codec::{self, find_ext, handshake_msg, parse_extensions, put_u16, put_vec16, put_vec8, Reader};
 use super::config::{ClientConfig, StoredSession};
-use super::engine::{certificate_body, parse_certificate, Event, Shared, Transcript};
+use super::engine::{certificate_body, parse_certificate_status, Event, Shared, Transcript};
 use super::keyschedule::{finished_mac, message_hash, psk_binder, ticket_psk, Schedule};
 use super::{alert, choose_scheme, cv_content, ext, hs, sign_message, sigscheme, verify_message, CipherSuite, Error, KeyShare, Level, NamedGroup, Result};
 use crate::crypto::rng;
 use crate::keys::PublicKey;
 use crate::util::ct_eq;
-use crate::x509::{self, Certificate};
+use crate::x509;
 use std::sync::Arc;
 
 #[cfg(test)]
@@ -43,6 +43,16 @@ pub(crate) struct ClientHs {
     /// Signature schemes from a CertificateRequest, when one arrived.
     cert_request: Option<(Vec<u8>, Vec<u16>)>,
     resumption_master: Option<Vec<u8>>,
+    /// Whether the ClientHello offers TLS 1.3 / TLS 1.2 (feature `tls12`).
+    offer13: bool,
+    #[cfg(feature = "tls12")]
+    offer12: bool,
+    /// A cached TLS 1.2 session offered in the ClientHello.
+    #[cfg(feature = "tls12")]
+    session12: Option<super::tls12::ClientSession12>,
+    /// The TLS 1.2 state machine, once the server chose TLS 1.2.
+    #[cfg(feature = "tls12")]
+    t12: Option<Box<super::client12::Client12>>,
 }
 
 impl ClientHs {
@@ -56,20 +66,53 @@ impl ClientHs {
         let max = cfg.max_handshake_message;
         let is_quic = quic_tp.is_some();
         let now = cfg.time.unix_millis();
-        let offered_psk = cfg.sessions.as_ref().and_then(|s| s.take(server_name, now)).filter(|s| cfg.suites.iter().any(|x| x.hash() == s.suite.hash()));
+        let server_key = server_name.trim_end_matches('.').to_ascii_lowercase();
+        #[cfg(feature = "tls12")]
+        let (offer13, offer12) =
+            (cfg.max_version >= super::ProtocolVersion::Tls13, !is_quic && cfg.min_version <= super::ProtocolVersion::Tls12 && !cfg.suites12.is_empty());
+        #[cfg(not(feature = "tls12"))]
+        let offer13 = true;
+        #[cfg(feature = "tls12")]
+        if !offer13 && !offer12 {
+            return Err(Error::Config("no protocol version left to offer".into()));
+        }
+        let offered_psk = if offer13 {
+            cfg.sessions.as_ref().and_then(|s| s.take(server_name, now)).filter(|s| cfg.suites.iter().any(|x| x.hash() == s.suite.hash()))
+        } else {
+            None
+        };
+        #[cfg(feature = "tls12")]
+        let session12 = if offer12 { cfg.sessions.as_ref().and_then(|s| s.get12(&server_key, now)).filter(|s| cfg.suites12.contains(&s.suite)) } else { None };
+        // a TLS 1.2 session-ID resumption offers the cached ID; otherwise a random one (TLS
+        // 1.3 middlebox compatibility, and it tells a ticket resumption apart)
+        #[cfg(feature = "tls12")]
+        let session_id = match &session12 {
+            Some(s) if s.ticket.is_empty() => s.session_id.clone(),
+            _ if is_quic => Vec::new(),
+            _ => rng::bytes(32),
+        };
+        #[cfg(not(feature = "tls12"))]
+        let session_id = if is_quic { Vec::new() } else { rng::bytes(32) };
         let mut c = ClientHs {
             sh: Shared::new(quic_tp, max),
             state: State::ServerHello,
-            server_name: server_name.trim_end_matches('.').to_ascii_lowercase(),
+            server_name: server_key,
             random: rng::array(),
-            session_id: if is_quic { Vec::new() } else { rng::bytes(32) },
-            shares: vec![KeyShare::generate(cfg.groups[0])],
+            session_id,
+            shares: if offer13 { vec![KeyShare::generate(cfg.groups[0])] } else { Vec::new() },
             transcript: Transcript::Buffer(Vec::new()),
             offered_psk,
             sched: None,
             retried: false,
             cert_request: None,
             resumption_master: None,
+            offer13,
+            #[cfg(feature = "tls12")]
+            offer12,
+            #[cfg(feature = "tls12")]
+            session12,
+            #[cfg(feature = "tls12")]
+            t12: None,
             cfg,
         };
         let ch = c.client_hello(None);
@@ -85,7 +128,12 @@ impl ClientHs {
         put_u16(&mut body, 0x0303);
         body.extend_from_slice(&self.random);
         put_vec8(&mut body, &self.session_id);
-        let suites: Vec<u16> = cfg.suites.iter().map(|s| s.id()).collect();
+        #[cfg_attr(not(feature = "tls12"), allow(unused_mut))]
+        let mut suites: Vec<u16> = if self.offer13 { cfg.suites.iter().map(|s| s.id()).collect() } else { Vec::new() };
+        #[cfg(feature = "tls12")]
+        if self.offer12 {
+            suites.extend(cfg.suites12.iter().map(|s| s.id()));
+        }
         body.extend(codec::u16_list(&suites));
         put_vec8(&mut body, &[0]);
         let mut exts: Vec<(u16, Vec<u8>)> = Vec::new();
@@ -96,17 +144,35 @@ impl ClientHs {
             put_vec16(&mut d, &list);
             exts.push((ext::SERVER_NAME, d));
         }
-        exts.push((ext::SUPPORTED_VERSIONS, vec![2, 3, 4]));
-        exts.push((ext::SUPPORTED_GROUPS, codec::u16_list(&cfg.groups.iter().map(|g| g.id()).collect::<Vec<_>>())));
-        exts.push((ext::SIGNATURE_ALGORITHMS, codec::u16_list(&sigscheme::SUPPORTED)));
-        let mut ks = Vec::new();
-        for s in &self.shares {
-            put_u16(&mut ks, s.group.id());
-            put_vec16(&mut ks, &s.public);
+        #[cfg(feature = "tls12")]
+        let offer12 = self.offer12;
+        #[cfg(not(feature = "tls12"))]
+        let offer12 = false;
+        if self.offer13 {
+            exts.push((ext::SUPPORTED_VERSIONS, if offer12 { vec![4, 3, 4, 3, 3] } else { vec![2, 3, 4] }));
         }
-        let mut ksd = Vec::new();
-        put_vec16(&mut ksd, &ks);
-        exts.push((ext::KEY_SHARE, ksd));
+        exts.push((ext::SUPPORTED_GROUPS, codec::u16_list(&cfg.groups.iter().map(|g| g.id()).collect::<Vec<_>>())));
+        exts.push((ext::SIGNATURE_ALGORITHMS, codec::u16_list(sigscheme::SUPPORTED)));
+        if self.offer13 {
+            let mut ks = Vec::new();
+            for s in &self.shares {
+                put_u16(&mut ks, s.group.id());
+                put_vec16(&mut ks, &s.public);
+            }
+            let mut ksd = Vec::new();
+            put_vec16(&mut ksd, &ks);
+            exts.push((ext::KEY_SHARE, ksd));
+        }
+        #[cfg(feature = "revocation")]
+        if cfg.revocation.as_ref().is_some_and(|p| p.ocsp != crate::revocation::OcspMode::Off) {
+            // status_type ocsp, empty responder_id_list and request_extensions
+            exts.push((ext::STATUS_REQUEST, vec![1, 0, 0, 0, 0]));
+        }
+        #[cfg(feature = "tls12")]
+        if offer12 {
+            let ticket = cfg.sessions.as_ref().map(|_| self.session12.as_ref().map(|s| s.ticket.as_slice()).unwrap_or(&[]));
+            super::client12::hello_extensions12(&mut exts, ticket);
+        }
         if !cfg.alpn.is_empty() {
             exts.push((ext::ALPN, codec::alpn_list(&cfg.alpn)));
         }
@@ -122,7 +188,7 @@ impl ClientHs {
         if TEST_OFFER_EARLY_DATA.with(|f| f.get()) {
             exts.push((ext::EARLY_DATA, Vec::new()));
         }
-        if cfg.sessions.is_some() || self.offered_psk.is_some() {
+        if self.offer13 && (cfg.sessions.is_some() || self.offered_psk.is_some()) {
             exts.push((ext::PSK_KEY_EXCHANGE_MODES, vec![1, 1]));
         }
         let now = cfg.time.unix_millis();
@@ -162,6 +228,10 @@ impl ClientHs {
     }
 
     pub fn handle(&mut self, msg: &[u8]) -> Result<()> {
+        #[cfg(feature = "tls12")]
+        if let Some(t) = self.t12.as_mut() {
+            return t.handle(&mut self.sh, msg);
+        }
         let typ = msg[0];
         let body = &msg[4..];
         match (&self.state, typ) {
@@ -189,12 +259,35 @@ impl ClientHs {
         let exts = parse_extensions(r.vec16()?)?;
         r.finish()?;
         let selected_version = find_ext(&exts, ext::SUPPORTED_VERSIONS);
-        if selected_version != Some(&[3, 4][..]) && (random[24..] == DOWNGRADE_TLS12 || random[24..] == DOWNGRADE_TLS11) {
+        if self.offer13 && selected_version != Some(&[3, 4][..]) && (random[24..] == DOWNGRADE_TLS12 || random[24..] == DOWNGRADE_TLS11) {
             // RFC 8446 section 4.1.3: a TLS 1.3 client that sees the downgrade sentinel in a
             // ServerHello for an older version must abort with illegal_parameter.
             return Err(Error::proto(alert::ILLEGAL_PARAMETER, "downgrade sentinel in ServerHello.random"));
         }
-        if version != 0x0303 || selected_version != Some(&[3, 4][..]) {
+        #[cfg(feature = "tls12")]
+        if self.offer12 && selected_version.is_none() && version == 0x0303 {
+            if self.retried {
+                return Err(Error::proto(alert::ILLEGAL_PARAMETER, "TLS 1.2 ServerHello after HelloRetryRequest"));
+            }
+            let Transcript::Buffer(ch) = &self.transcript else { return Err(Error::unexpected("ServerHello")) };
+            let hello = super::client12::Hello12 {
+                cfg: self.cfg.clone(),
+                server_name: &self.server_name,
+                client_random: self.random,
+                offered_session_id: &self.session_id,
+                session: self.session12.take(),
+                client_hello: ch,
+                #[cfg(feature = "revocation")]
+                requested_status: self.cfg.revocation.as_ref().is_some_and(|p| p.ocsp != crate::revocation::OcspMode::Off),
+                #[cfg(not(feature = "revocation"))]
+                requested_status: false,
+            };
+            let t = super::client12::Client12::start(&mut self.sh, hello, msg)?;
+            self.shares.clear();
+            self.t12 = Some(Box::new(t));
+            return Ok(());
+        }
+        if version != 0x0303 || selected_version != Some(&[3, 4][..]) || !self.offer13 {
             return Err(Error::proto(alert::PROTOCOL_VERSION, "server did not select TLS 1.3"));
         }
         if sid != self.session_id.as_slice() || compression != 0 {
@@ -349,18 +442,28 @@ impl ClientHs {
     }
 
     fn certificate(&mut self, msg: &[u8], body: &[u8]) -> Result<()> {
-        let (ctx, certs) = parse_certificate(body)?;
+        let (ctx, certs, _staple) = parse_certificate_status(body)?;
         if !ctx.is_empty() {
             return Err(Error::proto(alert::ILLEGAL_PARAMETER, "server certificate with a request context"));
         }
         if certs.is_empty() {
             return Err(Error::proto(alert::DECODE_ERROR, "server sent no certificate"));
         }
-        let now = (self.cfg.time.unix_millis() / 1000) as i64;
         let host = if self.server_name.is_empty() { None } else { Some(self.server_name.as_str()) };
-        x509::verify_chain(&certs, host, &self.cfg.roots, now, x509::OID_EKU_SERVER_AUTH)?;
-        let leaf = Certificate::from_der(&certs[0]).map_err(|e| Error::proto(alert::BAD_CERTIFICATE, e.to_string()))?;
-        let key = leaf.public_key.ok_or_else(|| Error::proto(alert::UNSUPPORTED_CERTIFICATE, "unsupported server key"))?;
+        let check = super::PeerCheck {
+            roots: &self.cfg.roots,
+            now: (self.cfg.time.unix_millis() / 1000) as i64,
+            eku: x509::OID_EKU_SERVER_AUTH,
+            #[cfg(feature = "revocation")]
+            revocation: self.cfg.revocation.as_ref(),
+            #[cfg(feature = "revocation")]
+            staple: _staple.as_deref(),
+        };
+        let key = check.verify(&certs, host)?;
+        #[cfg(feature = "revocation")]
+        {
+            self.sh.ocsp_response = _staple;
+        }
         self.sh.peer_certs = certs;
         self.transcript.add(msg);
         self.state = State::CertificateVerify(key);
@@ -395,7 +498,7 @@ impl ClientHs {
             match &self.cfg.client_cert {
                 Some(cert) => match choose_scheme(&cert.key, &algs) {
                     Some(scheme) => {
-                        let m = handshake_msg(hs::CERTIFICATE, &certificate_body(&ctx, &cert.chain));
+                        let m = handshake_msg(hs::CERTIFICATE, &certificate_body(&ctx, &cert.chain, None));
                         self.transcript.add(&m);
                         out.push(m);
                         let sig = sign_message(&cert.key, scheme, &cv_content(false, &self.transcript.hash()))?;
@@ -407,13 +510,13 @@ impl ClientHs {
                         out.push(m);
                     }
                     None => {
-                        let m = handshake_msg(hs::CERTIFICATE, &certificate_body(&ctx, &[]));
+                        let m = handshake_msg(hs::CERTIFICATE, &certificate_body(&ctx, &[], None));
                         self.transcript.add(&m);
                         out.push(m);
                     }
                 },
                 None => {
-                    let m = handshake_msg(hs::CERTIFICATE, &certificate_body(&ctx, &[]));
+                    let m = handshake_msg(hs::CERTIFICATE, &certificate_body(&ctx, &[], None));
                     self.transcript.add(&m);
                     out.push(m);
                 }

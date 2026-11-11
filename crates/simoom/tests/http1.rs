@@ -159,7 +159,9 @@ fn limits_give_specific_statuses() {
 
 #[test]
 fn slowloris_is_closed_by_the_head_deadline() {
-    let limits = Limits { head_timeout: Duration::from_millis(300), ..Limits::default() };
+    // `slow_head_limit: ZERO`: close at the head deadline even with connections to spare (by
+    // default slow heads stay open until the server is short of connections, K6).
+    let limits = Limits { head_timeout: Duration::from_millis(300), slow_head_limit: Duration::ZERO, ..Limits::default() };
     let h = serve_with(limits, echo_path);
     // A partial head that never completes.
     let mut c = Client::new(&h);

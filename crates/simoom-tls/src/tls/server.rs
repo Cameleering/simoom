@@ -8,15 +8,15 @@ use super::{alert, choose_scheme, cv_content, ext, hs, sign_message, sigscheme, 
 use crate::crypto::rng;
 use crate::keys::PublicKey;
 use crate::util::ct_eq;
-use crate::x509::{self, Certificate, RootStore};
+use crate::x509::{self, RootStore};
 use std::sync::Arc;
 
-struct ClientHello<'a> {
-    random: &'a [u8],
-    session_id: &'a [u8],
-    suites: Vec<u16>,
-    compression: &'a [u8],
-    exts: Vec<(u16, &'a [u8])>,
+pub(crate) struct ClientHello<'a> {
+    pub random: &'a [u8],
+    pub session_id: &'a [u8],
+    pub suites: Vec<u16>,
+    pub compression: &'a [u8],
+    pub exts: Vec<(u16, &'a [u8])>,
 }
 
 impl<'a> ClientHello<'a> {
@@ -39,7 +39,7 @@ impl<'a> ClientHello<'a> {
         Ok(ClientHello { random, session_id, suites, compression, exts })
     }
 
-    fn ext(&self, t: u16) -> Option<&'a [u8]> {
+    pub fn ext(&self, t: u16) -> Option<&'a [u8]> {
         find_ext(&self.exts, t)
     }
 
@@ -54,7 +54,7 @@ impl<'a> ClientHello<'a> {
         Ok(list.chunks(2).any(|c| c == [3, 4]))
     }
 
-    fn sni(&self) -> Result<Option<String>> {
+    pub fn sni(&self) -> Result<Option<String>> {
         let Some(d) = self.ext(ext::SERVER_NAME) else { return Ok(None) };
         let mut r = Reader::new(d, "server_name");
         let list = r.vec16()?;
@@ -193,6 +193,9 @@ pub(crate) struct ServerHs {
     /// session id.
     hrr: Option<(NamedGroup, [u8; 32], Vec<u8>)>,
     ccs_sent: bool,
+    /// The TLS 1.2 state machine, once the ClientHello chose TLS 1.2.
+    #[cfg(feature = "tls12")]
+    t12: Option<Box<super::server12::Server12>>,
 }
 
 impl ServerHs {
@@ -207,10 +210,16 @@ impl ServerHs {
             suite: None,
             hrr: None,
             ccs_sent: false,
+            #[cfg(feature = "tls12")]
+            t12: None,
         }
     }
 
     pub fn handle(&mut self, msg: &[u8]) -> Result<()> {
+        #[cfg(feature = "tls12")]
+        if let Some(t) = self.t12.as_mut() {
+            return t.handle(&mut self.sh, msg);
+        }
         let typ = msg[0];
         let body = &msg[4..];
         match (&self.state, typ) {
@@ -225,6 +234,23 @@ impl ServerHs {
     fn client_hello(&mut self, msg: &[u8]) -> Result<()> {
         let cfg = self.cfg.clone();
         let ch = ClientHello::parse(&msg[4..])?;
+        #[cfg(feature = "tls12")]
+        {
+            use super::ProtocolVersion;
+            let max13 = cfg.max_version >= ProtocolVersion::Tls13;
+            if (!max13 || !ch.offers_tls13()?) && self.hrr.is_none() && !self.sh.is_quic() && cfg.min_version <= ProtocolVersion::Tls12 {
+                // RFC 7507: a client retrying with a lower version than it supports
+                if max13 && ch.suites.contains(&super::tls12::FALLBACK_SCSV) {
+                    return Err(Error::proto(alert::INAPPROPRIATE_FALLBACK, "TLS_FALLBACK_SCSV while TLS 1.3 is supported"));
+                }
+                self.sh.early_data_offered = false;
+                self.t12 = Some(Box::new(super::server12::Server12::start(cfg, &mut self.sh, msg, &ch)?));
+                return Ok(());
+            }
+            if !max13 {
+                return Err(Error::proto(alert::PROTOCOL_VERSION, "TLS 1.3 is disabled and TLS 1.2 is not possible here"));
+            }
+        }
         if !ch.offers_tls13()? {
             return Err(Error::proto(alert::PROTOCOL_VERSION, "client does not offer TLS 1.3"));
         }
@@ -383,7 +409,11 @@ impl ServerHs {
                 body.extend(codec::extensions(&cr));
                 self.send_hs(handshake_msg(hs::CERTIFICATE_REQUEST, &body));
             }
-            self.send_certificate(&cert, scheme)?;
+            #[cfg(feature = "revocation")]
+            let staple = cfg.ocsp_staple.as_ref().and_then(|s| s.get()).filter(|_| ch.ext(ext::STATUS_REQUEST).is_some_and(|d| d.first() == Some(&1)));
+            #[cfg(not(feature = "revocation"))]
+            let staple: Option<Arc<Vec<u8>>> = None;
+            self.send_certificate(&cert, scheme, staple.as_deref().map(|v| v.as_slice()))?;
         }
         let fin = finished_mac(h, &sched.server_hs, &self.transcript.hash());
         self.send_hs(handshake_msg(hs::FINISHED, &fin));
@@ -444,8 +474,8 @@ impl ServerHs {
         self.sh.send(Level::Handshake, m);
     }
 
-    fn send_certificate(&mut self, cert: &CertifiedKey, scheme: u16) -> Result<()> {
-        self.send_hs(handshake_msg(hs::CERTIFICATE, &certificate_body(&[], &cert.chain)));
+    fn send_certificate(&mut self, cert: &CertifiedKey, scheme: u16, staple: Option<&[u8]>) -> Result<()> {
+        self.send_hs(handshake_msg(hs::CERTIFICATE, &certificate_body(&[], &cert.chain, staple)));
         let sig = sign_message(&cert.key, scheme, &cv_content(true, &self.transcript.hash()))?;
         let mut body = Vec::with_capacity(4 + sig.len());
         put_u16(&mut body, scheme);
@@ -471,10 +501,16 @@ impl ServerHs {
             self.state = State::Finished;
             return Ok(());
         }
-        let now = (self.cfg.time.unix_millis() / 1000) as i64;
-        x509::verify_chain(&certs, None, roots, now, x509::OID_EKU_CLIENT_AUTH)?;
-        let leaf = Certificate::from_der(&certs[0]).map_err(|e| Error::proto(alert::BAD_CERTIFICATE, e.to_string()))?;
-        let key = leaf.public_key.ok_or_else(|| Error::proto(alert::UNSUPPORTED_CERTIFICATE, "unsupported client key"))?;
+        let check = super::PeerCheck {
+            roots,
+            now: (self.cfg.time.unix_millis() / 1000) as i64,
+            eku: x509::OID_EKU_CLIENT_AUTH,
+            #[cfg(feature = "revocation")]
+            revocation: self.cfg.client_revocation.as_ref(),
+            #[cfg(feature = "revocation")]
+            staple: None,
+        };
+        let key = check.verify(&certs, None)?;
         self.sh.peer_certs = certs;
         self.state = State::CertificateVerify(key);
         Ok(())
@@ -534,7 +570,7 @@ impl ServerHs {
 }
 
 /// The DistinguishedName list of the client trust anchors (omitted when large).
-fn ca_names(auth: &ClientAuth) -> Option<Vec<u8>> {
+pub(crate) fn ca_names(auth: &ClientAuth) -> Option<Vec<u8>> {
     let roots: &RootStore = match auth {
         ClientAuth::Optional(r) | ClientAuth::Required(r) => r,
         ClientAuth::None => return None,

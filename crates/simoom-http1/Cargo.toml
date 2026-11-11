@@ -13,10 +13,13 @@ workspace = true
 
 [dependencies]
 simoom-sys = { path = "../simoom-sys" }
+simoom-compress = { path = "../simoom-compress", optional = true }
 
 [features]
 default = ["websocket"]
 # RFC 6455 handshake and frame codec (adds SHA-1).
 websocket = []
+# WebSocket permessage-deflate (RFC 7692): negotiation and the per-message codec (`ws::deflate`).
+permessage-deflate = ["websocket", "dep:simoom-compress"]
 # The coverage-guided fuzzer (`tests/cov_fuzz.rs`); test-only.
 sancov = ["simoom-sys/sancov"]

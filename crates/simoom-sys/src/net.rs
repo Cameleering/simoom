@@ -744,6 +744,24 @@ pub fn reserve_descriptors(n: usize) -> usize {
     }
 }
 
+/// The process's soft limit on open file descriptors (`RLIMIT_NOFILE` on Linux); `None`
+/// where there is no such limit to watch (Windows) or it can't be read.
+pub fn descriptor_limit() -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut lim = sys::rlimit::default();
+        // SAFETY: getrlimit writes one rlimit.
+        if unsafe { sys::getrlimit(sys::RLIMIT_NOFILE, &mut lim) } == 0 {
+            return Some(lim.rlim_cur.min(usize::MAX as u64) as usize);
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 pub fn unspecified_like(addr: &SocketAddr) -> SocketAddr {
     match addr {
         SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),

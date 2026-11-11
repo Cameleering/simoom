@@ -107,6 +107,7 @@ const CLOSED_WINDOW: usize = 32;
 /// Peer stream ids tracked as used or skipped below the highest one (256 bytes).
 const SEEN_WINDOW: usize = 2048;
 const SHUTDOWN_PING: [u8; 8] = *b"simoomGA";
+const KEEPALIVE_PING: [u8; 8] = *b"simoomKA";
 /// At most one window-tuning PING per this many milliseconds.
 const BDP_INTERVAL_MS: u64 = 500;
 
@@ -120,6 +121,9 @@ fn local_settings(role: Role, c: &Config) -> Vec<(u16, u32)> {
         s.push((setting::ENABLE_PUSH, 0));
     } else {
         s.push((setting::MAX_CONCURRENT_STREAMS, c.max_concurrent_streams));
+        if cfg!(feature = "connect-protocol") && c.enable_connect_protocol {
+            s.push((setting::ENABLE_CONNECT_PROTOCOL, 1));
+        }
     }
     if c.initial_window_size != DEFAULT_WINDOW {
         s.push((setting::INITIAL_WINDOW_SIZE, c.initial_window_size));
@@ -172,6 +176,12 @@ pub struct Connection {
     peer_max_concurrent: u32,
     /// The peer's SETTINGS_MAX_HEADER_LIST_SIZE (unlimited until it sends one).
     peer_max_header_list: u32,
+    /// The peer (a server) sent SETTINGS_ENABLE_CONNECT_PROTOCOL = 1.
+    peer_connect_protocol: bool,
+    /// PING keepalive: when the peer last sent anything, and the deadline of an unanswered
+    /// keepalive PING.
+    last_recv: Option<u64>,
+    keepalive_deadline: Option<u64>,
     // flow control
     send_window: i64,
     recv_window: i64,
@@ -242,6 +252,9 @@ impl Connection {
             peer_max_frame: frame::MIN_FRAME_SIZE as usize,
             peer_max_concurrent: u32::MAX,
             peer_max_header_list: u32::MAX,
+            peer_connect_protocol: false,
+            last_recv: None,
+            keepalive_deadline: None,
             send_window: DEFAULT_WINDOW as i64,
             recv_window: cfg.connection_window_size as i64,
             conn_target: cfg.connection_window_size,
@@ -269,6 +282,7 @@ impl Connection {
             blocked: Vec::new(),
             cfg,
         };
+        c.rx.allow_protocol = cfg!(feature = "connect-protocol") && role == Role::Server && c.cfg.enable_connect_protocol;
         if role == Role::Client {
             c.out.extend_from_slice(PREFACE);
         }
@@ -454,9 +468,48 @@ impl Connection {
     /// The next deadline (settings acknowledgement, graceful shutdown) for
     /// [`Connection::handle_timeout`].
     pub fn poll_timeout(&self) -> Option<u64> {
-        match (self.settings_deadline, self.graceful_deadline) {
+        let t = match (self.settings_deadline, self.graceful_deadline) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
+        };
+        match (t, self.keepalive_due()) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// When the keepalive needs attention: the PING deadline, or the time to send one.
+    fn keepalive_due(&self) -> Option<u64> {
+        if !cfg!(feature = "keepalive") {
+            return None;
+        }
+        let interval = self.cfg.keepalive_interval_ms?;
+        if self.phase == Phase::Closed {
+            return None;
+        }
+        self.keepalive_deadline.or_else(|| self.last_recv.map(|t| t.saturating_add(interval)))
+    }
+
+    /// Sends a keepalive PING when the peer has been quiet for the interval, or closes the
+    /// connection when nothing came back in time.
+    fn keepalive(&mut self, now: u64, sink: &mut dyn FnMut(Event<'_>)) {
+        if !cfg!(feature = "keepalive") {
+            return;
+        }
+        let Some(interval) = self.cfg.keepalive_interval_ms else { return };
+        if self.phase == Phase::Closed {
+            return;
+        }
+        if let Some(d) = self.keepalive_deadline {
+            if now >= d {
+                self.conn_error(ErrorCode::NO_ERROR, "PING keepalive timeout", sink);
+            }
+            return;
+        }
+        let last = *self.last_recv.get_or_insert(now);
+        if now >= last.saturating_add(interval) {
+            frame::write_ping(&mut self.out, KEEPALIVE_PING, false);
+            self.keepalive_deadline = Some(now.saturating_add(self.cfg.keepalive_timeout_ms));
         }
     }
 
@@ -473,6 +526,7 @@ impl Connection {
         if self.graceful_deadline.is_some_and(|d| now >= d) {
             self.final_goaway();
         }
+        self.keepalive(now, sink);
     }
 
     // ------------------------------------------------------------------ input
@@ -485,6 +539,11 @@ impl Connection {
     /// closed all input is consumed and ignored.
     pub fn recv(&mut self, input: &[u8], now: u64, sink: &mut dyn FnMut(Event<'_>)) -> usize {
         self.now = now;
+        if cfg!(feature = "keepalive") && !input.is_empty() {
+            // anything from the peer shows it is alive
+            self.last_recv = Some(now);
+            self.keepalive_deadline = None;
+        }
         if self.settings_unacked > 0 && self.settings_deadline.is_none() {
             self.settings_deadline = Some(now + self.cfg.settings_timeout_ms);
         }
@@ -1166,6 +1225,13 @@ impl Connection {
                     self.peer_max_frame = v as usize;
                 }
                 setting::MAX_HEADER_LIST_SIZE => self.peer_max_header_list = v,
+                setting::ENABLE_CONNECT_PROTOCOL if cfg!(feature = "connect-protocol") => {
+                    // RFC 8441 §3: 0 or 1, and never 0 after 1.
+                    if v > 1 || (v == 0 && self.peer_connect_protocol) {
+                        return perr("invalid SETTINGS_ENABLE_CONNECT_PROTOCOL");
+                    }
+                    self.peer_connect_protocol = v == 1;
+                }
                 _ => {} // unknown settings are ignored
             }
         }
@@ -1223,6 +1289,8 @@ impl Connection {
                 self.bdp_ack();
             } else if data == SHUTDOWN_PING && self.graceful_deadline.is_some() {
                 self.final_goaway();
+            } else if cfg!(feature = "keepalive") && data == KEEPALIVE_PING && self.cfg.keepalive_interval_ms.is_some() {
+                self.keepalive_deadline = None;
             } else {
                 if self.hit(Budget::Ping) {
                     return calm("too many PING frames");
@@ -1342,6 +1410,58 @@ impl Connection {
     /// The peer's SETTINGS_MAX_HEADER_LIST_SIZE (`u32::MAX` until it announces one).
     pub fn peer_max_header_list_size(&self) -> u32 {
         self.peer_max_header_list
+    }
+
+    /// The peer (a server) allows extended CONNECT: it sent SETTINGS_ENABLE_CONNECT_PROTOCOL
+    /// = 1 (RFC 8441 §3). Known once its SETTINGS arrived ([`Event::Settings`]).
+    pub fn peer_connect_protocol(&self) -> bool {
+        self.peer_connect_protocol
+    }
+
+    /// Client: opens an extended CONNECT stream (RFC 8441 §4), for example with
+    /// `protocol = b"websocket"` for WebSocket over HTTP/2 (RFC 8441 §5). The stream stays open
+    /// both ways; a 2xx response accepts the tunnel, whose bytes then travel as DATA. Fails with
+    /// [`Error::ConnectProtocolDisabled`] unless the server enabled extended CONNECT.
+    pub fn send_extended_connect(&mut self, protocol: &[u8], scheme: &[u8], authority: &[u8], path: &[u8], fields: &[(&[u8], &[u8])]) -> Result<u32, Error> {
+        if self.role != Role::Client {
+            return Err(Error::WrongRole);
+        }
+        if self.phase == Phase::Closed {
+            return Err(Error::ConnectionClosed);
+        }
+        if self.goaway_recv.is_some() || self.goaway_sent.is_some() {
+            return Err(Error::GoingAway);
+        }
+        if !self.peer_connect_protocol {
+            return Err(Error::ConnectProtocolDisabled);
+        }
+        if self.next_stream_id > MAX_WINDOW {
+            return Err(Error::StreamIdsExhausted);
+        }
+        if self.open_count >= self.peer_max_concurrent {
+            return Err(Error::StreamLimit);
+        }
+        let ok = |v: &[u8]| !v.is_empty() && valid_value(v);
+        if !ok(protocol) || !ok(scheme) || !ok(authority) || !ok(path) {
+            return Err(Error::InvalidHeader);
+        }
+        Self::check_fields(fields)?;
+        let pseudo: [(&[u8], &[u8]); 5] = [(b":method", b"CONNECT"), (b":protocol", protocol), (b":scheme", scheme), (b":authority", authority), (b":path", path)];
+        self.check_list_size(&pseudo, fields)?;
+        let id = self.next_stream_id;
+        self.next_stream_id += 2;
+        let s = Stream { send_window: self.peer_initial_window as i64, recv_window: self.stream_effective as i64, open: true, final_sent: true, ..Stream::default() };
+        self.streams.insert(id, s);
+        self.open_count += 1;
+        self.write_block(id, false, |enc, out| {
+            for (n, v) in pseudo {
+                enc.field(n, v, out);
+            }
+            for (n, v) in fields {
+                enc.field(n, v, out);
+            }
+        });
+        Ok(id)
     }
 
     fn check_fields(fields: &[(&[u8], &[u8])]) -> Result<(), Error> {

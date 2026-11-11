@@ -16,6 +16,17 @@ const OID_SAN: &str = "2.5.29.17";
 const OID_BASIC_CONSTRAINTS: &str = "2.5.29.19";
 const OID_KEY_USAGE: &str = "2.5.29.15";
 const OID_EXT_KEY_USAGE: &str = "2.5.29.37";
+#[cfg(feature = "revocation")]
+const OID_CRL_DISTRIBUTION_POINTS: &str = "2.5.29.31";
+#[cfg(feature = "revocation")]
+const OID_AUTHORITY_INFO_ACCESS: &str = "1.3.6.1.5.5.7.1.1";
+#[cfg(feature = "revocation")]
+const OID_AD_OCSP: &str = "1.3.6.1.5.5.7.48.1";
+#[cfg(feature = "revocation")]
+const OID_AD_CA_ISSUERS: &str = "1.3.6.1.5.5.7.48.2";
+/// At most this many URIs are kept per extension (CRL distribution points, OCSP, caIssuers).
+#[cfg(feature = "revocation")]
+const MAX_URIS_PER_EXTENSION: usize = 16;
 pub const OID_EKU_SERVER_AUTH: &str = "1.3.6.1.5.5.7.3.1";
 pub const OID_EKU_CLIENT_AUTH: &str = "1.3.6.1.5.5.7.3.2";
 const OID_EKU_ANY: &str = "2.5.29.37.0";
@@ -107,6 +118,12 @@ pub struct Certificate {
     pub key_usage: Option<u16>,
     pub ext_key_usage: Option<Vec<String>>,
     pub unknown_critical_extensions: Vec<String>,
+    /// URIs from the CRL distribution points extension (fullName entries only).
+    pub crl_distribution_points: Vec<String>,
+    /// OCSP responder URIs from the authority information access extension.
+    pub ocsp_urls: Vec<String>,
+    /// caIssuers URIs from the authority information access extension.
+    pub ca_issuers_urls: Vec<String>,
 }
 
 impl Certificate {
@@ -166,6 +183,9 @@ impl Certificate {
             key_usage: None,
             ext_key_usage: None,
             unknown_critical_extensions: Vec::new(),
+            crl_distribution_points: Vec::new(),
+            ocsp_urls: Vec::new(),
+            ca_issuers_urls: Vec::new(),
         };
         // optional issuerUniqueID [1], subjectUniqueID [2]
         let _ = t.optional(0x81)?;
@@ -236,6 +256,20 @@ impl Certificate {
                 }
                 self.ext_key_usage = Some(v);
             }
+            // Parsed leniently: a malformed non-critical locator never rejects a certificate.
+            // Only revocation checking reads them, so other builds leave them unparsed.
+            #[cfg(feature = "revocation")]
+            OID_CRL_DISTRIBUTION_POINTS => {
+                if parse_crl_distribution_points(value, &mut self.crl_distribution_points).is_err() && critical {
+                    return Err(DerError("malformed CRL distribution points".into()));
+                }
+            }
+            #[cfg(feature = "revocation")]
+            OID_AUTHORITY_INFO_ACCESS => {
+                if parse_authority_info_access(value, &mut self.ocsp_urls, &mut self.ca_issuers_urls).is_err() && critical {
+                    return Err(DerError("malformed authority information access".into()));
+                }
+            }
             _ => {
                 if critical {
                     self.unknown_critical_extensions.push(oid.to_string());
@@ -282,6 +316,51 @@ impl Certificate {
     }
 }
 
+#[cfg(feature = "revocation")]
+fn push_uri(out: &mut Vec<String>, gn: &asn1::Tlv) {
+    // uniformResourceIdentifier [6] IA5String
+    if gn.tag == 0x86 && out.len() < MAX_URIS_PER_EXTENSION && gn.value.is_ascii() {
+        out.push(String::from_utf8_lossy(gn.value).into_owned());
+    }
+}
+
+#[cfg(feature = "revocation")]
+/// CRLDistributionPoints ::= SEQUENCE OF DistributionPoint (RFC 5280 section 4.2.1.13).
+fn parse_crl_distribution_points(value: &[u8], out: &mut Vec<String>) -> DerResult<()> {
+    let mut dps = Der::new(value).sequence()?;
+    while !dps.is_empty() {
+        let mut dp = dps.sequence()?;
+        if let Some(name) = dp.optional(0xa0)? {
+            let mut n = name.reader();
+            // fullName [0] GeneralNames; nameRelativeToCRLIssuer [1] is skipped
+            if let Some(full) = n.optional(0xa0)? {
+                let mut gns = full.reader();
+                while !gns.is_empty() {
+                    push_uri(out, &gns.read()?);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "revocation")]
+/// AuthorityInfoAccessSyntax ::= SEQUENCE OF AccessDescription (RFC 5280 section 4.2.2.1).
+fn parse_authority_info_access(value: &[u8], ocsp: &mut Vec<String>, ca_issuers: &mut Vec<String>) -> DerResult<()> {
+    let mut list = Der::new(value).sequence()?;
+    while !list.is_empty() {
+        let mut ad = list.sequence()?;
+        let method = ad.oid()?;
+        let location = ad.read()?;
+        match method.as_str() {
+            OID_AD_OCSP => push_uri(ocsp, &location),
+            OID_AD_CA_ISSUERS => push_uri(ca_issuers, &location),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Matches a (lowercase) certificate DNS pattern against a (lowercase) host name.
 /// A wildcard is only allowed as the complete left-most label and matches exactly
 /// one non-empty label; at least two labels must follow it.
@@ -314,6 +393,10 @@ pub enum CertError {
     UsageNotAllowed { subject: String },
     PathTooLong,
     UnsupportedCriticalExtension { subject: String, oid: String },
+    /// The certificate is revoked (CRL or OCSP); `reason` is the CRLReason code when given.
+    Revoked { subject: String, reason: Option<u8> },
+    /// Revocation checking was required but no valid status could be obtained.
+    RevocationUnknown { subject: String, why: String },
 }
 
 impl fmt::Display for CertError {
@@ -336,6 +419,9 @@ impl fmt::Display for CertError {
             CertError::UnsupportedCriticalExtension { subject, oid } => {
                 write!(f, "unsupported critical extension {oid} in '{subject}'")
             }
+            CertError::Revoked { subject, reason: Some(r) } => write!(f, "certificate revoked (reason {r}): {subject}"),
+            CertError::Revoked { subject, reason: None } => write!(f, "certificate revoked: {subject}"),
+            CertError::RevocationUnknown { subject, why } => write!(f, "revocation status unknown for '{subject}': {why}"),
         }
     }
 }
@@ -376,8 +462,9 @@ impl RootStore {
     }
 
     /// The system trust store (`SSL_CERT_FILE`, else the first existing bundle in
-    /// [`SYSTEM_BUNDLE_PATHS`]); loaded once per process. Certificates that fail to
-    /// parse are skipped.
+    /// [`SYSTEM_BUNDLE_PATHS`], else the Windows `ROOT` certificate store; macOS is covered by
+    /// `/etc/ssl/cert.pem`); loaded once per process. Certificates that fail to parse are
+    /// skipped.
     pub fn system() -> RootStore {
         static SYSTEM: OnceLock<RootStore> = OnceLock::new();
         SYSTEM
@@ -393,6 +480,14 @@ impl RootStore {
                         store.add_pem_lenient(&data);
                         if !store.is_empty() {
                             break;
+                        }
+                    }
+                }
+                // Windows keeps its roots in the system certificate store, not in a file.
+                if store.is_empty() {
+                    for der in simoom_sys::certstore::system_roots() {
+                        if let Ok(c) = Certificate::from_der(&der) {
+                            store.roots.push(Arc::new(c));
                         }
                     }
                 }
@@ -494,13 +589,48 @@ pub fn verify_chain(
     now: i64,
     required_eku: &str,
 ) -> Result<Certificate, CertError> {
+    let (mut certs, _, _) = verify_core(chain, hostname, roots, now, required_eku)?;
+    Ok(certs.swap_remove(0))
+}
+
+/// Like [`verify_chain`], but returns the validated path: the leaf first, then each issuer,
+/// ending with the trust anchor. A pinned leaf that is itself a trust anchor gives a path of
+/// one certificate.
+pub fn verify_chain_path(
+    chain: &[Vec<u8>],
+    hostname: Option<&str>,
+    roots: &RootStore,
+    now: i64,
+    required_eku: &str,
+) -> Result<Vec<Certificate>, CertError> {
+    let (mut certs, path, anchor) = verify_core(chain, hostname, roots, now, required_eku)?;
+    let Some(anchor) = anchor else {
+        // a pinned leaf
+        return Ok(vec![certs.swap_remove(0)]);
+    };
+    let mut slots: Vec<Option<Certificate>> = certs.into_iter().map(Some).collect();
+    let mut out: Vec<Certificate> = path.iter().filter_map(|&i| slots[i].take()).collect();
+    out.push(Certificate::clone(&anchor));
+    Ok(out)
+}
+
+/// Validates the chain: (the parsed certificates, the indices of the path through them, the
+/// trust anchor; None when the leaf is itself a trust anchor).
+#[allow(clippy::type_complexity)]
+fn verify_core(
+    chain: &[Vec<u8>],
+    hostname: Option<&str>,
+    roots: &RootStore,
+    now: i64,
+    required_eku: &str,
+) -> Result<(Vec<Certificate>, Vec<usize>, Option<Arc<Certificate>>), CertError> {
     if chain.is_empty() {
         return Err(CertError::NoCertificates);
     }
     if chain.len() > MAX_PATH_DEPTH + 2 {
         return Err(CertError::PathTooLong);
     }
-    let mut certs: Vec<Certificate> = chain
+    let certs: Vec<Certificate> = chain
         .iter()
         .map(|d| Certificate::from_der(d).map_err(|e| CertError::Parse(e.to_string())))
         .collect::<Result<_, _>>()?;
@@ -529,12 +659,13 @@ pub fn verify_chain(
     }
     // a leaf that is itself a trust anchor (pinned self-signed certificate)
     if roots.roots.iter().any(|r| r.der == leaf.der) {
-        return Ok(certs.swap_remove(0));
+        return Ok((certs, vec![0], None));
     }
     let mut used = vec![false; certs.len()];
     used[0] = true;
-    build_path(&certs, 0, roots, now, &mut used, 0)?;
-    Ok(certs.swap_remove(0))
+    let mut path = vec![0usize];
+    let anchor = build_path(&certs, 0, roots, now, &mut used, 0, &mut path)?;
+    Ok((certs, path, Some(anchor)))
 }
 
 fn build_path(
@@ -544,7 +675,8 @@ fn build_path(
     now: i64,
     used: &mut Vec<bool>,
     depth: usize,
-) -> Result<(), CertError> {
+    path: &mut Vec<usize>,
+) -> Result<Arc<Certificate>, CertError> {
     if depth > MAX_PATH_DEPTH {
         return Err(CertError::PathTooLong);
     }
@@ -554,7 +686,7 @@ fn build_path(
     for root in roots.roots.iter().filter(|r| r.subject_raw == cert.issuer_raw) {
         if let Some(pk) = &root.public_key {
             if cert.verify_signed_by(pk) {
-                return Ok(());
+                return Ok(root.clone());
             }
             last_err = CertError::BadSignature { subject: cert.subject.to_string() };
         }
@@ -595,10 +727,12 @@ fn build_path(
             continue;
         }
         used[j] = true;
-        match build_path(certs, j, roots, now, used, depth + 1) {
-            Ok(()) => return Ok(()),
+        path.push(j);
+        match build_path(certs, j, roots, now, used, depth + 1, path) {
+            Ok(anchor) => return Ok(anchor),
             Err(e) => last_err = e,
         }
+        path.pop();
         used[j] = false;
     }
     Err(last_err)

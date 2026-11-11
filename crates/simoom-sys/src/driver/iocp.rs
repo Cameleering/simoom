@@ -132,7 +132,7 @@ impl Entry {
 
 pub(crate) struct Driver {
     port: Arc<Port>,
-    waker: Waker,
+    pub(crate) waker: Waker,
     slab: Slab<Entry>,
     stash: Vec<Vec<u8>>,
     large: LargeBufs,
@@ -743,6 +743,10 @@ impl Driver {
         self.target = n;
     }
 
+    pub(crate) fn trim_buffers(&mut self, keep: usize) {
+        self.stash.truncate(keep);
+    }
+
     pub(crate) fn stats(&self) -> DriverStats {
         self.stats
     }
@@ -1039,7 +1043,7 @@ impl Driver {
         self.skips = 0;
         let t = if out.len() > start || work { Some(Duration::ZERO) } else { timeout };
         let (port, entries, got) = (&self.port, &mut self.entries, &mut self.got);
-        self.spin.wait(t, true, &mut self.stats, |t, st| {
+        self.spin.wait(t, true, &mut self.stats, &self.waker.inner, &mut |t, st| {
             let ms = match t {
                 None => sys::INFINITE,
                 Some(d) => d.as_nanos().div_ceil(1_000_000).min(u32::MAX as u128 - 1) as u32,

@@ -10,6 +10,12 @@ pub(crate) mod engine;
 pub(crate) mod keyschedule;
 pub(crate) mod record;
 pub(crate) mod server;
+#[cfg(feature = "tls12")]
+pub mod tls12;
+#[cfg(all(feature = "tls12", feature = "client"))]
+pub(crate) mod client12;
+#[cfg(feature = "tls12")]
+pub(crate) mod server12;
 
 use crate::crypto::sha2::HashAlg;
 use crate::crypto::{p256, rng, x25519};
@@ -25,6 +31,8 @@ pub(crate) mod content {
 }
 
 pub(crate) mod hs {
+    #[cfg(feature = "tls12")]
+    pub const HELLO_REQUEST: u8 = 0;
     pub const CLIENT_HELLO: u8 = 1;
     pub const SERVER_HELLO: u8 = 2;
     pub const NEW_SESSION_TICKET: u8 = 4;
@@ -35,6 +43,14 @@ pub(crate) mod hs {
     pub const CERTIFICATE_VERIFY: u8 = 15;
     pub const FINISHED: u8 = 20;
     pub const KEY_UPDATE: u8 = 24;
+    #[cfg(feature = "tls12")]
+    pub const SERVER_KEY_EXCHANGE: u8 = 12;
+    #[cfg(feature = "tls12")]
+    pub const SERVER_HELLO_DONE: u8 = 14;
+    #[cfg(feature = "tls12")]
+    pub const CLIENT_KEY_EXCHANGE: u8 = 16;
+    #[cfg(all(feature = "tls12", any(feature = "client", feature = "revocation")))]
+    pub const CERTIFICATE_STATUS: u8 = 22;
     pub const MESSAGE_HASH: u8 = 254;
 }
 
@@ -52,6 +68,16 @@ pub(crate) mod ext {
     pub const CERTIFICATE_AUTHORITIES: u16 = 47;
     pub const KEY_SHARE: u16 = 51;
     pub const QUIC_TRANSPORT_PARAMETERS: u16 = 0x39;
+    #[cfg(any(all(feature = "tls12", feature = "client"), feature = "revocation"))]
+    pub const STATUS_REQUEST: u16 = 5;
+    #[cfg(feature = "tls12")]
+    pub const EC_POINT_FORMATS: u16 = 11;
+    #[cfg(feature = "tls12")]
+    pub const EXTENDED_MASTER_SECRET: u16 = 23;
+    #[cfg(feature = "tls12")]
+    pub const SESSION_TICKET: u16 = 35;
+    #[cfg(feature = "tls12")]
+    pub const RENEGOTIATION_INFO: u16 = 0xff01;
 }
 
 /// TLS alert descriptions (RFC 8446 section 6).
@@ -63,6 +89,7 @@ pub mod alert {
     pub const HANDSHAKE_FAILURE: u8 = 40;
     pub const BAD_CERTIFICATE: u8 = 42;
     pub const UNSUPPORTED_CERTIFICATE: u8 = 43;
+    pub const CERTIFICATE_REVOKED: u8 = 44;
     pub const CERTIFICATE_EXPIRED: u8 = 45;
     pub const CERTIFICATE_UNKNOWN: u8 = 46;
     pub const ILLEGAL_PARAMETER: u8 = 47;
@@ -70,11 +97,14 @@ pub mod alert {
     pub const DECODE_ERROR: u8 = 50;
     pub const DECRYPT_ERROR: u8 = 51;
     pub const PROTOCOL_VERSION: u8 = 70;
+    pub const INAPPROPRIATE_FALLBACK: u8 = 86;
     pub const INTERNAL_ERROR: u8 = 80;
     pub const USER_CANCELED: u8 = 90;
+    pub const NO_RENEGOTIATION: u8 = 100;
     pub const MISSING_EXTENSION: u8 = 109;
     pub const UNSUPPORTED_EXTENSION: u8 = 110;
     pub const UNRECOGNIZED_NAME: u8 = 112;
+    pub const BAD_CERTIFICATE_STATUS_RESPONSE: u8 = 113;
     pub const CERTIFICATE_REQUIRED: u8 = 116;
     pub const NO_APPLICATION_PROTOCOL: u8 = 120;
 
@@ -101,9 +131,11 @@ pub mod alert {
             80 => "internal_error",
             86 => "inappropriate_fallback",
             90 => "user_canceled",
+            100 => "no_renegotiation",
             109 => "missing_extension",
             110 => "unsupported_extension",
             112 => "unrecognized_name",
+            113 => "bad_certificate_status_response",
             116 => "certificate_required",
             120 => "no_application_protocol",
             _ => "unknown_alert",
@@ -150,6 +182,8 @@ impl Error {
                 CertError::UnknownIssuer { .. } => alert::UNKNOWN_CA,
                 CertError::Parse(_) | CertError::BadSignature { .. } => alert::BAD_CERTIFICATE,
                 CertError::NoCertificates => alert::CERTIFICATE_REQUIRED,
+                CertError::Revoked { .. } => alert::CERTIFICATE_REVOKED,
+                CertError::RevocationUnknown { .. } => alert::BAD_CERTIFICATE_STATUS_RESPONSE,
                 _ => alert::CERTIFICATE_UNKNOWN,
             }),
             Error::Config(_) => Some(alert::INTERNAL_ERROR),
@@ -186,6 +220,35 @@ impl From<CertError> for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// A negotiated protocol version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ProtocolVersion {
+    /// TLS 1.2 (RFC 5246), only with the `tls12` feature.
+    Tls12,
+    /// TLS 1.3 (RFC 8446).
+    Tls13,
+}
+
+impl ProtocolVersion {
+    /// The name Java and Camel use (`TLSv1.2`, `TLSv1.3`).
+    pub fn name(self) -> &'static str {
+        match self {
+            ProtocolVersion::Tls12 => "TLSv1.2",
+            ProtocolVersion::Tls13 => "TLSv1.3",
+        }
+    }
+    /// Parses `TLSv1.2`, `TLSv1.3`, `1.2`, `TLS1.3` and similar spellings.
+    pub fn parse(s: &str) -> Option<ProtocolVersion> {
+        let v = s.trim().to_ascii_lowercase();
+        let v = v.trim_start_matches("tlsv").trim_start_matches("tls");
+        match v.trim_start_matches(['v', '_', '-']) {
+            "1.2" | "12" | "1_2" => Some(ProtocolVersion::Tls12),
+            "1.3" | "13" | "1_3" => Some(ProtocolVersion::Tls13),
+            _ => None,
+        }
+    }
+}
 
 /// Encryption level of handshake data (RFC 9001 terms; the record layer uses the same three).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -282,25 +345,47 @@ impl CipherSuite {
 pub enum NamedGroup {
     X25519,
     Secp256r1,
+    /// secp384r1 (feature `p384`): not in the default lists; add it to `groups` to offer or
+    /// accept it.
+    #[cfg(feature = "p384")]
+    Secp384r1,
 }
 
 impl NamedGroup {
+    /// The default groups, in preference order.
     pub const ALL: [NamedGroup; 2] = [NamedGroup::X25519, NamedGroup::Secp256r1];
     pub fn id(self) -> u16 {
         match self {
             NamedGroup::X25519 => 0x001d,
             NamedGroup::Secp256r1 => 0x0017,
+            #[cfg(feature = "p384")]
+            NamedGroup::Secp384r1 => 0x0018,
         }
     }
     pub fn from_id(id: u16) -> Option<NamedGroup> {
-        NamedGroup::ALL.into_iter().find(|g| g.id() == id)
+        match id {
+            0x001d => Some(NamedGroup::X25519),
+            0x0017 => Some(NamedGroup::Secp256r1),
+            #[cfg(feature = "p384")]
+            0x0018 => Some(NamedGroup::Secp384r1),
+            _ => None,
+        }
+    }
+    /// The IANA name (`x25519`, `secp256r1`, `secp384r1`).
+    pub fn name(self) -> &'static str {
+        match self {
+            NamedGroup::X25519 => "x25519",
+            NamedGroup::Secp256r1 => "secp256r1",
+            #[cfg(feature = "p384")]
+            NamedGroup::Secp384r1 => "secp384r1",
+        }
     }
 }
 
 /// An ephemeral key pair.
 pub(crate) struct KeyShare {
     pub group: NamedGroup,
-    private: [u8; 32],
+    private: [u8; 48],
     pub public: Vec<u8>,
 }
 
@@ -314,14 +399,35 @@ impl KeyShare {
     pub fn generate(group: NamedGroup) -> KeyShare {
         match group {
             NamedGroup::X25519 => {
-                let sk = rng::array::<32>();
-                KeyShare { group, public: x25519::x25519_base(&sk).to_vec(), private: sk }
+                let mut sk = rng::array::<32>();
+                let public = x25519::x25519_base(&sk).to_vec();
+                let private = Self::pad(&sk);
+                crate::util::zeroize(&mut sk);
+                KeyShare { group, public, private }
             }
             NamedGroup::Secp256r1 => {
-                let sk = p256::generate_private();
-                KeyShare { group, public: p256::public_key(&sk).expect("valid scalar").to_vec(), private: sk }
+                let mut sk = p256::generate_private();
+                let public = p256::public_key(&sk).expect("valid scalar").to_vec();
+                let private = Self::pad(&sk);
+                crate::util::zeroize(&mut sk);
+                KeyShare { group, public, private }
+            }
+            #[cfg(feature = "p384")]
+            NamedGroup::Secp384r1 => {
+                let mut sk = crate::crypto::ec::p384::generate_private();
+                let public = crate::crypto::ec::p384::public_key(&sk).expect("valid scalar");
+                let mut private = [0u8; 48];
+                private.copy_from_slice(&sk);
+                crate::util::zeroize(&mut sk);
+                KeyShare { group, public, private }
             }
         }
+    }
+
+    fn pad(sk: &[u8]) -> [u8; 48] {
+        let mut p = [0u8; 48];
+        p[..sk.len()].copy_from_slice(sk);
+        p
     }
 
     /// The shared secret; fails for invalid peer keys.
@@ -330,9 +436,15 @@ impl KeyShare {
         match self.group {
             NamedGroup::X25519 => {
                 let p: [u8; 32] = peer.try_into().map_err(|_| bad())?;
-                x25519::agree(&self.private, &p).map(|s| s.to_vec()).ok_or_else(bad)
+                let sk: &[u8; 32] = self.private[..32].try_into().expect("32 bytes");
+                x25519::agree(sk, &p).map(|s| s.to_vec()).ok_or_else(bad)
             }
-            NamedGroup::Secp256r1 => p256::ecdh(&self.private, peer).map(|s| s.to_vec()).ok_or_else(bad),
+            NamedGroup::Secp256r1 => {
+                let sk: &[u8; 32] = self.private[..32].try_into().expect("32 bytes");
+                p256::ecdh(sk, peer).map(|s| s.to_vec()).ok_or_else(bad)
+            }
+            #[cfg(feature = "p384")]
+            NamedGroup::Secp384r1 => crate::crypto::ec::p384::ecdh(&self.private, peer).ok_or_else(bad),
         }
     }
 }
@@ -465,3 +577,36 @@ pub(crate) const HRR_RANDOM: [u8; 32] = [
     0xcf, 0x21, 0xad, 0x74, 0xe5, 0x9a, 0x61, 0x11, 0xbe, 0x1d, 0x8c, 0x02, 0x1e, 0x65, 0xb8, 0x91, 0xc2, 0xa2, 0x11, 0x16, 0x7a,
     0xbb, 0x8c, 0x5e, 0x07, 0x9e, 0x09, 0xe2, 0xc8, 0xa8, 0x33, 0x9c,
 ];
+
+/// How a peer's certificate chain is checked (shared by both versions and both sides).
+pub(crate) struct PeerCheck<'a> {
+    pub roots: &'a crate::x509::RootStore,
+    /// Unix seconds.
+    pub now: i64,
+    pub eku: &'a str,
+    #[cfg(feature = "revocation")]
+    pub revocation: Option<&'a crate::revocation::RevocationPolicy>,
+    #[cfg(feature = "revocation")]
+    pub staple: Option<&'a [u8]>,
+}
+
+impl PeerCheck<'_> {
+    /// Validates the chain (and its revocation status, when a policy is set) and returns the
+    /// leaf's public key. `host` is an argument rather than a field, so that a server-only build
+    /// (every caller passes `None`) leaves the hostname checks out.
+    pub fn verify(&self, certs: &[Vec<u8>], host: Option<&str>) -> Result<PublicKey> {
+        #[cfg(feature = "revocation")]
+        if let Some(policy) = self.revocation {
+            let path = crate::x509::verify_chain_path(certs, host, self.roots, self.now, self.eku)?;
+            crate::revocation::check_path(&path, policy, self.now, self.staple)?;
+            return path
+                .into_iter()
+                .next()
+                .and_then(|leaf| leaf.public_key)
+                .ok_or_else(|| Error::proto(alert::UNSUPPORTED_CERTIFICATE, "unsupported certificate key"));
+        }
+        crate::x509::verify_chain(certs, host, self.roots, self.now, self.eku)?
+            .public_key
+            .ok_or_else(|| Error::proto(alert::UNSUPPORTED_CERTIFICATE, "unsupported certificate key"))
+    }
+}

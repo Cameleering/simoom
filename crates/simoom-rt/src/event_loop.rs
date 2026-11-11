@@ -15,7 +15,7 @@ use simoom_sys::udp::Transmit;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 const LISTENER_BIT: u64 = 1 << 63;
@@ -26,43 +26,64 @@ const INITIAL_RECV_BUFFERS: usize = 8;
 const COMPACT_INPUT: usize = 512;
 /// How long loop 0 balances its accepts after the lazy loops started.
 const BALANCE_AFTER_GROWTH_NS: u64 = 1_000_000_000;
+/// A loop that saw no I/O for this long after a burst gives the buffers its pool cached back to
+/// the allocator, keeping [`IDLE_POOL_KEEP`] per size class, and asks the allocator to return
+/// free memory to the OS (K2, K8).
+#[cfg_attr(not(feature = "idle-trim"), allow(dead_code))]
+const IDLE_TRIM_NS: u64 = 1_000_000_000;
+#[cfg_attr(not(feature = "idle-trim"), allow(dead_code))]
+const IDLE_POOL_KEEP: usize = 4;
+/// Events left in a turn from which a connection's response is written as soon as its callback
+/// returns (K4).
+const FLUSH_EARLY_BATCH: usize = 16;
+/// I/O events since the last trim that make a burst worth trimming after.
+#[cfg_attr(not(feature = "idle-trim"), allow(dead_code))]
+const BURST_EVENTS: u64 = 4096;
 const UDP_BIT: u64 = 1 << 62;
 
 /// A task run on a loop thread.
 pub(crate) type Task = Box<dyn FnOnce(&mut LoopCtx<'_>) + Send>;
 
+/// What other threads queue for a loop. Messages to a connection or endpoint are their own
+/// variants, so a reply costs no closure allocation.
+pub(crate) enum Item {
+    Task(Task),
+    Conn(u64, Message),
+    Udp(usize, Message),
+}
+
+/// A loop's inbox: a lock-free MPSC queue (K3: `Responder::send` from a worker thread takes
+/// no lock and, while the loop is running or spinning, makes no system call; a parked loop is
+/// signalled once per batch through [`Waker::post`]).
 pub(crate) struct Queue {
-    tasks: Mutex<Vec<Task>>,
+    items: simoom_sys::mpsc::Mpsc<Item>,
     pub(crate) waker: Waker,
     closed: AtomicBool,
 }
 
 impl Queue {
     pub(crate) fn new(waker: Waker) -> Queue {
-        Queue { tasks: Mutex::new(Vec::new()), waker, closed: AtomicBool::new(false) }
+        Queue { items: simoom_sys::mpsc::Mpsc::new(), waker, closed: AtomicBool::new(false) }
     }
 
-    fn push(&self, t: Task) -> bool {
-        {
-            let mut q = self.tasks.lock().unwrap();
-            if self.closed.load(Ordering::Acquire) {
-                return false;
-            }
-            q.push(t);
+    fn push(&self, t: Item) -> bool {
+        if self.closed.load(Ordering::Acquire) {
+            return false;
         }
-        self.waker.wake();
-        true
+        self.items.push(t);
+        self.waker.post();
+        // Closed meanwhile: the item is dropped with the queue (or by `close`).
+        !self.closed.load(Ordering::Acquire)
     }
 
-    fn take(&self, into: &mut Vec<Task>) {
-        let mut q = self.tasks.lock().unwrap();
-        std::mem::swap(&mut *q, into);
+    fn take(&self, into: &mut Vec<Item>) {
+        self.items.take(into);
     }
 
     fn close(&self) {
-        let mut q = self.tasks.lock().unwrap();
         self.closed.store(true, Ordering::Release);
-        q.clear();
+        let mut v = Vec::new();
+        self.items.take(&mut v);
     }
 }
 
@@ -87,7 +108,7 @@ impl LoopHandle {
 
     /// Runs `f` on the loop thread at its next turn. Returns `false` if the loop has exited.
     pub fn run(&self, f: impl FnOnce(&mut LoopCtx<'_>) + Send + 'static) -> bool {
-        self.queue.push(Box::new(f))
+        self.queue.push(Item::Task(Box::new(f)))
     }
 }
 
@@ -111,7 +132,7 @@ impl ConnHandle {
     /// `false` if the loop has exited (the message is dropped).
     pub fn send(&self, msg: Message) -> bool {
         let key = self.key;
-        self.queue.push(Box::new(move |lcx: &mut LoopCtx<'_>| lcx.core.deliver(key, msg)))
+        self.queue.push(Item::Conn(key, msg))
     }
 
     /// The loop running the connection.
@@ -138,7 +159,7 @@ impl EndpointHandle {
     /// has exited.
     pub fn send(&self, msg: Message) -> bool {
         let idx = self.idx;
-        self.queue.push(Box::new(move |lcx: &mut LoopCtx<'_>| lcx.core.deliver_udp(idx, msg)))
+        self.queue.push(Item::Udp(idx, msg))
     }
 }
 
@@ -221,11 +242,61 @@ struct Conn {
     closed: bool,
     /// Timers this connection set that may still be pending: cancelled when it is removed, so
     /// a closed connection leaves nothing in the wheel. Fired ones are pruned as it grows.
-    timers: Vec<TimerId>,
+    timers: ConnTimers,
     /// In a lingering close: the write side is shut down and input is read and dropped until
     /// the peer closes, `linger_left` bytes were dropped, or the linger timer fires.
     lingering: bool,
-    linger_left: usize,
+    linger_left: u32,
+}
+
+/// One shared panic site for [`Core::conn`] (inlined into every `Ctx` method, an `expect`
+/// carried its own message and location into each, K9).
+#[cold]
+#[inline(never)]
+fn no_connection() -> ! {
+    panic!("connection exists during its callback")
+}
+
+/// The timers a connection set that may still be pending. Connections almost always have at
+/// most one (the facade re-arms a single timer), so it lives inline; more go to a side vector
+/// made only when needed (K8: no allocation per idle connection).
+#[derive(Default)]
+struct ConnTimers {
+    one: Option<TimerId>,
+    more: Option<Box<Vec<TimerId>>>,
+}
+
+impl ConnTimers {
+    fn push(&mut self, id: TimerId, wheel: &TimerWheel<TimerTarget>) {
+        if self.one.is_none_or(|t| !wheel.is_pending(t)) {
+            self.one = Some(id);
+            return;
+        }
+        let v = self.more.get_or_insert_with(Default::default);
+        if v.len() >= 4 {
+            v.retain(|t| wheel.is_pending(*t));
+        }
+        v.push(id);
+    }
+
+    fn remove(&mut self, id: TimerId) {
+        if self.one == Some(id) {
+            self.one = None;
+        } else if let Some(v) = self.more.as_mut() {
+            if let Some(i) = v.iter().position(|t| *t == id) {
+                v.swap_remove(i);
+            }
+        }
+    }
+
+    fn cancel_all(&mut self, wheel: &mut TimerWheel<TimerTarget>) {
+        if let Some(t) = self.one.take() {
+            wheel.cancel(t);
+        }
+        for t in self.more.take().into_iter().flat_map(|v| *v) {
+            wheel.cancel(t);
+        }
+    }
 }
 
 pub(crate) struct ListenerSlot {
@@ -302,11 +373,22 @@ pub(crate) struct Core {
     accepted: u64,
     rejected: u64,
     closed: u64,
+    /// The loop clock when the driver last reported I/O ([`IDLE_TRIM_NS`]).
+    #[cfg_attr(not(feature = "idle-trim"), allow(dead_code))]
+    last_io: u64,
+    /// I/O events since the last idle trim.
+    #[cfg_attr(not(feature = "idle-trim"), allow(dead_code))]
+    io_since_trim: u64,
+    /// Events (or messages) of this turn not dispatched yet, the current one included.
+    batch_left: usize,
 }
 
 impl Core {
     fn conn(&mut self, key: u64) -> &mut Conn {
-        self.conns.get_mut(key).expect("connection exists during its callback")
+        match self.conns.get_mut(key) {
+            Some(c) => c,
+            None => no_connection(),
+        }
     }
 
     fn deadline_tick(&self, after: Duration) -> u64 {
@@ -331,6 +413,10 @@ impl Core {
     }
 
     fn with_udp(&mut self, idx: usize, f: impl FnOnce(&mut dyn Endpoint, &mut UdpCtx<'_>)) {
+        // Without the `udp` feature there are no UDP slots: leave every caller's code out.
+        if !cfg!(feature = "udp") {
+            return;
+        }
         let Some(slot) = self.endpoints.get_mut(idx) else { return };
         let Some(mut ep) = slot.take() else { return };
         {
@@ -340,8 +426,10 @@ impl Core {
         self.endpoints[idx] = Some(ep);
     }
 
+    #[inline(never)]
     pub(crate) fn deliver(&mut self, key: u64, msg: Message) {
         self.with_conn(key, |h, cx| h.on_message(cx, msg));
+        self.flush_conn(key);
     }
 
     pub(crate) fn deliver_udp(&mut self, idx: usize, msg: Message) {
@@ -390,14 +478,14 @@ impl Core {
         }
         let Some(c) = self.conns.get_mut(key) else { return };
         c.lingering = true;
-        c.linger_left = self.cfg.linger_bytes;
+        c.linger_left = self.cfg.linger_bytes.min(u32::MAX as usize) as u32;
         if let Some(i) = c.input.take() {
             self.pool.put(i);
         }
         let at = self.deadline_tick(linger);
         let t = self.timers.insert(at, TimerTarget::Linger(key));
         if let Some(c) = self.conns.get_mut(key) {
-            c.timers.push(t);
+            c.timers.push(t, &self.timers);
         }
         self.driver.recv(id, true);
     }
@@ -450,7 +538,7 @@ impl Core {
             want_drain: false,
             closing: false,
             closed: false,
-            timers: Vec::new(),
+            timers: ConnTimers::default(),
             lingering: false,
             linger_left: 0,
         });
@@ -560,6 +648,17 @@ impl Ctx<'_> {
         }
     }
 
+    /// Offers input that is still unconsumed to [`Connection::on_data`] again right after the
+    /// current callback, for a connection that left input unconsumed without pausing (it was
+    /// busy) and can take it now.
+    pub fn redeliver(&mut self) {
+        let c = self.core.conn(self.key);
+        if c.user_paused || c.closed || !c.input.as_ref().is_some_and(|i| !i.is_empty()) {
+            return;
+        }
+        self.core.redeliver.push(self.key);
+    }
+
     /// Asks for [`Connection::on_drain`] once the queued output is at or below the low-water
     /// mark (right after this callback if it already is).
     pub fn notify_drain(&mut self) {
@@ -603,11 +702,7 @@ impl Ctx<'_> {
         let id = self.core.timers.insert(at, TimerTarget::Conn(self.key, token));
         let core = &mut *self.core;
         if let Some(c) = core.conns.get_mut(self.key) {
-            if c.timers.len() >= 4 {
-                let wheel = &core.timers;
-                c.timers.retain(|t| wheel.is_pending(*t));
-            }
-            c.timers.push(id);
+            c.timers.push(id, &core.timers);
         }
         id
     }
@@ -615,9 +710,7 @@ impl Ctx<'_> {
     /// Cancels a timer. Returns whether it was still pending.
     pub fn cancel_timer(&mut self, id: TimerId) -> bool {
         if let Some(c) = self.core.conns.get_mut(self.key) {
-            if let Some(i) = c.timers.iter().position(|t| *t == id) {
-                c.timers.swap_remove(i);
-            }
+            c.timers.remove(id);
         }
         self.core.timers.cancel(id).is_some()
     }
@@ -670,6 +763,19 @@ impl Ctx<'_> {
     /// The index of the loop running this connection.
     pub fn loop_index(&mut self) -> usize {
         self.core.index
+    }
+
+    /// Whether open connections passed three quarters of what the server can hold (its
+    /// `max_connections`, and on Linux its file descriptor limit): time to shed connections
+    /// that hold a slot without doing anything useful (K6).
+    /// Asked only when a slow request head reaches its deadline, so the descriptor limit is
+    /// read then (one `getrlimit`), not kept per loop.
+    #[inline(never)]
+    pub fn connection_pressure(&mut self) -> bool {
+        let max = self.core.cfg.max_connections;
+        let budget = simoom_sys::net::descriptor_limit().map_or(max, |fds| max.min(fds.saturating_sub(32).max(1)));
+        let open = self.core.shared.active.load(Ordering::Relaxed);
+        open.saturating_mul(4) > budget.saturating_mul(3)
     }
 }
 
@@ -850,6 +956,9 @@ pub(crate) fn build(mut setup: LoopSetup) -> io::Result<(Core, Arc<Queue>)> {
         accepted: 0,
         rejected: 0,
         closed: 0,
+        last_io: now_ns,
+        io_since_trim: 0,
+        batch_left: 0,
         cfg,
     };
     Ok((core, queue))
@@ -990,10 +1099,10 @@ impl Core {
             let n = buf.len();
             self.pool.put(buf);
             if c.lingering {
-                if n > c.linger_left {
+                if n > c.linger_left as usize {
                     self.close_now(key, CloseReason::Closed);
                 } else {
-                    c.linger_left -= n;
+                    c.linger_left -= n as u32;
                 }
             }
             return;
@@ -1023,6 +1132,23 @@ impl Core {
             return;
         }
         self.call_data(key);
+        self.flush_conn(key);
+    }
+
+    /// Hands a connection's output to the socket now (K4), where the driver can do so without an
+    /// extra system call, when enough of the turn's work is left that waiting for it would delay
+    /// this response (a small batch flushes at the end of the turn as before, at no cost).
+    #[inline]
+    fn flush_conn(&mut self, key: u64) {
+        if self.batch_left < FLUSH_EARLY_BATCH {
+            return;
+        }
+        if let Some(c) = self.conns.get_mut(key) {
+            if !c.closed {
+                let id = c.id;
+                self.driver.flush_now(id);
+            }
+        }
     }
 
     fn call_data(&mut self, key: u64) {
@@ -1131,9 +1257,7 @@ impl Core {
             return;
         }
         let Some(mut c) = self.conns.remove(key) else { return };
-        for t in c.timers.drain(..) {
-            self.timers.cancel(t);
-        }
+        c.timers.cancel_all(&mut self.timers);
         if let Some(i) = c.input.take() {
             self.pool.put(i);
         }
@@ -1155,6 +1279,24 @@ impl Core {
                 TimerTarget::Linger(key) => self.close_now(key, CloseReason::Closed),
             }
         }
+    }
+
+    /// After a burst: frees what it left once the loop has been idle a while; else shortens
+    /// the wait to that moment.
+    #[cfg(feature = "idle-trim")]
+    #[cold]
+    #[inline(never)]
+    fn idle_trim(&mut self, timeout: Option<Duration>) -> Option<Duration> {
+        let at = self.last_io.saturating_add(IDLE_TRIM_NS);
+        if self.now_ns >= at {
+            self.pool.trim(IDLE_POOL_KEEP);
+            self.driver.trim_buffers(INITIAL_RECV_BUFFERS);
+            self.io_since_trim = 0;
+            simoom_sys::alloc::release_free_memory();
+            return timeout;
+        }
+        let left = Duration::from_nanos(at - self.now_ns);
+        Some(timeout.map_or(left, |t| t.min(left)))
     }
 
     fn after_callbacks(&mut self) {
@@ -1208,7 +1350,7 @@ impl Core {
     pub(crate) fn run(&mut self) -> io::Result<()> {
         self.start_io()?;
         let mut events = Vec::with_capacity(256);
-        let mut tasks: Vec<Task> = Vec::new();
+        let mut tasks: Vec<Item> = Vec::new();
         let mut stop_at: Option<u64> = None;
         let mut aborted = false;
         let recv_size = self.cfg.buffer_classes[0];
@@ -1233,25 +1375,45 @@ impl Core {
                     timeout = Some(timeout.unwrap().min(Duration::from_millis(10)));
                 }
             }
-            if self.grow_next {
+            if self.grow_next || (!self.parked.is_empty() && self.grown && !self.shared.growing.load(Ordering::Acquire)) {
+                // Also: connections parked while the lazy loops started, and the start is over
+                // (or had nothing to start: one loop): spread them now, not at the next event
+                // (they waited for it, up to a timer away, before).
                 timeout = Some(Duration::ZERO);
+            }
+            #[cfg(feature = "idle-trim")]
+            if self.pool.stats().cached > 3 * IDLE_POOL_KEEP || self.io_since_trim >= BURST_EVENTS {
+                timeout = self.idle_trim(timeout);
             }
             self.driver.turn(timeout, &mut events)?;
             self.now_ns = simoom_sys::time::now_ns();
+            #[cfg(feature = "idle-trim")]
+            if !events.is_empty() {
+                self.last_io = self.now_ns;
+                self.io_since_trim += events.len() as u64;
+            }
             let mut woke = false;
-            for ev in events.drain(..) {
+            let n = events.len();
+            for (i, ev) in events.drain(..).enumerate() {
                 if matches!(ev, Event::Wake) {
                     woke = true;
                 }
+                self.batch_left = n - i;
                 self.dispatch(ev);
             }
             if woke {
                 self.queue.take(&mut tasks);
-                for t in tasks.drain(..) {
-                    let mut lcx = LoopCtx { core: self };
-                    t(&mut lcx);
+                let n = tasks.len();
+                for (i, t) in tasks.drain(..).enumerate() {
+                    self.batch_left = n - i;
+                    match t {
+                        Item::Task(t) => t(&mut LoopCtx { core: self }),
+                        Item::Conn(key, msg) => self.deliver(key, msg),
+                        Item::Udp(idx, msg) => self.deliver_udp(idx, msg),
+                    }
                 }
             }
+            self.batch_left = 0;
             if self.grown && self.handoff_until == 0 && !self.shared.growing.load(Ordering::Acquire) {
                 // The lazy loops run. Connections already queued on this loop's listener (a
                 // burst that arrived before theirs existed) are handed out for a while too.

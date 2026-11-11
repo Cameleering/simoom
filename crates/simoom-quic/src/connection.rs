@@ -473,6 +473,10 @@ impl Connection {
     pub fn alpn(&self) -> Option<&[u8]> {
         self.session.alpn_protocol()
     }
+    /// The TLS session: SNI, cipher suite, the peer's certificate chain.
+    pub fn tls(&self) -> &dyn CryptoSession {
+        &*self.session
+    }
     pub fn remote_address(&self) -> SocketAddr {
         self.path.remote
     }

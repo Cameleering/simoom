@@ -13,3 +13,11 @@ workspace = true
 
 [dependencies]
 simoom-hpack = { path = "../simoom-hpack" }
+
+[features]
+default = ["connect-protocol", "keepalive"]
+# RFC 8441 extended CONNECT (WebSocket over HTTP/2): `Config::enable_connect_protocol`,
+# `Headers::protocol`, `Connection::send_extended_connect`. Without it the option is ignored.
+connect-protocol = []
+# PING keepalive (`Config::keepalive_interval_ms`). Without it the options are ignored.
+keepalive = []

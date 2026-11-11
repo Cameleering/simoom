@@ -18,6 +18,8 @@ These decisions take precedence over anything later in this note that disagrees 
    (`cameleer-http`, `cameleer-tls`, `cameleer-grpc`). This supersedes "not a full web-server
    replacement" in item 1 as far as Cameleer's needs go (static files and a reverse proxy are
    still out of scope).
+   **Independent library (owner, 2026-11-09):** features a good standalone HTTP library is
+   expected to have are in scope even when Cameleer doesn't use them (BUGS.md L1–L8).
 1. **Not a full web-server replacement.** simoom is an embeddable HTTP engine. It does what
    Cameleer needs as a whole, and it is also usable by other services:
    - serve routes, REST and MCP, including streaming (SSE and chunked) and WebSocket upgrades;
@@ -37,7 +39,9 @@ These decisions take precedence over anything later in this note that disagrees 
    | HTTP/1.1, HTTP/2 and TLS 1.3 | at most 600 KB |
    | everything, HTTP/3 included | at most 1 MB |
 
-   Each protocol is a cargo feature, so a build pays only for what it uses. CI measures the
+   Each protocol is a cargo feature, so a build pays only for what it uses. **The 1 MB budget
+   applies to the full server build** (owner, 2026-11-09); builds that add the HTTP client, extra
+   codecs, keystores or TLS 1.2 are reported in size.sh without a budget. CI measures the
    size of every feature combination and fails when a budget is exceeded.
 5. **TLS is owned by simoom.** QUIC needs TLS 1.3 handshake messages without records (RFC 9001),
    header protection, and a sans-io API. So `simoom-tls` is a server-first TLS 1.3

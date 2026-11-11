@@ -13,7 +13,7 @@
 #[path = "reference/cameleer_compress.rs"]
 mod cameleer;
 
-use simoom_compress::{compress, decompress, Format};
+use simoom_compress::{compress, decompress, decompress_into, Format};
 use std::time::Instant;
 
 struct Rng(u64);
@@ -111,6 +111,76 @@ fn time(mut f: impl FnMut()) -> f64 {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // `c FORMAT LEVEL IN OUT`, `d FORMAT IN OUT`, `bench FORMAT LEVEL IN`, `bd FORMAT IN` (for
+    // comparisons with the reference tools; FORMAT is gzip, br or zstd)
+    if args.len() > 5 && args[1] == "bc" {
+        // `bc FORMAT LEVEL FILE N`: N compressions, for counting instructions per byte
+        let f = Format::from_content_encoding(args[2].as_bytes()).expect("format");
+        let d = std::fs::read(&args[4]).unwrap();
+        let (level, it) = (args[3].parse().unwrap(), args[5].parse::<usize>().unwrap());
+        let mut n = 0;
+        for _ in 0..it {
+            n = compress(&d, f, level).len();
+        }
+        println!("{} {n}", d.len() * it);
+        return;
+    }
+    if args.len() > 2 && args[1] == "bd" {
+        // `bd FORMAT FILE`: decompression speed (output MB/s) of an existing stream
+        let f = Format::from_content_encoding(args[2].as_bytes()).expect("format");
+        let c = std::fs::read(&args[3]).unwrap();
+        let n = decompress(&c, f, 1 << 30).unwrap().len();
+        // the output buffer is reused, as the reference tools do
+        let mut out = Vec::new();
+        if let Some(it) = args.get(4) {
+            // `bd FORMAT FILE N`: N decodes, for counting instructions per byte
+            let mut total = 0;
+            for _ in 0..it.parse::<usize>().unwrap() {
+                out.clear();
+                decompress_into(&c, f, 1 << 30, &mut out).unwrap();
+                total += out.len();
+            }
+            println!("{total}");
+            return;
+        }
+        let td = time(|| {
+            out.clear();
+            decompress_into(&c, f, 1 << 30, &mut out).unwrap();
+            std::hint::black_box(&out);
+        });
+        println!("{:.1}", n as f64 / td / 1e6);
+        return;
+    }
+    if args.len() > 2 && matches!(args[1].as_str(), "c" | "d" | "bench") {
+        let f = Format::from_content_encoding(args[2].as_bytes()).expect("format");
+        match args[1].as_str() {
+            "c" => {
+                let d = std::fs::read(&args[4]).unwrap();
+                std::fs::write(&args[5], compress(&d, f, args[3].parse().unwrap())).unwrap();
+            }
+            "d" => {
+                let d = std::fs::read(&args[3]).unwrap();
+                std::fs::write(&args[4], decompress(&d, f, 1 << 30).unwrap()).unwrap();
+            }
+            _ => {
+                let d = std::fs::read(&args[4]).unwrap();
+                let level = args[3].parse().unwrap();
+                let c = compress(&d, f, level);
+                assert!(decompress(&c, f, d.len()).unwrap() == d);
+                let tc = time(|| {
+                    std::hint::black_box(compress(&d, f, level));
+                });
+                let mut out = Vec::new();
+                let td = time(|| {
+                    out.clear();
+                    decompress_into(&c, f, d.len(), &mut out).unwrap();
+                    std::hint::black_box(&out);
+                });
+                println!("{:.3} {:.1} {:.1}", c.len() as f64 / d.len() as f64, d.len() as f64 / tc / 1e6, d.len() as f64 / td / 1e6);
+            }
+        }
+        return;
+    }
     let corpus = corpus();
     if let Some(i) = args.iter().position(|a| a == "--write-corpus") {
         let dir = std::path::PathBuf::from(&args[i + 1]);

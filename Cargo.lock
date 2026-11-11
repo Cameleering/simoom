@@ -6,6 +6,7 @@ version = 4
 name = "simoom"
 version = "0.1.0"
 dependencies = [
+ "simoom-compress",
  "simoom-h2",
  "simoom-h3",
  "simoom-http1",
@@ -26,6 +27,28 @@ dependencies = [
  "simoom-rt",
  "simoom-sys",
  "simoom-tls",
+]
+
+[[package]]
+name = "simoom-client"
+version = "0.1.0"
+dependencies = [
+ "simoom",
+ "simoom-compress",
+ "simoom-h2",
+ "simoom-h3",
+ "simoom-http1",
+ "simoom-quic",
+ "simoom-rt",
+ "simoom-sys",
+ "simoom-tls",
+]
+
+[[package]]
+name = "simoom-compress"
+version = "0.1.0"
+dependencies = [
+ "simoom-sys",
 ]
 
 [[package]]
@@ -52,6 +75,7 @@ version = "0.1.0"
 name = "simoom-http1"
 version = "0.1.0"
 dependencies = [
+ "simoom-compress",
  "simoom-sys",
 ]
 

@@ -4,7 +4,8 @@
 //! buffered whole except control frames, at most 131 bytes). It checks reserved bits, opcodes,
 //! masking direction, minimal length encoding, control-frame rules, fragmentation order,
 //! close codes, UTF-8 of text messages across fragments, and frame and message size limits.
-//! No extensions (permessage-deflate is not supported, so RSV bits must be zero).
+//! Extensions: permessage-deflate (RFC 7692) with the `permessage-deflate` feature
+//! ([`deflate`]); without a negotiated extension the RSV bits must be zero.
 
 use crate::parse::has_token;
 use crate::sha1::sha1;
@@ -108,10 +109,18 @@ pub fn validate_handshake<'b>(req: &Request<'b, '_>) -> Result<Handshake<'b>, Ha
 
 /// Appends the `101` reply, choosing `protocol` (which must be one the client offered).
 pub fn write_accept(out: &mut Vec<u8>, hs: &Handshake<'_>, protocol: Option<&[u8]>) -> Result<(), Error> {
+    write_accept_with(out, hs, protocol, None)
+}
+
+/// [`write_accept`] with a `Sec-WebSocket-Extensions` value (from [`deflate::negotiate`]).
+pub fn write_accept_with(out: &mut Vec<u8>, hs: &Handshake<'_>, protocol: Option<&[u8]>, extensions: Option<&[u8]>) -> Result<(), Error> {
     let mut w = HeadWriter::response(out, 101);
     w.header(b"Upgrade", b"websocket")?.header(b"Connection", b"Upgrade")?.header(b"Sec-WebSocket-Accept", &hs.accept)?;
     if let Some(p) = protocol {
         w.header(b"Sec-WebSocket-Protocol", p)?;
+    }
+    if let Some(e) = extensions {
+        w.header(b"Sec-WebSocket-Extensions", e)?;
     }
     w.finish();
     Ok(())
@@ -200,13 +209,15 @@ pub enum WsError {
     InvalidClose,
     /// A frame after a Close.
     AfterClose,
+    /// A compressed message that doesn't inflate (permessage-deflate).
+    Compression,
 }
 
 impl WsError {
     /// The close code to send: 1007 for UTF-8, 1009 for size, 1002 for the rest.
     pub fn close_code(self) -> u16 {
         match self {
-            WsError::InvalidUtf8 => 1007,
+            WsError::InvalidUtf8 | WsError::Compression => 1007,
             WsError::FrameTooLarge | WsError::MessageTooLarge => 1009,
             _ => 1002,
         }
@@ -321,9 +332,24 @@ pub struct FrameDecoder {
     message_len: u64,
     utf8: Utf8,
     closed: bool,
+    /// permessage-deflate is in use: RSV1 marks a compressed message.
+    rsv1_ok: bool,
+    /// The current message is compressed (its text is checked after inflating).
+    compressed: bool,
 }
 
 impl FrameDecoder {
+    /// Accepts RSV1 on the first frame of a data message (permessage-deflate negotiated).
+    pub fn set_permessage_deflate(&mut self, on: bool) {
+        self.rsv1_ok = on;
+    }
+
+    /// The message whose pieces are being returned has RSV1 set: inflate it (RFC 7692 §6.2).
+    /// UTF-8 is then not checked here: check the inflated text.
+    pub fn message_compressed(&self) -> bool {
+        self.compressed
+    }
+
     /// A decoder for `role` with `limits`.
     pub fn new(role: Role, limits: WsLimits) -> Self {
         FrameDecoder {
@@ -338,6 +364,8 @@ impl FrameDecoder {
             message_len: 0,
             utf8: Utf8::default(),
             closed: false,
+            rsv1_ok: false,
+            compressed: false,
         }
     }
 
@@ -352,7 +380,8 @@ impl FrameDecoder {
         }
         let [b0, b1, ..] = *buf else { return Ok((0, WsEvent::NeedMore)) };
         let fin = b0 & 0x80 != 0;
-        if b0 & 0x70 != 0 {
+        let rsv1 = b0 & 0x40 != 0;
+        if b0 & 0x30 != 0 || (rsv1 && (!self.rsv1_ok || !matches!(b0 & 0x0f, 1 | 2))) {
             return Err(WsError::ReservedBits);
         }
         let opcode = match b0 & 0x0f {
@@ -450,6 +479,7 @@ impl FrameDecoder {
                 self.text = opcode == Opcode::Text;
                 self.message_len = 0;
                 self.utf8 = Utf8::default();
+                self.compressed = rsv1;
             }
         }
         self.message_len += len;
@@ -477,7 +507,7 @@ impl FrameDecoder {
             apply_mask(piece, k, usize::from(self.mask_pos));
             self.mask_pos = ((usize::from(self.mask_pos) + n) & 3) as u8;
         }
-        if self.text && !self.utf8.feed(piece) {
+        if self.text && !self.compressed && !self.utf8.feed(piece) {
             return Err(WsError::InvalidUtf8);
         }
         self.remaining -= n as u64;
@@ -487,7 +517,7 @@ impl FrameDecoder {
     fn finish_piece<'a>(&mut self, used: usize, piece: &'a [u8]) -> Result<(usize, WsEvent<'a>), WsError> {
         let fin = self.remaining == 0 && self.frame_fin;
         if fin {
-            if self.text && self.utf8.need != 0 {
+            if self.text && !self.compressed && self.utf8.need != 0 {
                 return Err(WsError::InvalidUtf8);
             }
             self.in_message = false;
@@ -543,3 +573,14 @@ pub fn write_close(out: &mut Vec<u8>, code: u16, reason: &str, mask: Option<[u8;
     write_frame(out, true, Opcode::Close, &p[..2 + reason.len()], mask);
     true
 }
+
+/// [`write_frame`] for a compressed (permessage-deflate) message: RSV1 set on this, its first
+/// frame.
+pub fn write_frame_compressed(out: &mut Vec<u8>, fin: bool, opcode: Opcode, payload: &[u8], mask: Option<[u8; 4]>) {
+    let at = out.len();
+    write_frame(out, fin, opcode, payload, mask);
+    out[at] |= 0x40;
+}
+
+#[cfg(feature = "permessage-deflate")]
+pub mod deflate;

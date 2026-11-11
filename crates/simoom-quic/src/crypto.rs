@@ -93,6 +93,18 @@ pub trait CryptoSession: Send {
     /// Client: the connection continues in another QUIC version (compatible version
     /// negotiation, RFC 9368) before any Handshake keys exist; later keys use its labels.
     fn set_version(&mut self, _version: u32) {}
+    /// Server: the SNI name the client sent.
+    fn server_name(&self) -> Option<&str> {
+        None
+    }
+    /// The negotiated TLS cipher suite (its IANA code, `0x1301`...).
+    fn cipher_suite(&self) -> Option<u16> {
+        None
+    }
+    /// The peer's verified certificate chain (DER, leaf first); empty without one.
+    fn peer_certificates(&self) -> &[Vec<u8>] {
+        &[]
+    }
 }
 
 /// Endpoint-wide crypto services.

@@ -13,7 +13,8 @@ workspace = true
 
 [dependencies]
 simoom-qpack = { path = "../simoom-qpack" }
-simoom-quic = { path = "../simoom-quic" }
+simoom-quic = { path = "../simoom-quic", default-features = false }
 
 [dev-dependencies]
+simoom-quic = { path = "../simoom-quic" }
 simoom-tls = { path = "../simoom-tls" }

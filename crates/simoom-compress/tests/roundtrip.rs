@@ -242,7 +242,9 @@ fn zlib_or_raw_detects_both() {
     assert_eq!(Format::from_content_encoding(b"GZip"), Some(Format::Gzip));
     assert_eq!(Format::from_content_encoding(b"x-gzip"), Some(Format::Gzip));
     assert_eq!(Format::from_content_encoding(b"deflate"), Some(Format::ZlibOrRaw));
+    #[cfg(not(feature = "brotli"))]
     assert_eq!(Format::from_content_encoding(b"br"), None);
+    assert_eq!(Format::from_content_encoding(b"compress"), None);
 }
 
 #[test]

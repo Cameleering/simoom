@@ -18,13 +18,15 @@ simoom-sys = { path = "../simoom-sys", default-features = false }
 # Always linked for the Date header, header validation and base64; its request parser is linked
 # only with the `http1` feature, its WebSocket codec only with `websocket`.
 simoom-http1 = { path = "../simoom-http1", default-features = false }
-simoom-h2 = { path = "../simoom-h2", optional = true }
+# Its `connect-protocol` and `keepalive` features come with `websocket-h2` and `h2-keepalive`.
+simoom-h2 = { path = "../simoom-h2", optional = true, default-features = false }
 simoom-tls = { path = "../simoom-tls", optional = true, default-features = false }
-simoom-quic = { path = "../simoom-quic", optional = true }
+simoom-quic = { path = "../simoom-quic", optional = true, default-features = false }
 simoom-h3 = { path = "../simoom-h3", optional = true }
+simoom-compress = { path = "../simoom-compress", optional = true }
 
 [features]
-default = ["http1", "http2", "websocket", "io-uring", "watchdog"]
+default = ["http1", "http2", "websocket", "io-uring", "watchdog", "guard", "idle-trim"]
 # HTTP/1.1 over TCP: keep-alive, pipelining, chunked bodies, 100-continue.
 http1 = []
 # HTTP/2: h2c with prior knowledge and `Upgrade: h2c`, and h2 over TLS through ALPN.
@@ -43,23 +45,60 @@ websocket = ["http1", "simoom-http1/websocket"]
 # and moves their route to the offload pool. On by default; an edge build that leaves it out
 # saves its code, and `inline_budget` and the stall limits are then ignored.
 watchdog = []
+# Overload and slow-client guards (K5, K6): admission by backpressure
+# (`Limits::max_pending_per_loop`, `Limits::pending_503`), slow request heads kept open until the
+# server is short of connections (`Limits::slow_head_limit`) and the per-IP reconnect rate
+# (`Limits::reconnect_rate`). On by default; an edge build that leaves it out saves their code,
+# those limits are then ignored and slow heads close at `head_timeout`.
+guard = []
+# Memory returned after bursts (simoom-rt `idle-trim`): an idle loop frees cached buffers and
+# asks the allocator to give free memory back to the OS. On by default.
+idle-trim = ["simoom-rt/idle-trim"]
 # Alias of `websocket`.
 ws = ["websocket"]
-full = ["http1", "http2", "http3", "tls", "tls-extra", "tls-client", "websocket", "io-uring", "watchdog"]
-# simoom-tls's TLS client. The server never needs it; HTTP/3 pulls it in through simoom-quic
-# (its QUIC client), and the TLS tests use it.
-tls-client = ["tls", "simoom-tls/client"]
+# WebSocket over HTTP/2 (RFC 8441, extended CONNECT): `Reply::websocket` also accepts
+# `:protocol websocket` streams. Not in `default` or `full`, which keep their size budgets.
+websocket-h2 = ["websocket", "http2", "simoom-h2/connect-protocol"]
+# HTTP/2 PING keepalive (`Limits::h2_keepalive`): finds clients that vanished behind
+# long-lived streams. Without it those limits are ignored.
+h2-keepalive = ["http2", "simoom-h2/keepalive"]
+# Response compression (gzip, deflate) negotiated from `Accept-Encoding`
+# (`Builder::compression`), and request body decoding (`Request::decoded_body`).
+compression = ["dep:simoom-compress"]
+# Brotli (`br`) and zstd responses and request decoding, on top of `compression`.
+brotli = ["compression", "simoom-compress/brotli"]
+zstd = ["compression", "simoom-compress/zstd"]
+# WebSocket over HTTP/3 (RFC 9220, extended CONNECT): `Reply::websocket` also accepts
+# `:protocol websocket` streams on QUIC.
+websocket-h3 = ["websocket", "http3"]
+# WebSocket permessage-deflate (RFC 7692, `Builder::websocket_deflate`).
+ws-deflate = ["websocket", "simoom-http1/permessage-deflate"]
+# Server helpers (each its own feature): `multipart/form-data` parsing (`simoom::multipart`),
+# cookies (`simoom::cookie`), conditional and range requests (`simoom::conditional`), CORS
+# (`simoom::cors`).
+multipart = []
+cookies = []
+conditional = []
+cors = []
+# Authentication helpers (`simoom::auth`): Basic, Digest (RFC 7616, signed nonces, replay
+# protection, rspauth), Bearer extraction and the `Auth::wrap` service. Hashes and HMAC from
+# simoom-tls (MD5 from its `legacy` module).
+auth = ["dep:simoom-tls", "simoom-tls/legacy"]
+full = ["http1", "http2", "http3", "tls", "tls-extra", "tls-client", "websocket", "io-uring", "watchdog", "guard", "idle-trim"]
+# The TLS client (simoom-tls's, and simoom-quic's QUIC client). The server never needs it; the
+# TLS and HTTP/3 tests use it.
+tls-client = ["tls", "simoom-tls/client", "simoom-quic?/client"]
 # The Linux io_uring back end (`Backend::IoUring`; without it that falls back to epoll). On by
 # default for servers; an edge build (`--no-default-features --features http1`) leaves it out.
 io-uring = ["simoom-rt/io-uring"]
 
 [[example]]
 name = "h3_bulk"
-required-features = ["http3"]
+required-features = ["http3", "tls-client"]
 
 [[example]]
 name = "interop_server"
-required-features = ["http3"]
+required-features = ["http3", "tls-extra"]
 
 [[test]]
 name = "watchdog"

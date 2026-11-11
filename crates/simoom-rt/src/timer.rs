@@ -18,8 +18,16 @@ const READY: usize = OVERFLOW + 1;
 /// A handle to a scheduled timer, for [`TimerWheel::cancel`]. Stale handles are ignored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TimerId {
-    idx: u32,
+    /// The node index plus one (so `Option<TimerId>` is as small as `TimerId`, K8).
+    idx: core::num::NonZeroU32,
     gen: u32,
+}
+
+impl TimerId {
+    #[inline]
+    fn index(self) -> usize {
+        self.idx.get() as usize - 1
+    }
 }
 
 struct Node<T> {
@@ -158,23 +166,24 @@ impl<T> TimerWheel<T> {
         };
         self.link(idx);
         self.len += 1;
-        TimerId { idx, gen: self.nodes[idx as usize].gen }
+        TimerId { idx: core::num::NonZeroU32::MIN.saturating_add(idx), gen: self.nodes[idx as usize].gen }
     }
 
     /// Whether a timer is still scheduled (not expired and popped, not cancelled).
     pub fn is_pending(&self, id: TimerId) -> bool {
-        self.nodes.get(id.idx as usize).is_some_and(|n| n.gen == id.gen && n.payload.is_some())
+        self.nodes.get(id.index()).is_some_and(|n| n.gen == id.gen && n.payload.is_some())
     }
 
     /// Cancels a timer and returns its payload, or `None` if it already expired or was
     /// cancelled.
     pub fn cancel(&mut self, id: TimerId) -> Option<T> {
-        let n = self.nodes.get(id.idx as usize)?;
+        let n = self.nodes.get(id.index())?;
         if n.gen != id.gen || n.payload.is_none() {
             return None;
         }
-        self.unlink(id.idx);
-        Some(self.release(id.idx))
+        let idx = id.index() as u32;
+        self.unlink(idx);
+        Some(self.release(idx))
     }
 
     fn release(&mut self, idx: u32) -> T {

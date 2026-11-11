@@ -61,12 +61,98 @@ pub(crate) struct RecordCipher {
     aead: Aead,
     iv: [u8; 12],
     pub seq: u64,
+    /// TLS 1.2 record format: 0 = TLS 1.3, 1 = AES-GCM with an explicit nonce, 2 =
+    /// ChaCha20-Poly1305 (RFC 7905, nonce = IV xor sequence number).
+    #[cfg(feature = "tls12")]
+    v12: u8,
 }
 
 impl RecordCipher {
     pub fn new(suite: CipherSuite, secret: &[u8]) -> RecordCipher {
         let (key, iv) = traffic_key_iv(suite, secret);
-        RecordCipher { aead: Aead::new(suite.aead(), &key), iv, seq: 0 }
+        RecordCipher {
+            aead: Aead::new(suite.aead(), &key),
+            iv,
+            seq: 0,
+            #[cfg(feature = "tls12")]
+            v12: 0,
+        }
+    }
+
+    /// A TLS 1.2 record cipher (RFC 5288 AES-GCM, RFC 7905 ChaCha20-Poly1305) from the key
+    /// block's write key and IV (4 bytes of salt for GCM, 12 for ChaCha20).
+    #[cfg(feature = "tls12")]
+    pub fn tls12(alg: AeadAlg, key: &[u8], iv: &[u8]) -> RecordCipher {
+        let mut n = [0u8; 12];
+        n[..iv.len()].copy_from_slice(iv);
+        #[cfg(feature = "chacha20")]
+        let v12 = if alg == AeadAlg::Chacha20Poly1305 { 2 } else { 1 };
+        #[cfg(not(feature = "chacha20"))]
+        let v12 = 1;
+        RecordCipher { aead: Aead::new(alg, key), iv: n, seq: 0, v12 }
+    }
+
+
+    #[cfg(feature = "tls12")]
+    fn aad12(&self, typ: u8, len: usize) -> [u8; 13] {
+        let mut a = [0u8; 13];
+        a[..8].copy_from_slice(&self.seq.to_be_bytes());
+        a[8] = typ;
+        a[9] = 3;
+        a[10] = 3;
+        a[11..].copy_from_slice(&(len as u16).to_be_bytes());
+        a
+    }
+
+    /// TLS 1.2: appends one protected record of type `typ` (RFC 5246 section 6.2.3.3).
+    #[cfg(feature = "tls12")]
+    fn seal_record12(&mut self, typ: u8, payload: &[u8], out: &mut Vec<u8>) -> Result<()> {
+        let explicit = if self.v12 == 1 { 8 } else { 0 };
+        let len = explicit + payload.len() + TAG;
+        out.reserve(5 + len);
+        out.extend_from_slice(&[typ, 3, 3, (len >> 8) as u8, len as u8]);
+        if explicit > 0 {
+            out.extend_from_slice(&self.seq.to_be_bytes());
+        }
+        let start = out.len();
+        out.extend_from_slice(payload);
+        let aad = self.aad12(typ, payload.len());
+        let n = nonce(&self.iv, self.seq);
+        let tag = self.aead.seal(&n, &aad, &mut out[start..]);
+        out.extend_from_slice(&tag);
+        self.seq += 1;
+        Ok(())
+    }
+
+    /// TLS 1.2: decrypts a record body in place. Returns the content type (the record
+    /// header's), the offset of the plaintext in `body` and its length.
+    #[cfg(feature = "tls12")]
+    pub fn open_record12(&mut self, header: &[u8; 5], body: &mut [u8]) -> Result<(u8, usize, usize)> {
+        let explicit = if self.v12 == 1 { 8 } else { 0 };
+        if body.len() < explicit + TAG {
+            return Err(Error::proto(alert::BAD_RECORD_MAC, "record too short"));
+        }
+        if self.seq == u64::MAX {
+            return Err(Error::proto(alert::INTERNAL_ERROR, "sequence number exhausted"));
+        }
+        let n = if explicit > 0 {
+            let mut n = self.iv;
+            n[4..].copy_from_slice(&body[..8]);
+            n
+        } else {
+            nonce(&self.iv, self.seq)
+        };
+        let ct_len = body.len() - explicit - TAG;
+        if ct_len > MAX_PLAINTEXT {
+            return Err(Error::proto(alert::RECORD_OVERFLOW, "plaintext too long"));
+        }
+        let aad = self.aad12(header[0], ct_len);
+        let (ct, tag) = body[explicit..].split_at_mut(ct_len);
+        if !self.aead.open(&n, &aad, ct, tag) {
+            return Err(Error::proto(alert::BAD_RECORD_MAC, "record authentication failed"));
+        }
+        self.seq += 1;
+        Ok((header[0], explicit, ct_len))
     }
 
     /// Appends one protected record carrying `payload` of content type `typ` to `out`.
@@ -74,6 +160,10 @@ impl RecordCipher {
         debug_assert!(payload.len() <= MAX_PLAINTEXT);
         if self.seq == u64::MAX {
             return Err(Error::proto(alert::INTERNAL_ERROR, "sequence number exhausted"));
+        }
+        #[cfg(feature = "tls12")]
+        if self.v12 != 0 {
+            return self.seal_record12(typ, payload, out);
         }
         let len = payload.len() + 1 + TAG;
         let start = out.len();
@@ -87,6 +177,25 @@ impl RecordCipher {
         out.extend_from_slice(&tag);
         self.seq += 1;
         Ok(())
+    }
+
+    /// Whether this cipher uses the TLS 1.2 record format.
+    #[inline]
+    pub fn is_tls12(&self) -> bool {
+        #[cfg(feature = "tls12")]
+        return self.v12 != 0;
+        #[cfg(not(feature = "tls12"))]
+        false
+    }
+
+    /// Decrypts a record of either format: (content type, plaintext offset in `body`, length).
+    #[inline]
+    pub fn open_any(&mut self, header: &[u8; 5], body: &mut [u8]) -> Result<(u8, usize, usize)> {
+        #[cfg(feature = "tls12")]
+        if self.v12 != 0 {
+            return self.open_record12(header, body);
+        }
+        self.open_record(header, body).map(|(t, n)| (t, 0, n))
     }
 
     /// Decrypts a record body in place (`header` is the 5-byte record header). Returns the inner

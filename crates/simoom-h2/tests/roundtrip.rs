@@ -490,3 +490,75 @@ fn server_response_without_reading_body_cuts_it_off() {
     assert!(cev.contains(&Ev::Reset { stream: 1, code: ErrorCode::NO_ERROR, remote: true }));
     assert_eq!((c.tracked_streams(), s.tracked_streams()), (0, 0));
 }
+
+/// RFC 9113 §8.1: a server may send a complete response before the request is complete and
+/// then RST_STREAM(NO_ERROR); the client must not discard the response. (Cameleer's
+/// `a_complete_response_survives_rst_stream_no_error`, INTEROP bug 20, for the client role.)
+#[test]
+fn client_keeps_a_complete_response_followed_by_rst_stream_no_error() {
+    let mut c = Connection::client(quiet());
+    let mut s = Connection::server(quiet());
+    // a POST whose body is still coming
+    let id = c.send_request(b"POST", b"https", b"h", b"/early", &[], false).unwrap();
+    let (cev, _) = exchange(
+        &mut c,
+        &mut s,
+        |srv, e| {
+            if let Ev::Headers { stream, end: false, .. } = e {
+                // answer at once, then finish the handler: the engine resets the unread request
+                // side with RST_STREAM(NO_ERROR)
+                srv.send_response(*stream, 200, &[], false).unwrap();
+                assert_eq!(srv.send_data(*stream, b"early answer", true), Ok(12));
+                srv.stream_finished(*stream);
+            }
+        },
+        |_, _| {},
+    );
+    assert!(cev.iter().any(|e| matches!(e, Ev::Headers { stream, status: Some(200), .. } if *stream == id)), "{cev:?}");
+    let body: Vec<u8> = cev.iter().filter_map(|e| match e { Ev::Data { stream, data, .. } if *stream == id => Some(data.clone()), _ => None }).flatten().collect();
+    assert_eq!(body, b"early answer");
+    assert!(cev.contains(&Ev::Data { stream: id, data: b"early answer".to_vec(), end: true }), "{cev:?}");
+    // the reset, if reported at all, is NO_ERROR and comes after the end of the response
+    let end_at = cev.iter().position(|e| matches!(e, Ev::Data { end: true, .. })).unwrap();
+    for (i, e) in cev.iter().enumerate() {
+        if let Ev::Reset { code, .. } = e {
+            assert_eq!(*code, ErrorCode::NO_ERROR);
+            assert!(i > end_at);
+        }
+        assert!(!matches!(e, Ev::GoAway { .. } | Ev::Closed(_)), "{cev:?}");
+    }
+    // the rest of the request body is dropped without a connection error
+    let _ = c.send_data(id, b"late request body", true);
+    let (cev2, _) = exchange(&mut c, &mut s, |_, _| {}, |_, _| {});
+    assert!(!cev2.iter().any(|e| matches!(e, Ev::GoAway { .. } | Ev::Closed(_))), "{cev2:?}");
+    assert!(!c.wants_close() && !s.wants_close());
+    // and the connection carries on
+    let id2 = c.send_request(b"GET", b"https", b"h", b"/next", &[], true).unwrap();
+    let (cev3, _) = exchange(&mut c, &mut s, respond_hello, |_, _| {});
+    assert!(cev3.contains(&Ev::Data { stream: id2, data: b"Hello, world!".to_vec(), end: true }), "{cev3:?}");
+}
+
+/// The same with the response and the RST_STREAM(NO_ERROR) in one read, as a raw server sends
+/// them.
+#[test]
+fn client_keeps_a_response_and_rst_stream_no_error_in_one_read() {
+    let mut c = Connection::client(quiet());
+    let id = c.send_request(b"POST", b"https", b"h", b"/early", &[], false).unwrap();
+    drain(&mut c);
+    let mut raw = Raw::new();
+    raw.settings(&[]).settings_ack();
+    raw.headers(id, &[(":status", "200"), ("content-type", "text/plain")], false);
+    raw.data(id, b"early answer", true);
+    raw.rst(id, ErrorCode::NO_ERROR);
+    let (evs, frames) = feed(&mut c, &raw.take(), 0);
+    assert!(evs.iter().any(|e| matches!(e, Ev::Headers { stream, status: Some(200), end: false, .. } if *stream == id)), "{evs:?}");
+    assert!(evs.contains(&Ev::Data { stream: id, data: b"early answer".to_vec(), end: true }), "{evs:?}");
+    assert!(evs.iter().all(|e| !matches!(e, Ev::Reset { code, .. } if *code != ErrorCode::NO_ERROR)), "{evs:?}");
+    assert_eq!(goaway(&frames), None);
+    assert_eq!(rst(&frames, id), None, "the client must not answer the reset");
+    let _ = c.send_data(id, b"late", true);
+    let frames = drain(&mut c);
+    assert_eq!(goaway(&frames), None);
+    assert!(frames.iter().all(|f| !(f.h.kind == kind::DATA && f.h.stream == id)), "nothing more is sent on a reset stream");
+    assert!(!c.wants_close());
+}

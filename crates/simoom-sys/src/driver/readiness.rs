@@ -60,12 +60,14 @@ struct Entry {
     /// A UDP socket receiving into large buffers (GRO).
     large: bool,
     off: usize,
-    out: VecDeque<OutBuf>,
+    /// Buffers waiting to be sent; a queue from the driver's spares while there are any (K8:
+    /// an idle stream holds 8 bytes here instead of an empty queue's 32).
+    out: Option<Box<VecDeque<OutBuf>>>,
 }
 
 pub(crate) struct Driver<P: Poller> {
     poller: P,
-    waker: Waker,
+    pub(crate) waker: Waker,
     slab: Slab<Entry>,
     stash: Vec<Vec<u8>>,
     large: LargeBufs,
@@ -87,7 +89,13 @@ pub(crate) struct Driver<P: Poller> {
     spin: Spin,
     /// Turns in a row that returned results without polling the OS.
     skips: u8,
+    /// Empty output queues with capacity, lent to the streams that are sending (K8: an idle
+    /// stream holds no queue allocation, and a busy one allocates none).
+    spare_out: Vec<Box<VecDeque<OutBuf>>>,
 }
+
+/// Most spare output queues a driver keeps.
+const SPARE_OUT: usize = 256;
 
 /// Receive buffers a readiness driver starts with.
 const INITIAL_TARGET: usize = 8;
@@ -114,6 +122,7 @@ impl<P: Poller> Driver<P> {
             budget: cfg.recv_budget.max(1),
             spin: Spin::new(cfg),
             skips: 0,
+            spare_out: Vec::new(),
         })
     }
 
@@ -137,7 +146,7 @@ impl<P: Poller> Driver<P> {
             registered: kind != Kind::Stream,
             large: false,
             off: 0,
-            out: VecDeque::new(),
+            out: None,
         });
         if kind == Kind::Stream {
             self.unregistered.push(id);
@@ -225,7 +234,8 @@ impl<P: Poller> Driver<P> {
             self.pending.push(Event::Sent { key, buf });
             return;
         }
-        e.out.push_back(buf);
+        let spare = &mut self.spare_out;
+        e.out.get_or_insert_with(|| spare.pop().unwrap_or_default()).push_back(buf);
         if !e.in_flush {
             e.in_flush = true;
             self.flush_list.push(id);
@@ -240,7 +250,7 @@ impl<P: Poller> Driver<P> {
 
     pub(crate) fn close(&mut self, id: Id) {
         let Some(e) = self.slab.remove(id) else { return };
-        for buf in e.out {
+        for buf in e.out.into_iter().flat_map(|q| *q) {
             self.pending.push(Event::Sent { key: e.key, buf });
         }
         self.pending.push(Event::Closed { key: e.key });
@@ -264,6 +274,12 @@ impl<P: Poller> Driver<P> {
     pub(crate) fn set_buffer_target(&mut self, n: usize) {
         self.max_target = n.max(1);
         self.target = self.target.min(self.max_target);
+    }
+
+    pub(crate) fn trim_buffers(&mut self, keep: usize) {
+        self.target = INITIAL_TARGET.min(self.max_target).max(keep.min(self.max_target));
+        self.stash.truncate(keep);
+        self.spare_out = Vec::new();
     }
 
     pub(crate) fn stats(&self) -> DriverStats {
@@ -294,7 +310,7 @@ impl<P: Poller> Driver<P> {
         }
         let timeout = if out.len() > start || work { Some(Duration::ZERO) } else { timeout };
         let (poller, ready) = (&mut self.poller, &mut self.ready);
-        self.spin.wait(timeout, true, &mut self.stats, |t, st| {
+        self.spin.wait(timeout, true, &mut self.stats, &self.waker.inner, &mut |t, st| {
             poller.wait(ready, t, st)?;
             Ok(!ready.is_empty())
         })?;
@@ -327,7 +343,7 @@ impl<P: Poller> Driver<P> {
             }
             if r.writable || r.closed {
                 e.writable = true;
-                if !e.out.is_empty() && !e.in_flush {
+                if e.out.is_some() && !e.in_flush {
                     e.in_flush = true;
                     self.flush_list.push(id);
                 }
@@ -505,12 +521,30 @@ impl<P: Poller> Driver<P> {
         }
         let list = std::mem::take(&mut self.flush_list);
         for id in list {
-            let Some(e) = self.slab.get_mut(id) else { continue };
+            self.flush_entry(id, out);
+        }
+    }
+
+    /// Writes one stream's queued output now (K4: a response goes out as soon as its callback
+    /// returns, not after every other connection of the turn ran); its results are reported by
+    /// the next turn. The stream may still be on the flush list, where it is then skipped.
+    pub(crate) fn flush_now(&mut self, id: Id) {
+        if self.slab.get(id).is_some_and(|e| e.in_flush && e.writable) {
+            let mut out = std::mem::take(&mut self.pending);
+            self.flush_entry(id, &mut out);
+            self.pending = out;
+        }
+    }
+
+    fn flush_entry(&mut self, id: Id, out: &mut Vec<Event>) {
+        {
+            let Some(e) = self.slab.get_mut(id) else { return };
             e.in_flush = false;
-            while e.writable && !e.out.is_empty() && !e.failed {
+            while e.writable && !e.failed {
+                let Some(q) = e.out.as_deref_mut().filter(|q| !q.is_empty()) else { break };
                 let mut slices: [&[u8]; 64] = [&[]; 64];
                 let mut n = 0;
-                for (i, b) in e.out.iter().take(64).enumerate() {
+                for (i, b) in q.iter().take(64).enumerate() {
                     slices[i] = if i == 0 { &b.as_slice()[e.off..] } else { b.as_slice() };
                     n += 1;
                 }
@@ -521,11 +555,11 @@ impl<P: Poller> Driver<P> {
                     Ok(mut w) => {
                         let partial = w < total;
                         while w > 0 {
-                            let front = e.out.front().unwrap().len() - e.off;
+                            let front = q.front().unwrap().len() - e.off;
                             if w >= front {
                                 w -= front;
                                 e.off = 0;
-                                let buf = e.out.pop_front().unwrap();
+                                let buf = q.pop_front().unwrap();
                                 out.push(Event::Sent { key: e.key, buf });
                             } else {
                                 e.off += w;
@@ -533,9 +567,9 @@ impl<P: Poller> Driver<P> {
                             }
                         }
                         // Zero-length buffers are done as soon as they reach the front.
-                        while e.out.front().is_some_and(|b| b.len() == e.off) {
+                        while q.front().is_some_and(|b| b.len() == e.off) {
                             e.off = 0;
-                            let buf = e.out.pop_front().unwrap();
+                            let buf = q.pop_front().unwrap();
                             out.push(Event::Sent { key: e.key, buf });
                         }
                         if partial {
@@ -548,9 +582,16 @@ impl<P: Poller> Driver<P> {
                         e.failed = true;
                         e.off = 0;
                         out.push(Event::Error { key: e.key, error });
-                        for buf in e.out.drain(..) {
+                        for buf in q.drain(..) {
                             out.push(Event::Sent { key: e.key, buf });
                         }
+                    }
+                }
+            }
+            if e.out.as_ref().is_some_and(|q| q.is_empty()) {
+                if let Some(q) = e.out.take() {
+                    if self.spare_out.len() < SPARE_OUT {
+                        self.spare_out.push(q);
                     }
                 }
             }

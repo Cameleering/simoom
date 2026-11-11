@@ -14,7 +14,11 @@ use std::time::{Duration, Instant};
 
 fn start() -> ServerHandle {
     let ss = certgen::issue(&CertParams::server(&["localhost"]), PrivateKey::generate_ec(EcCurve::P256), None);
-    let cfg = ServerConfig::new(CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap());
+    let mut cfg = ServerConfig::new(CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap());
+    // These tests check a TLS 1.3-only server. Feature unification can switch on simoom-tls's
+    // `tls12` (a workspace-wide `--all-features` run does), and then the default would also
+    // accept TLS 1.2.
+    cfg.require_tls13();
     Server::builder()
         .listen_tls("127.0.0.1:0")
         .tls(cfg)
@@ -126,7 +130,11 @@ fn slow_fragmented_garbage_is_bounded_by_the_head_deadline() {
     // a client that opens TLS and then sends one byte of a record header and stalls must be
     // dropped by the handshake/head deadline, not held forever
     let ss = certgen::issue(&CertParams::server(&["localhost"]), PrivateKey::generate_ec(EcCurve::P256), None);
-    let cfg = ServerConfig::new(CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap());
+    let mut cfg = ServerConfig::new(CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap());
+    // These tests check a TLS 1.3-only server. Feature unification can switch on simoom-tls's
+    // `tls12` (a workspace-wide `--all-features` run does), and then the default would also
+    // accept TLS 1.2.
+    cfg.require_tls13();
     let h = Server::builder()
         .listen_tls("127.0.0.1:0")
         .tls(cfg)

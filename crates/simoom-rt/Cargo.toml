@@ -15,9 +15,12 @@ workspace = true
 simoom-sys = { path = "../simoom-sys", default-features = false }
 
 [features]
-default = ["io-uring", "udp"]
+default = ["io-uring", "udp", "idle-trim"]
 # The Linux io_uring back end (see simoom-sys). Without it `Backend::IoUring` falls back to epoll.
 io-uring = ["simoom-sys/io-uring"]
 # UDP endpoints (`Builder::udp`, for QUIC). A build without it carries none of the UDP receive
 # and send code.
 udp = ["simoom-sys/udp"]
+# After a burst, a loop idle for a second frees what its buffer pool and receive stock cached and
+# asks the C allocator to return free memory to the OS. A build without it keeps them.
+idle-trim = []

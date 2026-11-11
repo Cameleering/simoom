@@ -392,6 +392,12 @@ pub enum SignatureAlgorithm {
     RsaPss { hash: HashAlg, salt_len: usize },
     Ecdsa(HashAlg),
     Ed25519,
+    /// sha1WithRSAEncryption: legacy certificates, CRLs and OCSP responses (feature `sha1`).
+    #[cfg(feature = "sha1")]
+    RsaPkcs1Sha1,
+    /// ecdsa-with-SHA1 (feature `sha1`).
+    #[cfg(feature = "sha1")]
+    EcdsaSha1,
     Unknown(String),
 }
 
@@ -415,6 +421,10 @@ impl SignatureAlgorithm {
             "1.2.840.10045.4.3.2" => SignatureAlgorithm::Ecdsa(HashAlg::Sha256),
             "1.2.840.10045.4.3.3" => SignatureAlgorithm::Ecdsa(HashAlg::Sha384),
             "1.2.840.10045.4.3.4" => SignatureAlgorithm::Ecdsa(HashAlg::Sha512),
+            #[cfg(feature = "sha1")]
+            "1.2.840.113549.1.1.5" => SignatureAlgorithm::RsaPkcs1Sha1,
+            #[cfg(feature = "sha1")]
+            "1.2.840.10045.4.1" => SignatureAlgorithm::EcdsaSha1,
             #[cfg(feature = "ed25519")]
             OID_ED25519 => SignatureAlgorithm::Ed25519,
             OID_RSASSA_PSS => {
@@ -474,6 +484,13 @@ impl SignatureAlgorithm {
             },
             #[cfg(feature = "ed25519")]
             (SignatureAlgorithm::Ed25519, PublicKey::Ed25519(k)) => crate::crypto::ed25519::verify(k, message, sig),
+            #[cfg(all(feature = "sha1", feature = "rsa"))]
+            (SignatureAlgorithm::RsaPkcs1Sha1, PublicKey::Rsa(k)) => k.verify_pkcs1_sha1(&crate::crypto::sha1::Sha1::digest(message), sig),
+            #[cfg(feature = "sha1")]
+            (SignatureAlgorithm::EcdsaSha1, PublicKey::Ec { curve, point }) => match ecdsa_sig_from_der(sig) {
+                Some((r, s)) => curve.verify(point, &crate::crypto::sha1::Sha1::digest(message), &r, &s),
+                None => false,
+            },
             _ => false,
         }
     }

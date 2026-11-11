@@ -216,6 +216,46 @@ impl Hasher for Fnv {
     }
 }
 
+/// New connections per client IP as token buckets ([`crate::Limits::reconnect_rate`]): a
+/// direct-mapped table of 64 Ki entries, made on first use; an address that lands on another's
+/// entry takes it over with a full bucket (the table forgets, it never refuses wrongly).
+#[cfg(feature = "guard")]
+#[derive(Default)]
+pub(crate) struct Reconnects {
+    /// `(address, last refill ns, milli-tokens)`.
+    slots: Vec<(u128, u64, u32)>,
+    seed: u64,
+}
+
+#[cfg(feature = "guard")]
+const RECONNECT_SLOTS: usize = 1 << 16;
+
+#[cfg(feature = "guard")]
+impl Reconnects {
+    /// Takes a token for a connection from `ip` at `now_ns`; `false` when its bucket is empty.
+    pub(crate) fn allow(&mut self, ip: std::net::IpAddr, rate: u32, now_ns: u64) -> bool {
+        if self.slots.is_empty() {
+            let mut b = [0u8; 8];
+            let _ = simoom_sys::arch::os_random(&mut b);
+            self.seed = u64::from_le_bytes(b) | 1;
+            self.slots = vec![(0, 0, 0); RECONNECT_SLOTS];
+        }
+        let k = IpCounts::key(ip);
+        let h = ((k as u64) ^ ((k >> 64) as u64) ^ self.seed).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let s = &mut self.slots[(h >> 48) as usize];
+        let cap = u64::from(rate).saturating_mul(1000).min(u64::from(u32::MAX));
+        let tokens = if s.0 != k || s.1 == 0 {
+            cap
+        } else {
+            let refill = (now_ns.saturating_sub(s.1) as u128 * u128::from(rate) / 1_000_000) as u64;
+            (u64::from(s.2) + refill.min(cap)).min(cap)
+        };
+        let ok = tokens >= 1000;
+        *s = (k, now_ns.max(1), (if ok { tokens - 1000 } else { tokens }) as u32);
+        ok
+    }
+}
+
 /// Open connections per client IP ([`crate::Limits::max_connections_per_ip`]): an
 /// open-addressing table (linear probing, backward-shift deletion) with a hash keyed by OS
 /// randomness, so clients can't aim addresses at one bucket. std's `HashMap` costs about 4 KB
@@ -450,3 +490,97 @@ mod tests {
         std::time::Instant::now().elapsed().as_nanos() as u64 + 1
     }
 }
+
+#[cfg(feature = "guard")]
+thread_local! {
+    /// Replies outstanding on this loop thread and the bound from the limits (K5).
+    static PENDING: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+    /// Connections that stopped reading because of the bound, to wake when it is met again.
+    static PARKED: RefCell<Vec<simoom_rt::ConnHandle>> = const { RefCell::new(Vec::new()) };
+    static ANY_PARKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// One reply outstanding (deferred, offloaded) on this loop thread, for admission control
+/// ([`crate::Limits::max_pending_per_loop`], K5). Held in the connection's per-request state,
+/// which lives and dies on the loop thread, so the count is a plain thread-local.
+#[cfg(feature = "guard")]
+pub(crate) struct Pending(());
+
+#[cfg(feature = "guard")]
+impl Pending {
+    #[inline]
+    pub(crate) fn new(max: usize) -> Pending {
+        PENDING.with(|c| {
+            let (n, _) = c.get();
+            c.set((n + 1, max));
+        });
+        Pending(())
+    }
+}
+
+#[cfg(feature = "guard")]
+impl Drop for Pending {
+    #[inline]
+    fn drop(&mut self) {
+        let (n, max) = PENDING.with(|c| {
+            let (n, max) = c.get();
+            let n = n.saturating_sub(1);
+            c.set((n, max));
+            (n, max)
+        });
+        if ANY_PARKED.with(|p| p.get()) && n <= max - max / 4 {
+            wake_parked();
+        }
+    }
+}
+
+/// Whether this loop thread has reached its bound of outstanding replies.
+#[cfg(feature = "guard")]
+#[inline]
+pub(crate) fn over_pending() -> bool {
+    let (n, max) = PENDING.with(|c| c.get());
+    max != 0 && n >= max
+}
+
+/// Remembers a connection that stopped reading because of the bound.
+#[cfg(feature = "guard")]
+pub(crate) fn park(h: simoom_rt::ConnHandle) {
+    PARKED.with(|p| p.borrow_mut().push(h));
+    ANY_PARKED.with(|p| p.set(true));
+}
+
+/// Nudges every parked connection (a message it ignores; the callback re-checks its pause).
+#[cfg(feature = "guard")]
+#[cold]
+#[inline(never)]
+fn wake_parked() {
+    ANY_PARKED.with(|p| p.set(false));
+    let parked = PARKED.with(|p| std::mem::take(&mut *p.borrow_mut()));
+    for h in parked {
+        let env = crate::handle::Envelope { conn: 0, token: u64::MAX, msg: crate::handle::Msg::Dropped };
+        h.send(Box::new(env));
+    }
+}
+
+
+/// Without the `guard` feature: no admission bound (K5).
+#[cfg(not(feature = "guard"))]
+pub(crate) struct Pending;
+
+#[cfg(not(feature = "guard"))]
+impl Pending {
+    #[inline(always)]
+    pub(crate) fn new(_max: usize) -> Pending {
+        Pending
+    }
+}
+
+#[cfg(not(feature = "guard"))]
+#[inline(always)]
+pub(crate) fn over_pending() -> bool {
+    false
+}
+
+#[cfg(not(feature = "guard"))]
+#[inline(always)]
+pub(crate) fn park(_h: simoom_rt::ConnHandle) {}

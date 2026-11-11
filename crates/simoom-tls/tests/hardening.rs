@@ -83,6 +83,13 @@ fn reject(s: &mut ServerConnection, data: &[u8]) -> (Error, Option<u8>) {
 
 #[test]
 fn tls12_only_client_hello_gets_protocol_version() {
+    // with the tls12 feature a server refuses TLS 1.2 only when configured TLS 1.3-only
+    #[cfg(feature = "tls12")]
+    let server = || {
+        let (mut s, _) = pair(KeyKind::P256);
+        s.min_version = simoom_tls::tls::ProtocolVersion::Tls13;
+        ServerConnection::new(Arc::new(s))
+    };
     let mut s = server();
     let (_, a) = reject(&mut s, &record(22, &client_hello(0x0303, &[0x0303, 0x0302])));
     assert_eq!(a, Some(alert::PROTOCOL_VERSION));
@@ -192,11 +199,13 @@ fn client_rejects_the_downgrade_sentinels() {
         c.read_tls(&sh);
         assert_eq!(c.process_new_packets().unwrap_err().alert(), Some(alert::ILLEGAL_PARAMETER));
     }
-    // a plain TLS 1.2 ServerHello is protocol_version
+    // a plain TLS 1.2 ServerHello is protocol_version (with the tls12 feature: handshake_failure,
+    // since this one lacks the extended master secret the client requires)
     let mut c = client();
     let sh = tls12_server_hello(&mut c, [0x42; 32]);
     c.read_tls(&sh);
-    assert_eq!(c.process_new_packets().unwrap_err().alert(), Some(alert::PROTOCOL_VERSION));
+    let want = if cfg!(feature = "tls12") { alert::HANDSHAKE_FAILURE } else { alert::PROTOCOL_VERSION };
+    assert_eq!(c.process_new_packets().unwrap_err().alert(), Some(want));
 }
 
 #[test]

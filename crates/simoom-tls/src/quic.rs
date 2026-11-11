@@ -378,6 +378,9 @@ impl QuicConnection {
             match ev {
                 Event::Msg(_, m) => out.extend_from_slice(&m),
                 Event::Ccs => {}
+                // QUIC is TLS 1.3 only: the engines never choose TLS 1.2 for it
+                #[cfg(feature = "tls12")]
+                Event::ChangeCipher12(_) => {}
                 Event::Secrets { level, client, server } => {
                     let suite = self.engine.shared().suite.expect("suite");
                     let keys = Keys::new(suite, version, is_client, &client, &server);

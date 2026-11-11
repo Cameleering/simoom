@@ -32,18 +32,45 @@
 //! assert_eq!(plain, text);
 //! ```
 //!
-//! Brotli and zstd are not implemented: Cameleer supports neither for HTTP (its HTTP producer
-//! negotiates `gzip, deflate`, and its Kafka client refuses zstd), so nothing needs them yet.
+//! # Brotli and zstd
+//!
+//! With the `brotli` feature, [`Format::Brotli`] (RFC 7932): a complete decoder (context
+//! modelling, block switching, the static dictionary and its transforms) and an encoder
+//! (qualities 0-11; LZ77 with one prefix code per category, no context modelling). The
+//! 122,784-byte dictionary is stored DEFLATE-compressed (58,898 bytes) and inflated on first
+//! use.
+//!
+//! With the `zstd` feature, [`Format::Zstd`] (RFC 8878): a complete decoder (frames,
+//! skippable frames, raw, RLE and compressed blocks, Huffman and FSE tables, repeat offsets,
+//! the checksum, dictionaries through [`Decoder::add_dictionary`]) and an encoder (levels 1-22
+//! mapped to greedy, chained and lazy matching; Huffman literals and fitted FSE tables).
+//!
+//! Both decoders cap the window a stream may declare ([`Decoder::window_limit`]) as well as
+//! the output ([`Decoder::with_limit`]).
 #![forbid(unsafe_code)]
 
 mod checksum;
+mod codec;
 mod deflate;
 mod inflate;
 mod tables;
+#[cfg(any(feature = "brotli", feature = "zstd"))]
+mod fastlz;
+#[cfg(any(feature = "brotli", feature = "zstd"))]
+mod lz;
+#[cfg(any(feature = "brotli", feature = "zstd"))]
+mod window;
+#[cfg(feature = "brotli")]
+mod brotli;
+#[cfg(feature = "zstd")]
+mod zstd;
 
 pub use checksum::{adler32, crc32, Adler32, Crc32};
-pub use deflate::Encoder;
-pub use inflate::Decoder;
+pub use codec::{Decoder, Encoder};
+#[cfg(feature = "brotli")]
+pub use brotli::DEFAULT_MAX_WINDOW as BROTLI_DEFAULT_MAX_WINDOW;
+#[cfg(feature = "zstd")]
+pub use zstd::DEFAULT_MAX_WINDOW as ZSTD_DEFAULT_MAX_WINDOW;
 
 use std::fmt;
 
@@ -59,19 +86,34 @@ pub enum Format {
     /// Decoding: zlib if the data starts with a valid zlib header, else raw DEFLATE (some
     /// servers send raw DEFLATE as `Content-Encoding: deflate`). Encoding: zlib.
     ZlibOrRaw,
+    /// Brotli (RFC 7932), HTTP's `br` (feature `brotli`).
+    #[cfg(feature = "brotli")]
+    Brotli,
+    /// zstd (RFC 8878), HTTP's `zstd` (feature `zstd`).
+    #[cfg(feature = "zstd")]
+    Zstd,
 }
 
 impl Format {
     /// The decoding format for an HTTP content-coding token: `gzip` and `x-gzip` are
-    /// [`Format::Gzip`], `deflate` is [`Format::ZlibOrRaw`]. Case-insensitive.
+    /// [`Format::Gzip`], `deflate` is [`Format::ZlibOrRaw`], `br` is `Format::Brotli` (feature
+    /// `brotli`), `zstd` is `Format::Zstd` (feature `zstd`). Case-insensitive.
     pub fn from_content_encoding(token: &[u8]) -> Option<Format> {
         if token.eq_ignore_ascii_case(b"gzip") || token.eq_ignore_ascii_case(b"x-gzip") {
-            Some(Format::Gzip)
-        } else if token.eq_ignore_ascii_case(b"deflate") {
-            Some(Format::ZlibOrRaw)
-        } else {
-            None
+            return Some(Format::Gzip);
         }
+        if token.eq_ignore_ascii_case(b"deflate") {
+            return Some(Format::ZlibOrRaw);
+        }
+        #[cfg(feature = "brotli")]
+        if token.eq_ignore_ascii_case(b"br") {
+            return Some(Format::Brotli);
+        }
+        #[cfg(feature = "zstd")]
+        if token.eq_ignore_ascii_case(b"zstd") {
+            return Some(Format::Zstd);
+        }
+        None
     }
 
     /// The HTTP content-coding token for data in this format (`raw` has none; it is sent as
@@ -79,6 +121,10 @@ impl Format {
     pub fn content_encoding(self) -> &'static str {
         match self {
             Format::Gzip => "gzip",
+            #[cfg(feature = "brotli")]
+            Format::Brotli => "br",
+            #[cfg(feature = "zstd")]
+            Format::Zstd => "zstd",
             _ => "deflate",
         }
     }
@@ -140,11 +186,11 @@ pub fn compress(data: &[u8], format: Format, level: u32) -> Vec<u8> {
 /// is invalid or truncated, or if a checksum does not match.
 pub fn decompress(data: &[u8], format: Format, limit: usize) -> Result<Vec<u8>, Error> {
     let mut out = Vec::with_capacity(data.len().saturating_mul(3).clamp(256, 1 << 20).min(limit.max(1)));
-    Decoder::new(format).decode_all(data, &mut out, limit)?;
+    Decoder::with_limit(format, limit as u64).decode_all(data, &mut out, limit)?;
     Ok(out)
 }
 
 /// Decompresses `data` in one go, appending to `out` (see [`decompress`]).
 pub fn decompress_into(data: &[u8], format: Format, limit: usize, out: &mut Vec<u8>) -> Result<(), Error> {
-    Decoder::new(format).decode_all(data, out, limit)
+    Decoder::with_limit(format, limit as u64).decode_all(data, out, limit)
 }

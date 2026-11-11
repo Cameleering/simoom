@@ -124,10 +124,10 @@ impl BitWriter {
 /// Code lengths for `freq`, limited to `max_len` bits (Huffman's algorithm, then the Kraft
 /// adjustment that miniz uses: overlong codes are moved to `max_len` and shorter codes are
 /// lengthened until the code is complete again).
-fn build_lengths(freq: &[u32], max_len: usize, lens: &mut [u8]) {
+pub(crate) fn build_lengths(freq: &[u32], max_len: usize, lens: &mut [u8]) {
     let n_sym = freq.len();
     lens[..n_sym].fill(0);
-    let mut leaves = [(0u32, 0u16); 288];
+    let mut leaves = [(0u32, 0u16); 704];
     let mut n = 0;
     for (s, &f) in freq.iter().enumerate() {
         if f != 0 {
@@ -144,8 +144,8 @@ fn build_lengths(freq: &[u32], max_len: usize, lens: &mut [u8]) {
     }
     let leaves = &mut leaves[..n];
     leaves.sort_unstable();
-    let mut weight = [0u32; 2 * 288];
-    let mut parent = [0u16; 2 * 288];
+    let mut weight = [0u32; 2 * 704];
+    let mut parent = [0u16; 2 * 704];
     for i in 0..n {
         weight[i] = leaves[i].0;
     }
@@ -167,7 +167,7 @@ fn build_lengths(freq: &[u32], max_len: usize, lens: &mut [u8]) {
         parent[a] = k as u16;
         parent[b] = k as u16;
     }
-    let mut depth = [0u16; 2 * 288];
+    let mut depth = [0u16; 2 * 704];
     for k in (0..2 * n - 2).rev() {
         depth[k] = depth[parent[k] as usize] + 1;
     }
@@ -202,7 +202,7 @@ fn build_lengths(freq: &[u32], max_len: usize, lens: &mut [u8]) {
 }
 
 /// Canonical codes for `lens`, bit-reversed for LSB-first output.
-fn gen_codes(lens: &[u8], codes: &mut [u16]) {
+pub(crate) fn gen_codes(lens: &[u8], codes: &mut [u16]) {
     let mut count = [0u16; 16];
     for &l in lens {
         count[l as usize] += 1;
@@ -245,11 +245,11 @@ fn fixed() -> &'static Fixed {
 
 /// A streaming compressor producing raw DEFLATE, zlib or gzip data.
 ///
-/// [`Encoder::encode`] buffers input and appends compressed bytes to `out` as blocks fill;
-/// [`Encoder::flush`] makes everything given so far decodable (a sync flush: an empty stored
-/// block ends on a byte boundary, as zlib's `Z_SYNC_FLUSH` does); [`Encoder::finish`] writes the
+/// [`Deflate::encode`] buffers input and appends compressed bytes to `out` as blocks fill;
+/// [`Deflate::flush`] makes everything given so far decodable (a sync flush: an empty stored
+/// block ends on a byte boundary, as zlib's `Z_SYNC_FLUSH` does); [`Deflate::finish`] writes the
 /// last block and the trailer. Levels 0 (stored) to 9; 6 is the usual default.
-pub struct Encoder {
+pub(crate) struct Deflate {
     format: Format,
     level: u8,
     cfg: Cfg,
@@ -273,21 +273,23 @@ pub struct Encoder {
     crc: Crc32,
     adler: Adler32,
     total_in: u64,
+    /// Longest distance used (a smaller window for WebSocket permessage-deflate).
+    max_dist: usize,
 }
 
-impl std::fmt::Debug for Encoder {
+impl std::fmt::Debug for Deflate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Encoder").field("format", &self.format).field("level", &self.level).field("total_in", &self.total_in).finish()
+        f.debug_struct("Deflate").field("format", &self.format).field("level", &self.level).field("total_in", &self.total_in).finish()
     }
 }
 
-impl Encoder {
+impl Deflate {
     /// An encoder for `format` at `level` (0-9; higher values are treated as 9).
     /// [`Format::ZlibOrRaw`] produces zlib.
-    pub fn new(format: Format, level: u32) -> Encoder {
+    pub fn new(format: Format, level: u32) -> Deflate {
         let level = level.min(9) as u8;
         let format = if format == Format::ZlibOrRaw { Format::Zlib } else { format };
-        Encoder {
+        Deflate {
             format,
             level,
             cfg: CFG[level as usize],
@@ -309,7 +311,13 @@ impl Encoder {
             crc: Crc32::new(),
             adler: Adler32::new(),
             total_in: 0,
+            max_dist: MAX_DIST,
         }
+    }
+
+    /// Limits back-references to `2^bits` bytes (8 to 15).
+    pub(crate) fn set_window_bits(&mut self, bits: u32) {
+        self.max_dist = MAX_DIST.min(1 << bits.clamp(8, 15));
     }
 
     /// Starts a new stream with the same format and level, keeping the allocations.
@@ -320,12 +328,8 @@ impl Encoder {
         head.fill(0);
         prev.fill(0);
         syms.clear();
-        *self = Encoder { buf, head, prev, syms, ..Encoder::new(self.format, self.level as u32) };
-    }
-
-    /// The container format.
-    pub fn format(&self) -> Format {
-        self.format
+        let max_dist = self.max_dist;
+        *self = Deflate { buf, head, prev, syms, max_dist, ..Deflate::new(self.format, self.level as u32) };
     }
 
     /// Uncompressed bytes taken so far.
@@ -333,14 +337,14 @@ impl Encoder {
         self.total_in
     }
 
-    /// [`Encoder::finish`] has been called.
+    /// [`Deflate::finish`] has been called.
     pub fn is_finished(&self) -> bool {
         self.finished
     }
 
     /// Compresses `input`, appending any completed output to `out`.
     pub fn encode(&mut self, mut input: &[u8], out: &mut Vec<u8>) {
-        assert!(!self.finished, "Encoder::encode after finish");
+        assert!(!self.finished, "Deflate::encode after finish");
         self.start(out);
         match self.format {
             Format::Gzip => self.crc.update(input),
@@ -362,7 +366,7 @@ impl Encoder {
     /// Sync flush: everything given so far becomes decodable from `out`, which ends on a byte
     /// boundary. Costs 5 bytes or so; compression continues with the same window.
     pub fn flush(&mut self, out: &mut Vec<u8>) {
-        assert!(!self.finished, "Encoder::flush after finish");
+        assert!(!self.finished, "Deflate::flush after finish");
         self.start(out);
         self.process(true, out);
         self.emit_block(false, out);
@@ -373,7 +377,7 @@ impl Encoder {
     }
 
     /// Writes the last block and the container trailer. The encoder is then finished until
-    /// [`Encoder::reset`].
+    /// [`Deflate::reset`].
     pub fn finish(&mut self, out: &mut Vec<u8>) {
         if self.finished {
             return;
@@ -487,7 +491,7 @@ impl Encoder {
             chain >>= 2;
         }
         let nice = (self.cfg.nice as usize).min(max_len);
-        let limit = cur.saturating_sub(MAX_DIST);
+        let limit = cur.saturating_sub(self.max_dist);
         let mut best_dist = 0;
         loop {
             if buf[cand + best] == buf[cur + best] && buf[cand] == buf[cur] && buf[cand + 1] == buf[cur + 1] {
@@ -566,7 +570,7 @@ impl Encoder {
             let mut dist = 0;
             if look >= MIN_MATCH {
                 let cand = self.insert(p);
-                if cand < p && p - cand <= MAX_DIST {
+                if cand < p && p - cand <= self.max_dist {
                     (len, dist) = self.longest_match(p, cand, MIN_MATCH - 1);
                 }
             }
@@ -599,7 +603,7 @@ impl Encoder {
             self.cur_len = MIN_MATCH - 1;
             if look >= MIN_MATCH {
                 let cand = self.insert(p);
-                if cand < p && p - cand <= MAX_DIST && prev_len < self.cfg.lazy as usize {
+                if cand < p && p - cand <= self.max_dist && prev_len < self.cfg.lazy as usize {
                     let (l, d) = self.longest_match(p, cand, prev_len.max(MIN_MATCH - 1));
                     if l >= MIN_MATCH && !(l == MIN_MATCH && d > TOO_FAR) {
                         self.cur_len = l;

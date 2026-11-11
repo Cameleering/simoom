@@ -230,8 +230,21 @@ impl Connection {
             self.rx_pos += 5 + len;
             let body = p + 5..p + 5 + len;
             if typ == content::CHANGE_CIPHER_SPEC {
-                // middlebox compatibility: tolerated, unprotected, only during the handshake
-                if self.rx[body] != [1] || self.engine.shared().done || self.ccs_seen >= 2 {
+                // TLS 1.2: the peer switches to its new keys
+                #[cfg(feature = "tls12")]
+                if self.rx[body.clone()] == [1] {
+                    if let Some(rc) = self.engine.shared_mut().pending_read12.take() {
+                        if !self.hs.is_empty() {
+                            return Err(Error::unexpected("ChangeCipherSpec inside a handshake message"));
+                        }
+                        self.read = Some(rc);
+                        self.read_level = Level::OneRtt;
+                        self.engine.shared_mut().expect_level = Level::OneRtt;
+                        continue;
+                    }
+                }
+                // TLS 1.3 middlebox compatibility: tolerated, unprotected, only during the handshake
+                if self.rx[body] != [1] || self.engine.shared().done || self.ccs_seen >= 2 || self.engine.shared().is_tls12() {
                     return Err(Error::unexpected("ChangeCipherSpec"));
                 }
                 self.ccs_seen += 1;
@@ -243,13 +256,14 @@ impl Connection {
                         let d = self.rx[p + 6];
                         return Err(if d == alert::CLOSE_NOTIFY { Error::unexpected("unprotected close_notify") } else { Error::PeerAlert(d) });
                     }
-                    if typ != content::APPLICATION_DATA {
+                    if !rc.is_tls12() && typ != content::APPLICATION_DATA {
                         return Err(Error::unexpected("unprotected record after the key change"));
                     }
-                    match rc.open_record(&header, &mut self.rx[body.clone()]) {
-                        Ok((t, n)) => {
+                    match rc.open_any(&header, &mut self.rx[body.clone()]) {
+                        Ok((t, off, n)) => {
                             self.early_skipped = usize::MAX;
-                            (t, body.start..body.start + n)
+                            let start = body.start + off;
+                            (t, start..start + n)
                         }
                         // rejected 0-RTT data under the client's early key: skip it
                         Err(_) if self.skip_early(len) => continue,
@@ -300,6 +314,8 @@ impl Connection {
                     match d {
                         alert::CLOSE_NOTIFY => self.peer_closed = true,
                         alert::USER_CANCELED => self.idle_record()?,
+                        // TLS 1.2: a warning that the peer will not renegotiate (we never ask)
+                        alert::NO_RENEGOTIATION if self.engine.shared().is_tls12() && self.rx[range.start] == 1 => self.idle_record()?,
                         _ => return Err(Error::PeerAlert(d)),
                     }
                 }
@@ -338,6 +354,19 @@ impl Connection {
         self.hs.push(self.read_level, data)?;
         let max = self.engine.shared().max_message;
         while let Some((level, msg)) = self.hs.next(max)? {
+            #[cfg(feature = "tls12")]
+            if self.engine.shared().done && self.engine.shared().is_tls12() {
+                // renegotiation is refused (RFC 5746 allows a no_renegotiation warning)
+                self.idle_record()?;
+                let client = self.engine.is_client();
+                if (client && msg[0] == hs::HELLO_REQUEST && msg.len() == 4) || (!client && msg[0] == hs::CLIENT_HELLO) {
+                    if !self.sent_close {
+                        self.send_record(content::ALERT, &[1, alert::NO_RENEGOTIATION])?;
+                    }
+                    continue;
+                }
+                return Err(Error::unexpected("handshake message after the TLS 1.2 handshake"));
+            }
             if self.engine.shared().done && msg[0] == hs::KEY_UPDATE {
                 self.idle_record()?;
                 self.key_update_received(&msg)?;
@@ -393,6 +422,13 @@ impl Connection {
                 Event::Ccs => {
                     self.flush_hs()?;
                     self.tx.extend_from_slice(&[content::CHANGE_CIPHER_SPEC, 3, 3, 0, 1, 1]);
+                }
+                #[cfg(feature = "tls12")]
+                Event::ChangeCipher12(rc) => {
+                    self.flush_hs()?;
+                    self.tx.extend_from_slice(&[content::CHANGE_CIPHER_SPEC, 3, 3, 0, 1, 1]);
+                    self.write = Some(rc);
+                    self.write_level = Level::OneRtt;
                 }
                 Event::Secrets { level, client, server } => {
                     self.flush_hs()?;
@@ -505,9 +541,18 @@ impl Connection {
             self.pending_app.extend_from_slice(data);
             return Ok(data.len());
         }
+        let tls12 = self.engine.shared().is_tls12();
         for chunk in data.chunks(MAX_PLAINTEXT) {
             if self.write.as_ref().is_some_and(|w| w.seq >= KEY_UPDATE_AFTER) {
-                self.send_key_update(false)?;
+                if tls12 {
+                    // TLS 1.2 has no KeyUpdate (and renegotiation is refused): stop well below
+                    // the AES-GCM limit; the application reconnects
+                    if self.write.as_ref().is_some_and(|w| w.seq >= 2 * KEY_UPDATE_AFTER) {
+                        return Err(Error::Config("TLS 1.2 record limit reached; reconnect".into()));
+                    }
+                } else {
+                    self.send_key_update(false)?;
+                }
             }
             self.send_record(content::APPLICATION_DATA, chunk)?;
         }
@@ -567,6 +612,9 @@ impl Connection {
         if !self.engine.shared().done || self.write_level != Level::OneRtt {
             return Err(Error::Config("KeyUpdate requires a completed handshake".into()));
         }
+        if self.engine.shared().is_tls12() {
+            return Err(Error::Config("KeyUpdate is TLS 1.3 only".into()));
+        }
         self.send_record(content::HANDSHAKE, &codec::handshake_msg(hs::KEY_UPDATE, &[request_peer as u8]))?;
         let suite = self.suite();
         self.write_secret = next_traffic_secret(suite.hash(), &self.write_secret);
@@ -582,8 +630,36 @@ impl Connection {
     pub fn alpn_protocol(&self) -> Option<&[u8]> {
         self.engine.shared().alpn.as_deref()
     }
+    /// The TLS 1.3 cipher suite (None for TLS 1.2: see `negotiated_tls12_suite` and
+    /// [`Connection::cipher_suite_name`]).
     pub fn negotiated_cipher_suite(&self) -> Option<CipherSuite> {
         self.engine.shared().suite.filter(|_| !self.is_handshaking())
+    }
+    /// The TLS 1.2 cipher suite, when TLS 1.2 was negotiated.
+    #[cfg(feature = "tls12")]
+    pub fn negotiated_tls12_suite(&self) -> Option<super::tls12::Tls12Suite> {
+        self.engine.shared().tls12.filter(|_| !self.is_handshaking())
+    }
+    /// The IANA name of the negotiated cipher suite, for either version.
+    pub fn cipher_suite_name(&self) -> Option<&'static str> {
+        #[cfg(feature = "tls12")]
+        if let Some(s) = self.negotiated_tls12_suite() {
+            return Some(s.name());
+        }
+        self.negotiated_cipher_suite().map(|s| s.name())
+    }
+    /// The negotiated protocol version (None during the handshake).
+    pub fn protocol_version(&self) -> Option<super::ProtocolVersion> {
+        if self.is_handshaking() {
+            return None;
+        }
+        Some(if self.engine.shared().is_tls12() { super::ProtocolVersion::Tls12 } else { super::ProtocolVersion::Tls13 })
+    }
+    /// Client: the OCSP response the server stapled, if any (feature `revocation`; it was
+    /// validated when the client's revocation policy asked for stapling).
+    #[cfg(feature = "revocation")]
+    pub fn ocsp_response(&self) -> Option<&[u8]> {
+        self.engine.shared().ocsp_response.as_deref()
     }
     pub fn negotiated_group(&self) -> Option<NamedGroup> {
         self.engine.shared().group
@@ -608,7 +684,15 @@ impl Connection {
     }
 
     /// RFC 8446 section 7.5 keying material exporter.
+    /// With TLS 1.2 this is RFC 5705, where an empty `context` means no context.
     pub fn export_keying_material(&self, label: &[u8], context: &[u8], len: usize) -> Result<Vec<u8>> {
+        #[cfg(feature = "tls12")]
+        if let Some(e) = &self.engine.shared().exporter12 {
+            if self.is_handshaking() {
+                return Err(Error::Config("handshake not complete".into()));
+            }
+            return Ok(super::tls12::export(e.hash, &e.master, &e.randoms, label, (!context.is_empty()).then_some(context), len));
+        }
         let em = self.engine.shared().exporter_master.as_ref().ok_or_else(|| Error::Config("handshake not complete".into()))?;
         let h = self.suite().hash();
         let secret = derive_secret(h, em, label, &h.hash(&[]));
@@ -621,6 +705,9 @@ impl Connection {
     pub fn export_traffic_secrets(self) -> Result<ExportedSecrets> {
         if self.is_handshaking() || self.error.is_some() || self.wants_write() || !self.hs.is_empty() {
             return Err(Error::Config("export needs an established connection with no pending output".into()));
+        }
+        if self.engine.shared().is_tls12() {
+            return Err(Error::Config("traffic secret export is TLS 1.3 only".into()));
         }
         let suite = self.suite();
         let dir = |secret: &Vec<u8>, c: &Option<RecordCipher>| {
@@ -844,6 +931,58 @@ mod tests {
         // the client reads the alert under the server's application key
         move_bytes(&mut s, &mut c, &[]).unwrap_err();
         assert_eq!(c.error(), Some(&Error::PeerAlert(alert::UNEXPECTED_MESSAGE)));
+    }
+
+    #[cfg(feature = "tls12")]
+    fn handshaken12() -> (ClientConnection, ServerConnection) {
+        let ss = certgen::issue(&CertParams::server(&["localhost"]), PrivateKey::generate_ec(EcCurve::P256), None);
+        let mut scfg = ServerConfig::new(CertifiedKey::new(vec![ss.cert_der.clone()], ss.key.clone()).unwrap());
+        scfg.max_version = super::super::ProtocolVersion::Tls12;
+        let mut roots = RootStore::empty();
+        roots.add_der(&ss.cert_der).unwrap();
+        let mut c = ClientConnection::new(Arc::new(ClientConfig::new(roots)), "localhost").unwrap();
+        let mut s = ServerConnection::new(Arc::new(scfg));
+        for _ in 0..10 {
+            move_bytes(&mut c, &mut s, &[]).unwrap();
+            move_bytes(&mut s, &mut c, &[]).unwrap();
+        }
+        assert!(!c.is_handshaking() && !s.is_handshaking());
+        assert_eq!(c.protocol_version(), Some(super::super::ProtocolVersion::Tls12));
+        (c, s)
+    }
+
+    #[cfg(feature = "tls12")]
+    #[test]
+    fn tls12_renegotiation_is_refused_with_a_warning() {
+        let (mut c, mut s) = handshaken12();
+        // a ClientHello after the handshake: the server warns no_renegotiation and carries on
+        let ch = forge(&mut c, content::HANDSHAKE, &[hs::CLIENT_HELLO, 0, 0, 4, 3, 3, 0, 0]);
+        feed(&mut s, &ch).unwrap();
+        move_bytes(&mut s, &mut c, &[]).unwrap();
+        assert!(c.error().is_none());
+        let data = forge(&mut c, content::APPLICATION_DATA, b"still here");
+        feed(&mut s, &data).unwrap();
+        assert_eq!(s.plaintext(), b"still here");
+        // a flood of them hits the idle-record bound
+        let mut flood = Vec::new();
+        for _ in 0..100 {
+            flood.extend(forge(&mut c, content::HANDSHAKE, &[hs::CLIENT_HELLO, 0, 0, 4, 3, 3, 0, 0]));
+        }
+        assert_eq!(feed(&mut s, &flood).unwrap_err().alert(), Some(alert::UNEXPECTED_MESSAGE));
+        // a HelloRequest to the client gets the same answer; any other message is fatal
+        let (mut c, mut s) = handshaken12();
+        let mut hr = Vec::new();
+        s.0.write.as_mut().unwrap().seal_record(content::HANDSHAKE, &[hs::HELLO_REQUEST, 0, 0, 0], &mut hr).unwrap();
+        c.read_tls(&hr);
+        c.process_new_packets().unwrap();
+        assert!(c.wants_write());
+        let mut fin = Vec::new();
+        s.0.write.as_mut().unwrap().seal_record(content::HANDSHAKE, &[hs::FINISHED, 0, 0, 0], &mut fin).unwrap();
+        c.read_tls(&fin);
+        assert_eq!(c.process_new_packets().unwrap_err().alert(), Some(alert::UNEXPECTED_MESSAGE));
+        // a stray ChangeCipherSpec after the handshake is fatal too
+        let (_c, mut s) = handshaken12();
+        assert_eq!(feed(&mut s, &[content::CHANGE_CIPHER_SPEC, 3, 3, 0, 1, 1]).unwrap_err().alert(), Some(alert::UNEXPECTED_MESSAGE));
     }
 
     #[test]

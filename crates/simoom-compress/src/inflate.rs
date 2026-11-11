@@ -371,15 +371,15 @@ enum St {
 
 /// A streaming decompressor for raw DEFLATE, zlib or gzip data.
 ///
-/// Feed input with [`Decoder::decode`] (output appended to a `Vec`) or
-/// [`Decoder::decode_into`] (output into a slice, for a fixed per-call bound), then call
-/// [`Decoder::finish`] once the input has ended to check that the stream was complete.
-/// [`Decoder::with_limit`] caps the total output (decompression bombs).
+/// Feed input with [`Inflate::decode`] (output appended to a `Vec`) or
+/// [`Inflate::decode_into`] (output into a slice, for a fixed per-call bound), then call
+/// [`Inflate::finish`] once the input has ended to check that the stream was complete.
+/// [`Inflate::with_limit`] caps the total output (decompression bombs).
 ///
 /// gzip streams may hold several members, which are decoded one after another (RFC 1952 §2.2).
 /// Bytes after the last member that do not start another member are ignored.
 #[derive(Clone)]
-pub struct Decoder {
+pub(crate) struct Inflate {
     format: Format,
     orig: Format,
     st: St,
@@ -413,22 +413,17 @@ pub struct Decoder {
     limit: u64,
 }
 
-impl std::fmt::Debug for Decoder {
+impl std::fmt::Debug for Inflate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Decoder").field("format", &self.format).field("total_in", &self.total_in).field("total_out", &self.total_out).finish()
+        f.debug_struct("Inflate").field("format", &self.format).field("total_in", &self.total_in).field("total_out", &self.total_out).finish()
     }
 }
 
-impl Decoder {
-    /// A decoder for `format`, without an output limit.
-    pub fn new(format: Format) -> Decoder {
-        Decoder::with_limit(format, u64::MAX)
-    }
-
+impl Inflate {
     /// A decoder that fails with [`ErrorKind::LimitExceeded`] once the output would pass `limit`
     /// bytes.
-    pub fn with_limit(format: Format, limit: u64) -> Decoder {
-        Decoder {
+    pub fn with_limit(format: Format, limit: u64) -> Inflate {
+        Inflate {
             format,
             orig: format,
             st: St::Header,
@@ -464,7 +459,7 @@ impl Decoder {
     pub fn reset(&mut self) {
         let win = std::mem::take(&mut self.win);
         let (lit, dist, cl) = (std::mem::take(&mut self.lit), std::mem::take(&mut self.dist), std::mem::take(&mut self.cl));
-        *self = Decoder { win, lit, dist, cl, ..Decoder::with_limit(self.orig, self.limit) };
+        *self = Inflate { win, lit, dist, cl, ..Inflate::with_limit(self.orig, self.limit) };
         self.win.clear();
     }
 
@@ -479,7 +474,7 @@ impl Decoder {
         matches!(self.st, St::Done | St::Member)
     }
 
-    /// Decoded bytes not yet returned by [`Decoder::decode_into`].
+    /// Decoded bytes not yet returned by [`Inflate::decode_into`].
     pub fn has_pending(&self) -> bool {
         self.flushed < self.win.len()
     }
@@ -521,7 +516,7 @@ impl Decoder {
 
     /// Decodes `input` into `output`. Returns `(consumed, written)`. Stops when `output` is
     /// full; call again with the rest of the input (and with an empty input, while
-    /// [`Decoder::has_pending`], to collect the remaining output).
+    /// [`Inflate::has_pending`], to collect the remaining output).
     pub fn decode_into(&mut self, input: &[u8], output: &mut [u8]) -> Result<(usize, usize), Error> {
         let mut pos = 0;
         let mut written = 0;
@@ -878,6 +873,8 @@ impl Decoder {
                 Ok(true)
             }
             Format::Gzip => self.gzip_header(inp, pos),
+            #[allow(unreachable_patterns)]
+            _ => Err(Error::invalid("not a DEFLATE format")),
         }
     }
 

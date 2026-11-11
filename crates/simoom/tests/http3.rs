@@ -1,7 +1,7 @@
 //! HTTP/3 over QUIC on a real UDP socket, with the simoom-quic and simoom-h3 clients, plus
 //! `alt-svc` on the TCP side.
 
-#![cfg(feature = "http3")]
+#![cfg(all(feature = "http3", feature = "tls-client"))]
 
 mod common;
 

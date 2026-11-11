@@ -48,6 +48,9 @@ impl From<Body> for BodyRef<'static> {
 pub(crate) trait Target {
     /// The header list the reply fills (cleared when the reply is created).
     fn headers(&mut self) -> &mut HeaderBuf;
+    /// The trailer fields of the next [`Target::respond`]; empty unless [`Reply::trailer`] added
+    /// some, and emptied by the response that sends them.
+    fn trailers(&mut self) -> &mut HeaderBuf;
     /// A complete response with the headers in [`Target::headers`].
     fn respond(&mut self, status: u16, body: BodyRef<'_>, close: bool);
     /// A pre-serialized response.
@@ -95,6 +98,11 @@ pub struct Reply<'a> {
     status: u16,
     close: bool,
     invalid: bool,
+    /// [`Reply::trailer`] was called: a finisher that sends no trailers must drop them.
+    trailers: bool,
+    /// The negotiated content coding (feature `compression`).
+    #[cfg(feature = "compression")]
+    coding: Option<crate::compress::Neg>,
 }
 
 impl std::fmt::Debug for Reply<'_> {
@@ -106,7 +114,21 @@ impl std::fmt::Debug for Reply<'_> {
 impl<'a> Reply<'a> {
     pub(crate) fn new(t: &'a mut dyn Target) -> Reply<'a> {
         t.headers().clear();
-        Reply { t, status: 200, close: false, invalid: false }
+        Reply {
+            t,
+            status: 200,
+            close: false,
+            invalid: false,
+            trailers: false,
+            #[cfg(feature = "compression")]
+            coding: None,
+        }
+    }
+
+    #[cfg(feature = "compression")]
+    pub(crate) fn with_coding(mut self, n: crate::compress::Neg) -> Self {
+        self.coding = Some(n);
+        self
     }
 
     /// Sets the status code (default 200). A code outside 100..=999, or a 1xx, turns into a 500.
@@ -127,14 +149,43 @@ impl<'a> Reply<'a> {
         self
     }
 
+    /// Adds a trailer field, sent after the body of an immediate response ([`Reply::body`] and
+    /// the like): trailing HEADERS on HTTP/2 and HTTP/3, a trailer section on HTTP/1.1, which
+    /// then uses chunked framing. HTTP/1.0 and `HEAD` get no trailers. A streamed body sends
+    /// trailers with [`BodySink::finish_with_trailers`] and a deferred one with
+    /// [`Response::trailer`]; trailers set here are dropped by those finishers. An invalid name or
+    /// value turns the response into a 500.
+    pub fn trailer(mut self, name: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Self {
+        self.trailers = true;
+        if self.t.trailers().push(name.as_ref(), value.as_ref()) == Pushed::Invalid {
+            self.invalid = true;
+        }
+        self
+    }
+
+    /// Drops trailers a finisher won't send.
+    fn drop_trailers(&mut self) {
+        if self.trailers {
+            self.t.trailers().clear();
+        }
+    }
+
     fn ok(&self) -> bool {
         !self.invalid && (200..=999).contains(&self.status)
     }
 
-    fn finish(self, body: BodyRef<'_>) -> Outcome {
+    fn finish(mut self, body: BodyRef<'_>) -> Outcome {
         if self.ok() {
+            #[cfg(feature = "compression")]
+            if let Some(n) = &self.coding {
+                if let Some(c) = crate::compress::apply(n, self.status, self.t.headers(), body.as_bytes()) {
+                    self.t.respond(self.status, BodyRef::Owned(c), self.close);
+                    return Outcome::Done;
+                }
+            }
             self.t.respond(self.status, body, self.close);
         } else {
+            self.drop_trailers();
             self.t.headers().clear();
             self.t.respond(500, BodyRef::Static(b"Internal Server Error"), self.close);
         }
@@ -171,12 +222,17 @@ impl<'a> Reply<'a> {
         self.status = response.status;
         self.close |= response.close;
         self.invalid = response.invalid;
+        if !response.trailers.is_empty() {
+            self.trailers = true;
+            *self.t.trailers() = response.trailers;
+        }
         self.finish(response.body.into())
     }
 
     /// Sends a pre-serialized reply: the fastest path for fixed answers. Headers and status set
     /// on this reply are ignored.
-    pub fn fixed(self, r: &StaticReply) -> Outcome {
+    pub fn fixed(mut self, r: &StaticReply) -> Outcome {
+        self.drop_trailers();
         self.t.fixed(r, self.close);
         Outcome::Done
     }
@@ -184,14 +240,25 @@ impl<'a> Reply<'a> {
     /// Defers the response: answer later, from any thread, with the [`Responder`]. While a
     /// response is deferred an HTTP/1.1 connection reads no further requests (replies stay in
     /// order); HTTP/2 and HTTP/3 streams carry on independently.
-    pub fn defer(self) -> Responder {
-        self.t.defer()
+    pub fn defer(mut self) -> Responder {
+        self.drop_trailers();
+        let r = self.t.defer();
+        #[cfg(feature = "compression")]
+        let r = r.with_coding(self.coding.take());
+        r
     }
 
     /// Sends the status and headers now and streams the body through the returned
     /// [`BodySink`]: chunked on HTTP/1.1 (close-delimited on HTTP/1.0).
-    pub fn stream(self) -> BodySink {
+    pub fn stream(mut self) -> BodySink {
+        self.drop_trailers();
         let status = if self.ok() { self.status } else { 500 };
+        #[cfg(feature = "compression")]
+        if let Some(n) = &self.coding {
+            if let Some(e) = crate::compress::stream(n, status, self.t.headers()) {
+                return self.t.stream(status, self.close).with_encoder(e);
+            }
+        }
         self.t.stream(status, self.close)
     }
 
@@ -243,13 +310,16 @@ impl<'a> Reply<'a> {
         })
     }
 
-    fn submit(self, job: impl FnOnce(Responder) + Send + 'static) -> Outcome {
+    fn submit(mut self, job: impl FnOnce(Responder) + Send + 'static) -> Outcome {
+        self.drop_trailers();
         let Some(pool) = self.t.pool() else {
             // Already on a worker: run here.
             job(self.t.defer());
             return Outcome::Deferred;
         };
         let responder = self.t.defer();
+        #[cfg(feature = "compression")]
+        let responder = responder.with_coding(self.coding.take());
         match pool.try_submit(Box::new(move || job(responder))) {
             Ok(()) => Outcome::Deferred,
             Err(_) => {
@@ -277,7 +347,8 @@ impl<'a> Reply<'a> {
     /// [`Reply::websocket`], choosing a subprotocol the client offered
     /// (`Sec-WebSocket-Protocol`).
     #[cfg(feature = "websocket")]
-    pub fn websocket_with_protocol(self, protocol: Option<&str>, handler: impl crate::ws::WebSocketHandler) -> Outcome {
+    pub fn websocket_with_protocol(mut self, protocol: Option<&str>, handler: impl crate::ws::WebSocketHandler) -> Outcome {
+        self.drop_trailers();
         if !self.t.websocket(protocol.map(str::as_bytes), Box::new(handler)) {
             self.t.headers().clear();
             self.t.respond(400, BodyRef::Static(b"Bad Request"), true);
@@ -291,7 +362,7 @@ fn run_detached<F>(mut owned: OwnedRequest, responder: Responder, loop_index: us
 where
     F: FnOnce(&mut Request<'_>, Reply<'_>) -> Outcome,
 {
-    let mut t = Detached { responder: Some(responder), headers: HeaderBuf::default(), loop_index };
+    let mut t = Detached { responder: Some(responder), headers: HeaderBuf::default(), trailers: HeaderBuf::default(), loop_index };
     let mut req = owned.as_request();
     let r = catch_unwind(AssertUnwindSafe(|| {
         let _ = f(&mut req, Reply::new(&mut t));
@@ -308,6 +379,7 @@ where
 struct Detached {
     responder: Option<Responder>,
     headers: HeaderBuf,
+    trailers: HeaderBuf,
     loop_index: usize,
 }
 
@@ -316,9 +388,13 @@ impl Target for Detached {
         &mut self.headers
     }
 
+    fn trailers(&mut self) -> &mut HeaderBuf {
+        &mut self.trailers
+    }
+
     fn respond(&mut self, status: u16, body: BodyRef<'_>, close: bool) {
         if let Some(r) = self.responder.take() {
-            r.send(Response { status, headers: std::mem::take(&mut self.headers), body: body.into_body(), close, invalid: false });
+            r.send(Response { status, headers: std::mem::take(&mut self.headers), body: body.into_body(), close, invalid: false, trailers: std::mem::take(&mut self.trailers) });
         }
     }
 
@@ -338,7 +414,7 @@ impl Target for Detached {
 
     fn stream(&mut self, status: u16, close: bool) -> BodySink {
         let r = self.responder.take().expect("a reply completes once");
-        r.stream(Response { status, headers: std::mem::take(&mut self.headers), body: Body::Empty, close, invalid: false })
+        r.stream(Response { status, headers: std::mem::take(&mut self.headers), body: Body::Empty, close, invalid: false, trailers: HeaderBuf::default() })
     }
 
     fn pool(&mut self) -> Option<OffloadPool> {

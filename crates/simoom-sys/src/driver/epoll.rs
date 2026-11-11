@@ -11,7 +11,8 @@ use std::time::Duration;
 
 pub(crate) struct Poller {
     ep: OwnedFd,
-    efd: Arc<OwnedFd>,
+    /// Kept open for the waker clones (never read; see [`eventfd_waker`]).
+    _efd: Arc<OwnedFd>,
     events: Vec<sys::epoll_event>,
     max_events: usize,
 }
@@ -27,15 +28,25 @@ pub(crate) fn eventfd() -> io::Result<OwnedFd> {
 }
 
 /// A waker that writes to an eventfd. The eventfd stays open while any waker clone lives.
+///
+/// The drivers never read the eventfd after a wake (K3: one system call fewer per wake-up):
+/// every write wakes an edge-triggered epoll entry and a multishot io_uring poll again, whatever
+/// the counter holds. The counter only grows, by one per signal; in the practically impossible
+/// case that it is full (2^64 - 2 signals), the write fails with `EAGAIN` and the waker resets
+/// it and writes again.
 pub(crate) fn eventfd_waker(efd: Arc<OwnedFd>) -> Waker {
     Waker::new(Box::new(move || {
         let one: u64 = 1;
         // SAFETY: writes 8 bytes from a live u64 to an eventfd we keep open.
-        unsafe { sys::write(efd.as_raw_fd(), (&one as *const u64).cast(), 8) };
+        if unsafe { sys::write(efd.as_raw_fd(), (&one as *const u64).cast(), 8) } < 0 {
+            drain_eventfd(&efd);
+            // SAFETY: as above.
+            unsafe { sys::write(efd.as_raw_fd(), (&one as *const u64).cast(), 8) };
+        }
     }))
 }
 
-/// Resets an eventfd after a wake (one `read`).
+/// Resets an eventfd (one `read`).
 pub(crate) fn drain_eventfd(fd: &OwnedFd) {
     let mut v: u64 = 0;
     // SAFETY: reads at most 8 bytes into a live u64; non-blocking.
@@ -58,7 +69,7 @@ impl PollerTrait for Poller {
             return Err(io::Error::last_os_error());
         }
         let waker = eventfd_waker(efd.clone());
-        Ok((Poller { ep, efd, events: vec![sys::epoll_event { events: 0, data: 0 }; EVENTS_START.min(events)], max_events: events }, waker))
+        Ok((Poller { ep, _efd: efd, events: vec![sys::epoll_event { events: 0, data: 0 }; EVENTS_START.min(events)], max_events: events }, waker))
     }
 
     fn add(&mut self, sock: RawSock, token: u64, listener: bool, stats: &mut DriverStats) -> io::Result<()> {
@@ -86,10 +97,6 @@ impl PollerTrait for Poller {
         let full = n as usize == self.events.len();
         for ev in &self.events[..n as usize] {
             let (flags, token) = (ev.events, ev.data);
-            if token == WAKE {
-                stats.other_calls += 1;
-                drain_eventfd(&self.efd);
-            }
             out.push(Ready {
                 token,
                 readable: flags & (sys::EPOLLIN | sys::EPOLLRDHUP) != 0,

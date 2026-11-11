@@ -30,6 +30,32 @@ ed25519 = []
 # Without these four, a build has X25519, P-256 (ECDH and ECDSA) and AES-GCM: the smallest
 # edge build is `--no-default-features`.
 chacha20 = []
+# TLS 1.2 (RFC 5246) next to TLS 1.3, client and server: ECDHE (X25519, P-256, P-384) with
+# AES-GCM and ChaCha20-Poly1305, extended master secret required, session tickets and IDs,
+# renegotiation refused, the RFC 8446 downgrade sentinel. QUIC stays TLS 1.3 only.
+tls12 = []
+# SHA-1, for the formats that still name it (OCSP CertIDs, legacy certificate, CRL and OCSP
+# signatures, PKCS#12 and JKS integrity). Never used by the handshake. Implied by the
+# key store and revocation features.
+sha1 = []
+# Key material from files: PEM bundles (also encrypted PKCS#8 keys), the KeyStore type and
+# SslContextParameters (Camel's SSLContextParameters). `pkcs12` and `jks` add those formats.
+# Legacy primitives only old key-store formats use: MD5, DES/3DES, RC2, and the bitsliced AES
+# with CBC for PBES2 (crypto::legacy, moves to saltire). Off in server builds; the key store
+# features turn it on.
+legacy = ["sha1"]
+keystore = ["legacy"]
+# PKCS#12 / PFX key stores (PBES2 with PBKDF2 and AES; the legacy PBE-SHA1-3DES/RC2 schemes
+# of old files), read and write.
+pkcs12 = ["keystore", "sha1"]
+# Java JKS and JCEKS key stores, read and write.
+jks = ["keystore", "sha1"]
+# Revocation: CRLs (parse, verify, check, distribution points), OCSP client checks and OCSP
+# stapling (server: status_request in TLS 1.3 and 1.2; client: staple validation).
+revocation = ["sha1"]
+# A blocking std::io::Read + Write TLS stream over a TcpStream (client and server), with
+# timeouts and a lingering close after fatal alerts.
+blocking = []
 
 [[example]]
 name = "bench_tls"
@@ -62,4 +88,41 @@ required-features = ["client", "rsa", "p384", "ed25519", "chacha20"]
 
 [[test]]
 name = "hardening"
-required-features = ["client"]
+# tests/common builds certificates of every key type
+required-features = ["client", "rsa", "p384", "ed25519"]
+
+[[test]]
+name = "revocation"
+required-features = ["revocation", "rsa", "p384", "ed25519"]
+
+[[test]]
+name = "fuzzing_revocation"
+required-features = ["revocation", "rsa", "p384", "ed25519"]
+
+[[test]]
+name = "keystores"
+required-features = ["pkcs12", "jks", "rsa", "p384", "ed25519"]
+
+[[test]]
+name = "fuzzing_keystore"
+required-features = ["pkcs12", "jks"]
+
+[[test]]
+name = "tls12"
+required-features = ["tls12", "client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "interop12"
+required-features = ["tls12", "client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "tls_revocation"
+required-features = ["revocation", "tls12", "client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "fuzzing_tls12"
+required-features = ["tls12", "client", "rsa", "p384", "ed25519", "chacha20"]
+
+[[test]]
+name = "timing_legacy"
+required-features = ["pkcs12"]

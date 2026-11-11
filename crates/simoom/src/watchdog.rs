@@ -106,8 +106,8 @@ pub(crate) struct Watch {
     offload: AtomicBool,
     /// Measured calls left while the route is suspect (0: not suspect).
     suspect: AtomicU32,
-    /// Times of recent confirmed stalls (loop clock, ns).
-    ring: Mutex<VecDeque<u64>>,
+    /// Recent confirmed stalls: when each ended and how long it held the thread (ns).
+    ring: Mutex<VecDeque<(u64, u64)>>,
     /// Consecutive fast calls on the offload pool.
     fast: AtomicU32,
     /// Fast calls needed to move back (0: not set yet).
@@ -202,11 +202,15 @@ impl Watch {
         let k = (stalls as usize).min(MAX_RING);
         let full = {
             let mut ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
-            ring.push_back(now);
+            ring.push_back((now, wall_ns));
             while ring.len() > k {
                 ring.pop_front();
             }
-            ring.len() == k && now.saturating_sub(ring[0]) <= p.window_ns
+            // The window counts time outside the stalls themselves: a route that blocks 250 ms
+            // or more per call cannot fit k calls into one second of wall time, yet it holds the
+            // loop the whole time (U10).
+            let held: u64 = ring.iter().skip(1).map(|&(_, w)| w).sum();
+            ring.len() == k && now.saturating_sub(ring[0].0).saturating_sub(held) <= p.window_ns
         };
         if !full {
             return Event::Stall;
@@ -323,6 +327,27 @@ mod tests {
             assert!(!w.offloaded_call(100_000, Some(IDLE)));
         }
         assert!(w.offloaded_call(100_000, Some(IDLE)));
+    }
+
+    // U10: calls that block longer than window / stalls still move the route, because the
+    // window counts only the time between them.
+    #[test]
+    fn long_blocking_calls_move_the_route() {
+        let w = Watch::new(None);
+        w.wall_overrun();
+        let blocked = Sample { cpu_ns: 10_000, voluntary: Some(1) };
+        let call = 400_000_000; // 400 ms per call, back to back on one connection
+        let t = 10_000_000_000u64;
+        assert_eq!(w.measured(call, blocked, &P, 3, t), Event::Stall);
+        assert_eq!(w.measured(call, blocked, &P, 3, t + call + 1_000_000), Event::Stall);
+        assert_eq!(w.measured(call, blocked, &P, 3, t + 2 * (call + 1_000_000)), Event::Offloaded);
+        // but long calls far apart (idle time between them beyond the window) do not
+        let w = Watch::new(None);
+        w.wall_overrun();
+        for i in 0..6u64 {
+            assert_eq!(w.measured(call, blocked, &P, 3, t + i * (call + 2_000_000_000)), Event::Stall);
+        }
+        assert!(!w.offloaded());
     }
 
     #[test]

@@ -191,6 +191,16 @@ impl RsaPublicKey {
         }
     }
 
+    /// RSASSA-PKCS1-v1_5 verification over a SHA-1 digest (legacy certificates, CRLs and OCSP
+    /// responses only; never accepted in a TLS handshake).
+    #[cfg(feature = "sha1")]
+    pub fn verify_pkcs1_sha1(&self, digest: &[u8; 20], sig: &[u8]) -> bool {
+        match (self.encrypt_raw(sig), pkcs1_encode_prefixed(SHA1_DIGEST_INFO, digest, self.k)) {
+            (Some(em), Some(expect)) => ct_eq(&em, &expect),
+            _ => false,
+        }
+    }
+
     /// RSASSA-PSS verification over a digest with MGF1 using the same hash.
     /// `salt_len` = None accepts any salt length.
     pub fn verify_pss(&self, hash: HashAlg, digest: &[u8], sig: &[u8], salt_len: Option<usize>) -> bool {
@@ -243,9 +253,19 @@ impl RsaPublicKey {
 }
 
 fn pkcs1_encode(hash: HashAlg, digest: &[u8], k: usize) -> Option<Vec<u8>> {
-    let prefix = digest_info_prefix(hash);
+    if digest.len() != hash.output_len() {
+        return None;
+    }
+    pkcs1_encode_prefixed(digest_info_prefix(hash), digest, k)
+}
+
+/// The DigestInfo prefix of SHA-1 (RFC 8017 section 9.2 note 1).
+#[cfg(feature = "sha1")]
+const SHA1_DIGEST_INFO: &[u8] = &[0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14];
+
+fn pkcs1_encode_prefixed(prefix: &[u8], digest: &[u8], k: usize) -> Option<Vec<u8>> {
     let t_len = prefix.len() + digest.len();
-    if digest.len() != hash.output_len() || k < t_len + 11 {
+    if k < t_len + 11 {
         return None;
     }
     let mut em = vec![0x00, 0x01];
@@ -384,6 +404,14 @@ impl RsaPrivateKey {
 
     pub fn sign_pkcs1(&self, hash: HashAlg, digest: &[u8]) -> Option<Vec<u8>> {
         let em = pkcs1_encode(hash, digest, self.public.k)?;
+        self.decrypt_raw(&em)
+    }
+
+    /// RSASSA-PKCS1-v1_5 signature over a SHA-1 digest (only for test fixtures of legacy
+    /// formats).
+    #[cfg(feature = "sha1")]
+    pub fn sign_pkcs1_sha1(&self, digest: &[u8; 20]) -> Option<Vec<u8>> {
+        let em = pkcs1_encode_prefixed(SHA1_DIGEST_INFO, digest, self.public.k)?;
         self.decrypt_raw(&em)
     }
 

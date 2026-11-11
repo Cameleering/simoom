@@ -57,7 +57,9 @@
 //!   protection keys, key updates, Retry integrity tags, QUIC v1 and v2.
 //! - [`certgen`]: self-signed and CA-issued certificates for tests.
 //!
-//! TLS 1.2 is not implemented (the plan's optional `tls12` feature).
+//! - With the `tls12` feature, TLS 1.2 (RFC 5246) next to 1.3 for both sides: the six ECDHE
+//!   AES-GCM and ChaCha20-Poly1305 suites, extended master secret required, tickets and session
+//!   IDs, renegotiation refused, downgrade protection ([`tls::tls12`]). QUIC stays TLS 1.3 only.
 //!
 //! # Cargo features
 //!
@@ -65,6 +67,12 @@
 //! `ed25519` (key and certificate types; `ed25519` also speeds up X25519 key generation) and
 //! `chacha20` (the ChaCha20-Poly1305 suite). `--no-default-features` is the smallest server:
 //! X25519, P-256 and AES-GCM.
+//!
+//! Off by default (and in simoom's server builds): `tls12`; `keystore` (PEM bundles, encrypted
+//! PKCS#8, [`keystore::KeyStore`], [`params::SslContextParameters`]), `pkcs12`, `jks`;
+//! `revocation` (CRLs, OCSP, stapling: [`revocation`]); `blocking` (a `Read + Write` stream
+//! adapter: [`blocking`]); `sha1` and `legacy` (the old digests and ciphers those need). See
+//! `docs/parity/tls.md` for how they map to Cameleer's `cameleer-tls`.
 //!
 //! # Hardware paths
 //!
@@ -75,15 +83,25 @@
 #![forbid(unsafe_code)]
 
 pub mod asn1;
+#[cfg(feature = "blocking")]
+pub mod blocking;
 pub mod certgen;
 pub mod crypto;
 pub mod keys;
+#[cfg(feature = "keystore")]
+pub mod params;
 pub mod pem;
+#[cfg(any(feature = "keystore", feature = "revocation"))]
+pub mod pki;
 pub mod quic;
 pub mod tls;
 pub mod util;
 pub mod x509;
 
+#[cfg(feature = "keystore")]
+pub use pki::keystore;
+#[cfg(feature = "revocation")]
+pub use pki::revocation;
 pub use tls::config::{CertifiedKey, ClientAuth, ServerConfig, SystemClock, Ticketer, TimeSource};
 #[cfg(feature = "client")]
 pub use tls::config::{ClientConfig, SessionCache};

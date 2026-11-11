@@ -12,4 +12,14 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+# Only the TLS server unless the `client` feature asks for the client: a server-only build
+# (simoom's `http3` without `tls-client`) never links the TLS client handshake.
+simoom-tls = { path = "../simoom-tls", default-features = false }
+
+[features]
+default = ["client"]
+# QUIC client connections (`TlsProvider::client`, `Endpoint::connect` with TLS).
+client = ["simoom-tls/client"]
+
+[dev-dependencies]
 simoom-tls = { path = "../simoom-tls" }

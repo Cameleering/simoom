@@ -2,13 +2,13 @@
 //! 100-continue, deferred and streamed replies, timeouts, and upgrades to h2c and WebSocket.
 
 use crate::conn::{Io, Layer};
-use crate::handle::{BodySink, BodySource, Envelope, Msg, Pushed as SrcPushed, Responder, Route, SinkShared, SrcShared};
+use crate::handle::{BodySink, BodySource, Cancel, Envelope, Msg, Pushed as SrcPushed, Responder, Route, SinkShared, SrcShared};
 use crate::reply::{BodyRef, Target};
 use crate::request::{HeaderView, Request};
 use crate::server::{bump, Shared};
 use crate::types::{HeaderBuf, OwnedHead, StaticReply, Version};
 use crate::util::{content_length, date_line, has_body, status_line, with_date};
-use simoom_http1::write::{ChunkHeader, CONTINUE, LAST_CHUNK};
+use simoom_http1::write::CONTINUE;
 use simoom_http1::{BodyDecoder, BodyEvent, Error as ParseError, Framing, RequestParser, Status, EMPTY_HEADER};
 use simoom_rt::offload::OffloadPool;
 use std::sync::Arc;
@@ -23,8 +23,9 @@ const HEAD_FIXED: usize = 160;
 enum Resp {
     /// No response outstanding.
     Idle,
-    /// Deferred: a [`Responder`] will answer.
-    Waiting,
+    /// Deferred: a [`Responder`] will answer; since when (loop clock, for
+    /// [`crate::Limits::defer_timeout`]).
+    Waiting(Arc<Cancel>, u64, crate::util::Pending),
     /// A streamed body is being written.
     Streaming(Box<Stream>),
 }
@@ -74,8 +75,30 @@ pub(crate) struct H1 {
     stopping: bool,
     /// The connection is closing or switched: no more input.
     done: bool,
-    switch: Option<Box<dyn Layer>>,
+    /// The next layer after an upgrade (a thin box: rarely set, and an idle connection holds
+    /// less, K8).
+    switch: Option<Box<Box<dyn Layer>>>,
+    /// Trailer fields of the next response ([`crate::Reply::trailer`]); boxed, made only
+    /// when a reply sets one (K8: an idle connection holds less).
+    trl: Option<Box<HeaderBuf>>,
+    /// Input left unconsumed by the last callback (pipelined requests behind a deferred reply).
+    unread: usize,
+    /// The current request for [`crate::Builder::on_complete`]: when its head was read, body
+    /// bytes in and out, and the status sent.
+    /// Made only when the server has a completion hook (K8: an idle connection holds less).
+    rq: Option<Box<RqStats>>,
+    rq_status: u16,
+    /// The client left while the current reply was deferred (reported as aborted).
+    rq_cancelled: bool,
+    /// Head timeouts this head outlived because the server was not short of connections
+    /// ([`crate::Limits::slow_head_limit`]).
+    #[cfg_attr(not(feature = "guard"), allow(dead_code))]
+    slow_rounds: u16,
 }
+
+/// While a reply is deferred the connection keeps reading (to see the client leave) until this
+/// much input waits unconsumed.
+const DEFER_READ_AHEAD: usize = 16 * 1024;
 
 enum TState {
     None,
@@ -86,7 +109,30 @@ enum TState {
     Upgraded,
 }
 
+/// The current request's numbers for [`crate::Builder::on_complete`].
+#[derive(Clone, Copy, Default)]
+struct RqStats {
+    start: u64,
+    bytes_in: u64,
+    bytes_out: u64,
+}
+
 impl H1 {
+    /// A request starts at `start`: reset its numbers (kept only with a completion hook).
+    #[inline]
+    fn rq_begin(&mut self, io: &Io<'_, '_>, start: u64) {
+        if io.sh.on_complete.is_some() {
+            **self.rq.get_or_insert_with(Default::default) = RqStats { start, ..RqStats::default() };
+        }
+    }
+
+    #[inline]
+    fn rq_set_out(&mut self, n: u64) {
+        if let Some(r) = self.rq.as_deref_mut() {
+            r.bytes_out = n;
+        }
+    }
+
     pub(crate) fn new(now: u64) -> H1 {
         H1 {
             parser: RequestParser::new(),
@@ -105,6 +151,12 @@ impl H1 {
             stopping: false,
             done: false,
             switch: None,
+            trl: None,
+            unread: 0,
+            rq: None,
+            rq_status: 0,
+            rq_cancelled: false,
+            slow_rounds: 0,
         }
     }
 
@@ -132,11 +184,21 @@ impl H1 {
 
     /// Writes a whole response with the headers in `self.hdrs`.
     fn write_full(&mut self, io: &mut Io<'_, '_>, status: u16, body: BodyRef<'_>, close: bool) {
+        if self.trl.as_ref().is_some_and(|t| !t.is_empty()) {
+            return self.write_with_trailers(io, status, body, close);
+        }
+        self.write_plain(io, status, body, close);
+    }
+
+    /// [`H1::write_full`] without trailers (`content-length` framing).
+    fn write_plain(&mut self, io: &mut Io<'_, '_>, status: u16, body: BodyRef<'_>, close: bool) {
         self.close_after |= close;
         let close = self.closing();
         let sh = io.sh;
         let now = io.now;
         let len = body.as_bytes().len() as u64;
+        self.rq_status = status;
+        self.rq_set_out(len);
         let with_body = has_body(status);
         {
             let out = io.out();
@@ -159,8 +221,41 @@ impl H1 {
         }
     }
 
+    /// A whole response with trailer fields: chunked framing, then the trailer section
+    /// (HTTP/1.0 and `HEAD` drop the trailers and use `content-length`).
+    #[cold]
+    #[inline(never)]
+    fn write_with_trailers(&mut self, io: &mut Io<'_, '_>, status: u16, body: BodyRef<'_>, close: bool) {
+        let trl = self.trl.take().map(|b| *b).unwrap_or_default();
+        if self.http10 || self.head_only || !has_body(status) {
+            return self.write_plain(io, status, body, close);
+        }
+        self.start_stream(io, status, close, Arc::new(SinkShared::new(1)));
+        let n = body.as_bytes().len();
+        if n > 0 {
+            chunk_head(io, n);
+            io.write_body(body);
+            io.write(b"\r\n");
+        }
+        self.end_with_trailers(io, &trl);
+        // the caller finishes the response
+        self.resp = Resp::Idle;
+        self.rq_status = status;
+        self.rq_set_out(n as u64);
+    }
+
+    /// The last chunk and the trailer section.
+    fn end_with_trailers(&mut self, io: &mut Io<'_, '_>, trl: &HeaderBuf) {
+        let out = io.out();
+        out.extend_from_slice(b"0\r\n");
+        trl.write_h1(out);
+        out.extend_from_slice(b"\r\n");
+    }
+
     fn write_fixed(&mut self, io: &mut Io<'_, '_>, r: &StaticReply, close: bool) {
         self.close_after |= close;
+        self.rq_status = r.status;
+        self.rq_set_out(r.body_len as u64);
         let close = self.closing();
         let sh = io.sh;
         let now = io.now;
@@ -184,6 +279,8 @@ impl H1 {
 
     fn start_stream(&mut self, io: &mut Io<'_, '_>, status: u16, close: bool, sink: Arc<SinkShared>) {
         self.close_after |= close;
+        self.rq_status = status;
+        self.rq_set_out(0);
         let chunked = !self.http10 && has_body(status);
         if !chunked {
             self.close_after = true; // close-delimited body on HTTP/1.0
@@ -210,7 +307,7 @@ impl H1 {
         let n = data.len();
         if !s.head_only && n > 0 {
             if s.chunked {
-                io.write(ChunkHeader::new(n).as_bytes());
+                chunk_head(io, n);
                 io.write_body(BodyRef::Owned(data));
                 io.write(b"\r\n");
             } else {
@@ -218,27 +315,55 @@ impl H1 {
             }
         }
         s.unacked += n;
+        if let Some(r) = self.rq.as_deref_mut() {
+            r.bytes_out += n as u64;
+        }
         io.cx.notify_drain();
     }
 
-    fn end_stream(&mut self, io: &mut Io<'_, '_>, abort: bool) {
+    fn end_stream(&mut self, io: &mut Io<'_, '_>, abort: bool, trailers: &HeaderBuf) {
         let Resp::Streaming(s) = &mut self.resp else { return };
         if abort {
             s.sink.close();
             self.done = true;
             io.abort = true;
+            self.report(io, true);
             return;
         }
-        if s.chunked && !s.head_only {
-            io.write(LAST_CHUNK);
-        }
+        let (chunked, head_only) = (s.chunked, s.head_only);
         s.sink.close();
+        if chunked && !head_only {
+            // the last chunk, the trailer fields (if any) and the blank line
+            self.end_with_trailers(io, trailers);
+        }
         self.finish_response(io);
+    }
+
+    /// Reports the current request to [`crate::Builder::on_complete`], when one is set.
+    #[inline]
+    fn report(&mut self, io: &Io<'_, '_>, aborted: bool) {
+        if io.sh.on_complete.is_some() {
+            self.report_hook(io, aborted);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn report_hook(&mut self, io: &Io<'_, '_>, aborted: bool) {
+        let v = if self.http10 { Version::Http10 } else { Version::Http11 };
+        let r = self.rq.as_deref().copied().unwrap_or_default();
+        io.sh.complete(self.rq_status, r.bytes_in, r.bytes_out, r.start, io.now, v, io.peer, io.meta.listener, aborted || self.rq_cancelled);
     }
 
     /// The current response is complete.
     fn finish_response(&mut self, io: &mut Io<'_, '_>) {
         self.resp = Resp::Idle;
+        self.report(io, false);
+        if self.unread > 0 {
+            // pipelined input read while the reply was deferred: parse it now
+            self.unread = 0;
+            io.cx.redeliver();
+        }
         self.idle_since = io.now;
         if self.closing() {
             self.done = true;
@@ -259,6 +384,13 @@ impl H1 {
     }
 
     /// A request error: an error response, then close.
+    /// A request head the parser refused (or that timed out): the completion it reports starts
+    /// with the head.
+    fn fail_head(&mut self, io: &mut Io<'_, '_>, status: u16) {
+        self.rq_begin(io, if self.head_started != 0 { self.head_started } else { io.now });
+        self.fail(io, status);
+    }
+
     fn fail(&mut self, io: &mut Io<'_, '_>, status: u16) {
         let c = io.sh.counters(io.li);
         bump(match status {
@@ -273,6 +405,7 @@ impl H1 {
             self.head_only = false;
             let reason = simoom_http1::write::reason(status).as_bytes();
             self.write_full(io, status, BodyRef::Slice(reason), true);
+            self.report(io, false);
         }
         self.done = true;
         io.close = true;
@@ -311,12 +444,12 @@ impl H1 {
                     // a connection error of type PROTOCOL_ERROR (RFC 9113 §3.4): the HTTP/2 codec
                     // answers SETTINGS and GOAWAY(PROTOCOL_ERROR) and closes. Nothing was
                     // consumed, so the codec sees the same bytes.
-                    self.switch = Some(Box::new(crate::h2::H2Layer::new(io.sh, io.now)));
+                    self.switch = Some(Box::new(Box::new(crate::h2::H2Layer::new(io.sh, io.now))));
                     self.done = true;
                     return None;
                 }
                 let _ = first;
-                self.fail(io, e.status());
+                self.fail_head(io, e.status());
                 None
             }
             Ok(Status::Complete(req)) => {
@@ -330,6 +463,9 @@ impl H1 {
     fn request(&mut self, io: &mut Io<'_, '_>, req: &simoom_http1::Request<'_, '_>, rest: &[u8]) -> usize {
         self.seq += 1;
         self.requests += 1;
+        self.slow_rounds = 0;
+        self.rq_begin(io, io.now);
+        self.rq_cancelled = false;
         bump(&io.sh.counters(io.li).requests);
         self.head_only = req.method == b"HEAD";
         self.http10 = req.version == simoom_http1::Version::Http10;
@@ -340,7 +476,7 @@ impl H1 {
         let connect = req.form == simoom_http1::TargetForm::Authority;
         self.close_after = !req.keep_alive || connect || self.stopping || (max != 0 && self.requests >= max);
         let hl = req.head_len;
-        if io.shed {
+        if io.shed || (io.sh.limits.pending_503 && crate::util::over_pending()) {
             let end = match req.framing {
                 Framing::None => Some(hl),
                 Framing::Length(n) if (rest.len() - hl) as u64 >= n => Some(hl + n as usize),
@@ -360,6 +496,9 @@ impl H1 {
             }
             Framing::Length(n) if (rest.len() - hl) as u64 >= n => {
                 let end = hl + n as usize;
+                if let Some(r) = self.rq.as_deref_mut() {
+                    r.bytes_in = n;
+                }
                 self.dispatch(io, req, &rest[hl..end], None, None);
                 end
             }
@@ -374,7 +513,7 @@ impl H1 {
                     b.src = Some(src.clone());
                     self.body = Some(b);
                     self.dispatch(io, req, b"", Some(src.clone()), None);
-                    if req.wants_continue() && !self.done && Arc::strong_count(&src) > 1 && matches!(self.resp, Resp::Waiting) {
+                    if req.wants_continue() && !self.done && Arc::strong_count(&src) > 1 && matches!(self.resp, Resp::Waiting(..)) {
                         io.write(CONTINUE);
                     }
                 } else {
@@ -417,6 +556,9 @@ impl H1 {
                     match ev {
                         BodyEvent::Data(d) => {
                             b.bytes += d.len() as u64;
+                            if let Some(r) = self.rq.as_deref_mut() {
+                                r.bytes_in += d.len() as u64;
+                            }
                             if let Some(src) = &b.src {
                                 if src.push(d) == SrcPushed::Full {
                                     b.full = true;
@@ -504,6 +646,7 @@ impl H1 {
         r.peer = io.peer;
         r.secure = io.secure;
         r.loop_index = io.li;
+        r.meta = Some(io.meta);
         if let Some(s) = src {
             r.streamed = true;
             r.source = Some(BodySource::new(s, Route::Conn(io.cx.handle()), 0, self.seq));
@@ -581,7 +724,7 @@ impl H1 {
         }
         let Some(layer) = crate::h2::H2Layer::upgrade(io, v, head) else { return false };
         bump(&io.sh.counters(io.li).upgrades);
-        self.switch = Some(Box::new(layer));
+        self.switch = Some(Box::new(Box::new(layer)));
         self.done = true;
         true
     }
@@ -589,6 +732,7 @@ impl H1 {
 
 impl Layer for H1 {
     fn input(&mut self, io: &mut Io<'_, '_>, data: &[u8]) -> usize {
+        self.unread = 0;
         let mut pos = 0;
         while !self.done {
             if self.body.is_some() {
@@ -609,7 +753,7 @@ impl Layer for H1 {
                     // A broken preface goes to the HTTP/2 codec too, which refuses it with
                     // GOAWAY(PROTOCOL_ERROR) (RFC 9113 §3.4).
                     simoom_http1::h2c::Preface::H2 | simoom_http1::h2c::Preface::Invalid => {
-                        self.switch = Some(Box::new(crate::h2::H2Layer::new(io.sh, io.now)));
+                        self.switch = Some(Box::new(Box::new(crate::h2::H2Layer::new(io.sh, io.now))));
                         self.done = true;
                         break;
                     }
@@ -631,6 +775,7 @@ impl Layer for H1 {
         if self.done && self.switch.is_none() {
             return data.len();
         }
+        self.unread = data.len() - pos;
         pos
     }
 
@@ -642,28 +787,31 @@ impl Layer for H1 {
             return;
         }
         match env.msg {
-            Msg::Reply(mut resp) if matches!(self.resp, Resp::Waiting) => {
+            Msg::Reply(mut resp) if matches!(self.resp, Resp::Waiting(..)) => {
                 std::mem::swap(&mut self.hdrs, &mut resp.headers);
                 let (status, close) = if resp.invalid { (500, resp.close) } else { (resp.status.max(200), resp.close) };
                 if resp.invalid {
                     self.hdrs.clear();
+                } else if !resp.trailers.is_empty() {
+                    self.trl = Some(Box::new(std::mem::take(&mut resp.trailers)));
                 }
                 self.write_full(io, status, std::mem::take(&mut resp.body).into(), close);
                 self.finish_response(io);
             }
-            Msg::Dropped if matches!(self.resp, Resp::Waiting) => {
+            Msg::Dropped if matches!(self.resp, Resp::Waiting(..)) => {
                 self.hdrs.clear();
                 self.write_full(io, 500, BodyRef::Static(b"Internal Server Error"), false);
                 self.finish_response(io);
             }
-            Msg::Stream(mut head, sink) if matches!(self.resp, Resp::Waiting) => {
+            Msg::Stream(mut head, sink) if matches!(self.resp, Resp::Waiting(..)) => {
                 std::mem::swap(&mut self.hdrs, &mut head.headers);
                 let status = if head.invalid || head.status < 200 { 500 } else { head.status };
                 self.start_stream(io, status, head.close, sink);
             }
             Msg::Stream(_, sink) => sink.close(),
             Msg::Chunk(data) => self.chunk(io, data),
-            Msg::End { abort } => self.end_stream(io, abort),
+            Msg::End { abort } => self.end_stream(io, abort, &HeaderBuf::default()),
+            Msg::EndTrailers(t) => self.end_stream(io, false, &t),
             Msg::BodyResume => {
                 if let Some(b) = self.body.as_mut() {
                     if b.full {
@@ -699,6 +847,11 @@ impl Layer for H1 {
             io.close = true;
         } else {
             self.close_after = true;
+            // the client is done: a deferred reply may stop (Go's net/http does the same)
+            if let Resp::Waiting(c, _, _) = &self.resp {
+                c.cancel();
+                self.rq_cancelled = true;
+            }
         }
     }
 
@@ -714,8 +867,18 @@ impl Layer for H1 {
         let now = io.now;
         let l = &io.sh.limits;
         if self.head_started != 0 && now >= self.head_started + l.head_timeout.as_nanos() as u64 {
+            // K6: a slow head holds no buffer; while the server has connections to spare, leave
+            // it open (closing it only brings its client straight back), up to slow_head_limit.
+            #[cfg(feature = "guard")]
+            let ht = l.head_timeout.as_nanos().max(1);
+            #[cfg(feature = "guard")]
+            if self.slow_rounds < u16::MAX && (u128::from(self.slow_rounds) + 2) * ht <= l.slow_head_limit.as_nanos() && !io.cx.connection_pressure() {
+                self.slow_rounds += 1;
+                self.head_started = now;
+                return;
+            }
             match crate::util::head_timeout_action(now) {
-                crate::util::HeadTimeout::Answer => self.fail(io, 408),
+                crate::util::HeadTimeout::Answer => self.fail_head(io, 408),
                 crate::util::HeadTimeout::Drop => {
                     // Many at once on this loop (a slowloris wave): reset without a 408.
                     bump(&io.sh.counters(io.li).timeouts);
@@ -736,6 +899,19 @@ impl Layer for H1 {
                 }
                 self.reading_body = false;
                 self.fail(io, 408);
+                return;
+            }
+        }
+        let d = io.sh.defer_ns;
+        if matches!(&self.resp, Resp::Waiting(_, since, _) if d != 0 && now >= since.saturating_add(d)) {
+            if let Resp::Waiting(c, _, _) = std::mem::replace(&mut self.resp, Resp::Idle) {
+                // Limits::defer_timeout: the responder took too long
+                c.cancel();
+                bump(&io.sh.counters(io.li).timeouts);
+                self.hdrs.clear();
+                self.trl = None;
+                self.write_full(io, 504, BodyRef::Static(b"Gateway Timeout"), false);
+                self.finish_response(io);
                 return;
             }
         }
@@ -760,23 +936,48 @@ impl Layer for H1 {
         if self.idle() && self.head_started == 0 {
             d = d.min(self.idle_since.saturating_add(l.keep_alive_timeout.as_nanos() as u64));
         }
+        if let Resp::Waiting(_, since, _) = &self.resp {
+            if sh.defer_ns != 0 {
+                d = d.min(since.saturating_add(sh.defer_ns));
+            }
+        }
         d
     }
 
     fn wants_pause(&self) -> bool {
-        self.done || (!matches!(self.resp, Resp::Idle) && !self.reading_body) || self.body.as_ref().is_some_and(|b| b.full)
+        // A deferred reply keeps reading a little, so a client that leaves is seen at once.
+        let busy = match self.resp {
+            Resp::Idle => false,
+            Resp::Waiting(..) => self.unread >= DEFER_READ_AHEAD,
+            Resp::Streaming(_) => true,
+        };
+        self.done || (busy && !self.reading_body) || self.body.as_ref().is_some_and(|b| b.full)
     }
 
     fn take_switch(&mut self) -> Option<Box<dyn Layer>> {
-        self.switch.take()
+        self.switch.take().map(|b| *b)
+    }
+
+    fn admission_pause(&self) -> bool {
+        matches!(self.resp, Resp::Idle) && !self.reading_body && !self.done
     }
 
     fn closed(&mut self) {
-        if let Resp::Streaming(s) = &self.resp {
-            s.sink.close();
+        match &self.resp {
+            Resp::Streaming(s) => s.sink.close(),
+            Resp::Waiting(c, _, _) => c.cancel(),
+            Resp::Idle => {}
         }
         if let Some(src) = self.body.as_ref().and_then(|b| b.src.as_ref()) {
             src.fail("the connection closed");
+        }
+    }
+
+    fn closed_report(&mut self, sh: &Shared, meta: &crate::request::Meta, peer: Option<std::net::SocketAddr>) {
+        if sh.on_complete.is_some() && !matches!(self.resp, Resp::Idle) {
+            let v = if self.http10 { Version::Http10 } else { Version::Http11 };
+            let r = self.rq.as_deref().copied().unwrap_or_default();
+            sh.complete(self.rq_status, r.bytes_in, r.bytes_out, r.start, simoom_sys::time::now_ns(), v, peer, meta.listener, true);
         }
     }
 }
@@ -794,6 +995,10 @@ impl Target for H1Target<'_, '_, '_> {
         &mut self.h.hdrs
     }
 
+    fn trailers(&mut self) -> &mut HeaderBuf {
+        self.h.trl.get_or_insert_with(Default::default)
+    }
+
     fn respond(&mut self, status: u16, body: BodyRef<'_>, close: bool) {
         self.h.write_full(self.io, status, body, close);
         self.state = TState::Responded;
@@ -805,9 +1010,11 @@ impl Target for H1Target<'_, '_, '_> {
     }
 
     fn defer(&mut self) -> Responder {
-        self.h.resp = Resp::Waiting;
+        let c = Arc::new(Cancel::default());
+        self.h.resp = Resp::Waiting(c.clone(), self.io.now, crate::util::Pending::new(self.io.sh.limits.max_pending_per_loop));
+        self.h.unread = 0;
         self.state = TState::Deferred;
-        Responder::new(Route::Conn(self.io.cx.handle()), 0, self.h.seq, self.io.sh.limits.stream_buffer)
+        Responder::new(Route::Conn(self.io.cx.handle()), 0, self.h.seq, self.io.sh.limits.stream_buffer, c)
     }
 
     fn undefer(&mut self) {
@@ -842,12 +1049,13 @@ impl Target for H1Target<'_, '_, '_> {
         }
         let protocol = protocol.filter(|p| hs.protocols.is_some_and(|offered| offered.split(|&b| b == b',').any(|o| o.trim_ascii() == *p)));
         let mut out = Vec::with_capacity(160);
-        if simoom_http1::ws::write_accept(&mut out, &hs, protocol).is_err() {
+        let (ext, deflate) = crate::ws::negotiate_deflate(self.io.sh, hs.extensions);
+        if simoom_http1::ws::write_accept_with(&mut out, &hs, protocol, ext.as_deref().map(str::as_bytes)).is_err() {
             return false;
         }
         self.io.write(&out);
         bump(&self.io.sh.counters(self.io.li).upgrades);
-        self.h.switch = Some(Box::new(crate::ws::WsLayer::new(handler, self.io.sh.limits.max_ws_message)));
+        self.h.switch = Some(Box::new(Box::new(crate::ws::WsLayer::new(handler, self.io.sh.limits.max_ws_message, deflate))));
         self.h.done = true;
         self.state = TState::Upgraded;
         true
@@ -864,6 +1072,20 @@ fn looks_like_http(buf: &[u8]) -> bool {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
     let last = line.rsplit(|&b| b == b' ').next().unwrap_or(line);
     last.starts_with(b"HT") || last.contains(&b'/')
+}
+
+/// Writes a chunk header: `n` in hex and CRLF. The digit loop has an opaque trip count so it
+/// stays rolled (unrolled, the formatter costs about 1.3 KB of code for one header).
+#[inline(never)]
+fn chunk_head(io: &mut Io<'_, '_>, n: usize) {
+    let mut b = [0u8; 18];
+    let digits = std::hint::black_box(((usize::BITS - (n | 1).leading_zeros()).div_ceil(4)) as usize);
+    for i in 0..digits {
+        b[digits - 1 - i] = b"0123456789abcdef"[(n >> (4 * i)) & 15];
+    }
+    b[digits] = b'\r';
+    b[digits + 1] = b'\n';
+    io.write(&b[..digits + 2]);
 }
 
 /// A chunked body's trailer section (already validated by the decoder) as owned fields; `None`

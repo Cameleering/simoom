@@ -73,8 +73,9 @@ impl BufPool {
     }
 
     /// Takes a buffer back. It is cleared and kept if its capacity is a class size and that
-    /// class is not full; otherwise it is freed.
-    #[inline]
+    /// class is not full; otherwise it is freed. Out of line: it is called from many places in
+    /// the loop, and a call costs nothing next to the free or push it ends in.
+    #[inline(never)]
     pub fn put(&mut self, mut buf: Vec<u8>) {
         let cap = buf.capacity();
         for (i, &size) in self.classes.iter().enumerate() {

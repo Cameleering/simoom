@@ -8,11 +8,15 @@
 //!   measured. When it stays above `target` for a whole `interval`, the pool reports overload
 //!   and refuses new jobs with [`Rejected::Overloaded`] until a job is taken faster than `target`
 //!   again (Nichols and Jacobson, "Controlling Queue Delay", 2012). A server answers those with a
-//!   fast 503 instead of queueing.
+//!   fast 503 instead of queueing. The effective target is the larger of `target` and four times
+//!   the jobs' recent mean run time, so a pool of slow blocking jobs (100 ms calls to a database)
+//!   does not shed because a job waits a few run times behind a burst: only a queue that keeps
+//!   growing past what the workers can absorb is overload (K10: at the old one-run-time target,
+//!   500 clients of 100 ms jobs on 192 workers had nearly every request shed).
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// A unit of offloaded work.
@@ -44,13 +48,15 @@ impl std::error::Error for Rejected {}
 /// Settings of an [`OffloadPool`].
 #[derive(Clone, Debug)]
 pub struct OffloadConfig {
-    /// Most worker threads (0 = twice the CPU count, at least 4).
+    /// Most worker threads (0 = [`default_threads`]: 32 per CPU, between 512 and 1024). Threads
+    /// start on demand and exit when idle, so a high cap costs nothing until jobs block.
     pub max_threads: usize,
     /// Most jobs waiting.
     pub max_queue: usize,
     /// How long an idle worker waits before it exits.
     pub idle_timeout: Duration,
-    /// CoDel sojourn target.
+    /// CoDel sojourn target (raised to four times the jobs' recent mean run time when that is
+    /// longer).
     pub target: Duration,
     /// CoDel interval.
     pub interval: Duration,
@@ -114,6 +120,16 @@ struct Inner {
     rejected_overload: AtomicU64,
     last_sojourn_us: AtomicU64,
     alive: AtomicUsize,
+    /// Mean run time of recent jobs, ns (exponentially weighted, 1/8).
+    run_ns: AtomicU64,
+}
+
+/// The worker cap for `max_threads: 0`: 32 per CPU, at least 512 and at most 1024. Sized for
+/// blocking integration calls like a thread-per-request server's pool (a 100 ms handler needs
+/// about 10 threads per 100 requests per second; Cameleer's pool is 1024); workers start on
+/// demand and exit after `idle_timeout`, so the cap costs nothing until jobs block (K10).
+pub fn default_threads() -> usize {
+    (simoom_sys::cpu::cpu_count() * 32).clamp(512, 1024)
 }
 
 /// A bounded shared worker pool. Cheap to clone. See the [module docs](self).
@@ -147,6 +163,7 @@ impl OffloadPool {
                 rejected_overload: AtomicU64::new(0),
                 last_sojourn_us: AtomicU64::new(0),
                 alive: AtomicUsize::new(0),
+                run_ns: AtomicU64::new(0),
                 cfg,
             }),
         }
@@ -159,7 +176,7 @@ impl OffloadPool {
             inner.rejected_overload.fetch_add(1, Ordering::Relaxed);
             return Err(Rejected::Overloaded);
         }
-        let mut st = inner.state.lock().unwrap();
+        let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         if st.stop {
             return Err(Rejected::Stopped);
         }
@@ -172,13 +189,13 @@ impl OffloadPool {
         if st.idle > 0 {
             drop(st);
             inner.cv.notify_one();
-        } else if st.threads < *inner.max_threads.get_or_init(|| (simoom_sys::cpu::cpu_count() * 2).max(4)) {
+        } else if st.threads < *inner.max_threads.get_or_init(default_threads) {
             st.threads += 1;
             drop(st);
             let inner2 = self.inner.clone();
             let spawned = crate::spawn(std::thread::Builder::new().name(inner.cfg.name.clone()), Box::new(move || worker(inner2)));
             if spawned.is_err() {
-                self.inner.state.lock().unwrap().threads -= 1;
+                self.inner.state.lock().unwrap_or_else(PoisonError::into_inner).threads -= 1;
             }
         }
         Ok(())
@@ -186,7 +203,7 @@ impl OffloadPool {
 
     /// Counters.
     pub fn stats(&self) -> OffloadStats {
-        let st = self.inner.state.lock().unwrap();
+        let st = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         OffloadStats {
             submitted: self.inner.submitted.load(Ordering::Relaxed),
             completed: self.inner.completed.load(Ordering::Relaxed),
@@ -202,7 +219,7 @@ impl OffloadPool {
     /// Stops taking jobs; workers finish what is queued and exit. Waits up to `deadline` for
     /// them and returns whether all exited.
     pub fn shutdown(&self, deadline: Duration) -> bool {
-        self.inner.state.lock().unwrap().stop = true;
+        self.inner.state.lock().unwrap_or_else(PoisonError::into_inner).stop = true;
         self.inner.cv.notify_all();
         let end = Instant::now() + deadline;
         while self.inner.alive.load(Ordering::Acquire) > 0 {
@@ -217,14 +234,17 @@ impl OffloadPool {
 
 fn worker(inner: Arc<Inner>) {
     inner.alive.fetch_add(1, Ordering::AcqRel);
-    let mut st = inner.state.lock().unwrap();
+    let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
     loop {
         if let Some((at, job)) = st.queue.pop_front() {
             let now = Instant::now();
             let sojourn = now - at;
             inner.last_sojourn_us.store(sojourn.as_micros() as u64, Ordering::Relaxed);
-            // CoDel: overloaded once the sojourn stays above target for a whole interval.
-            if sojourn > inner.cfg.target {
+            // CoDel: overloaded once the sojourn stays above target for a whole interval. The
+            // target is at least four times the jobs' mean run time: waiting a few jobs' length
+            // is normal for a pool of slow jobs, not overload.
+            let target = inner.cfg.target.max(Duration::from_nanos(inner.run_ns.load(Ordering::Relaxed).saturating_mul(4)));
+            if sojourn > target {
                 match st.first_above {
                     None => st.first_above = Some(now + inner.cfg.interval),
                     Some(t) if now >= t => inner.overloaded.store(true, Ordering::Relaxed),
@@ -240,15 +260,20 @@ fn worker(inner: Arc<Inner>) {
             }
             drop(st);
             job();
+            let ran = now.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+            let m = inner.run_ns.load(Ordering::Relaxed);
+            // The first job sets the mean (from zero, the first slow jobs looked like a queue
+            // far above target).
+            inner.run_ns.store(if m == 0 { ran.max(1) } else { m - m / 8 + ran / 8 }, Ordering::Relaxed);
             inner.completed.fetch_add(1, Ordering::Relaxed);
-            st = inner.state.lock().unwrap();
+            st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
             continue;
         }
         if st.stop {
             break;
         }
         st.idle += 1;
-        let (g, to) = inner.cv.wait_timeout(st, inner.cfg.idle_timeout).unwrap();
+        let (g, to) = inner.cv.wait_timeout(st, inner.cfg.idle_timeout).unwrap_or_else(PoisonError::into_inner);
         st = g;
         st.idle -= 1;
         if to.timed_out() && st.queue.is_empty() {
@@ -335,6 +360,72 @@ mod tests {
         assert!(!p.stats().overloaded);
         p.try_submit(Box::new(|| {})).unwrap();
         p.shutdown(Duration::from_secs(10));
+    }
+
+    // U10: slow blocking jobs whose waits stay near their own run time are not overload.
+    #[test]
+    fn slow_jobs_waiting_one_job_length_are_not_shed() {
+        let p = OffloadPool::new(OffloadConfig { max_threads: 2, target: Duration::from_millis(1), interval: Duration::from_millis(10), ..Default::default() });
+        for _ in 0..6 {
+            for _ in 0..4 {
+                // two run at once, two wait about one run time (30 ms, far above the 1 ms target)
+                assert_eq!(p.try_submit(Box::new(|| std::thread::sleep(Duration::from_millis(30)))), Ok(()), "{:?}", p.stats());
+            }
+            std::thread::sleep(Duration::from_millis(80));
+        }
+        assert_eq!(p.stats().rejected_overload, 0);
+        assert!(p.shutdown(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn default_thread_cap_suits_blocking_calls() {
+        let n = default_threads();
+        assert!((512..=1024).contains(&n), "{n}");
+        let p = OffloadPool::new(OffloadConfig::default());
+        let (tx, rx) = mpsc::channel();
+        // 64 concurrent blocking calls all run at once with the default cap
+        let gate = Arc::new((Mutex::new(0usize), Condvar::new()));
+        for _ in 0..64 {
+            let (tx, gate) = (tx.clone(), gate.clone());
+            p.try_submit(Box::new(move || {
+                let (m, cv) = &*gate;
+                let mut g = m.lock().unwrap();
+                *g += 1;
+                cv.notify_all();
+                let _ = cv.wait_timeout_while(g, Duration::from_secs(10), |c| *c < 64).unwrap();
+                tx.send(()).unwrap();
+            }))
+            .unwrap();
+        }
+        for _ in 0..64 {
+            rx.recv_timeout(Duration::from_secs(10)).expect("all 64 run concurrently");
+        }
+        assert!(p.shutdown(Duration::from_secs(5)));
+    }
+
+    // K10: closed-loop clients of slow jobs, more of them than workers: a standing queue of a
+    // couple of run times, which used to be shed almost entirely, is served.
+    #[test]
+    fn more_clients_than_workers_of_slow_jobs_are_queued_not_shed() {
+        let p = OffloadPool::new(OffloadConfig { max_threads: 4, target: Duration::from_millis(1), interval: Duration::from_millis(10), ..Default::default() });
+        let (tx, rx) = mpsc::channel::<()>();
+        // 10 clients, each submitting its next 20 ms job when the last one finished.
+        let submit = |p: &OffloadPool, tx: &mpsc::Sender<()>| {
+            let tx = tx.clone();
+            p.try_submit(Box::new(move || {
+                std::thread::sleep(Duration::from_millis(20));
+                let _ = tx.send(());
+            }))
+        };
+        for _ in 0..10 {
+            submit(&p, &tx).unwrap();
+        }
+        for _ in 0..100 {
+            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(submit(&p, &tx), Ok(()), "{:?}", p.stats());
+        }
+        assert_eq!(p.stats().rejected_overload, 0);
+        assert!(p.shutdown(Duration::from_secs(5)));
     }
 
     #[test]

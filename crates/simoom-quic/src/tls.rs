@@ -8,7 +8,9 @@ use crate::crypto::{
 use crate::error::TransportError;
 use simoom_tls::crypto::{rng, sha2::HashAlg};
 use simoom_tls::quic as tq;
-use simoom_tls::{ClientConfig, ServerConfig};
+#[cfg(feature = "client")]
+use simoom_tls::ClientConfig;
+use simoom_tls::ServerConfig;
 use std::sync::Arc;
 
 struct Pk(tq::PacketKey);
@@ -92,21 +94,62 @@ impl CryptoSession for Session {
     fn set_version(&mut self, version: u32) {
         self.0.set_version(version);
     }
+    fn server_name(&self) -> Option<&str> {
+        self.0.server_name()
+    }
+    fn cipher_suite(&self) -> Option<u16> {
+        self.0.negotiated_cipher_suite().map(|s| s.id())
+    }
+    fn peer_certificates(&self) -> &[Vec<u8>] {
+        self.0.peer_certificates()
+    }
 }
 
+/// Starts a client session; set only by the constructors that take a client configuration, so
+/// a server-only binary never links the TLS client handshake.
+#[cfg(feature = "client")]
+type StartClient = fn(&Arc<ClientConfig>, u32, &str, Vec<u8>) -> Result<Box<dyn CryptoSession>, TransportError>;
+
 /// TLS-backed crypto for an endpoint. A server needs `server`, a client `client`; the
-/// configurations must list ALPN protocols (`h3` for HTTP/3).
+/// configurations must list ALPN protocols (`h3` for HTTP/3). Build a client provider with
+/// [`TlsProvider::client`] or [`TlsProvider::with_client`] (which link the TLS client); a
+/// provider made with [`TlsProvider::server`] refuses client sessions.
 pub struct TlsProvider {
     pub server: Option<Arc<ServerConfig>>,
+    #[cfg(feature = "client")]
     pub client: Option<Arc<ClientConfig>>,
+    #[cfg(feature = "client")]
+    start_client: Option<StartClient>,
+}
+
+#[cfg(feature = "client")]
+fn start_client(cfg: &Arc<ClientConfig>, version: u32, name: &str, tp: Vec<u8>) -> Result<Box<dyn CryptoSession>, TransportError> {
+    let mut c = tq::QuicConnection::new_client(cfg.clone(), name, tp)
+        .map_err(|_| TransportError::new(crate::error::INTERNAL_ERROR, "TLS client configuration rejected"))?;
+    c.set_version(version);
+    Ok(Box::new(Session(c)))
 }
 
 impl TlsProvider {
     pub fn server(cfg: Arc<ServerConfig>) -> Self {
-        TlsProvider { server: Some(cfg), client: None }
+        TlsProvider {
+            server: Some(cfg),
+            #[cfg(feature = "client")]
+            client: None,
+            #[cfg(feature = "client")]
+            start_client: None,
+        }
     }
+    #[cfg(feature = "client")]
     pub fn client(cfg: Arc<ClientConfig>) -> Self {
-        TlsProvider { server: None, client: Some(cfg) }
+        TlsProvider { server: None, client: None, start_client: None }.with_client(cfg)
+    }
+    /// Adds a client configuration (an endpoint that both accepts and opens connections).
+    #[cfg(feature = "client")]
+    pub fn with_client(mut self, cfg: Arc<ClientConfig>) -> Self {
+        self.client = Some(cfg);
+        self.start_client = Some(start_client);
+        self
     }
 }
 
@@ -132,10 +175,11 @@ impl CryptoProvider for TlsProvider {
         Ok(Box::new(Session(c)))
     }
     fn client_session(&self, version: u32, name: &str, tp: Vec<u8>) -> Result<Box<dyn CryptoSession>, TransportError> {
-        let cfg = self.client.clone().ok_or(TransportError::new(crate::error::INTERNAL_ERROR, "no TLS client configuration"))?;
-        let mut c = tq::QuicConnection::new_client(cfg, name, tp)
-            .map_err(|_| TransportError::new(crate::error::INTERNAL_ERROR, "TLS client configuration rejected"))?;
-        c.set_version(version);
-        Ok(Box::new(Session(c)))
+        #[cfg(feature = "client")]
+        if let (Some(cfg), Some(start)) = (&self.client, self.start_client) {
+            return start(cfg, version, name, tp);
+        }
+        let _ = (version, name, tp);
+        Err(TransportError::new(crate::error::INTERNAL_ERROR, "no TLS client configuration"))
     }
 }

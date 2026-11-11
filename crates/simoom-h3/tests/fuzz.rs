@@ -133,7 +133,7 @@ fn fuzz_server_streams() {
 fn fuzz_settings_and_validation() {
     let mut rng = Rng::new(seed() ^ 1);
     let mut base = Vec::new();
-    Settings { qpack_max_table_capacity: Some(1), max_field_section_size: Some(2), qpack_blocked_streams: Some(3) }.encode(&mut base);
+    Settings { qpack_max_table_capacity: Some(1), max_field_section_size: Some(2), qpack_blocked_streams: Some(3), ..Default::default() }.encode(&mut base);
     for _ in 0..iters(50_000) {
         let mut d = base[2..].to_vec();
         mutate(&mut rng, &mut d);

@@ -651,6 +651,7 @@ fn busy_polling_spins_only_while_events_come_sooner_than_a_wake_up() {
     if spin.max == 0 {
         return; // turned off with SIMOOM_BUSY_POLL_US=0
     }
+    let wk = Waker::new(Box::new(|| {}));
     let mut st = DriverStats::default();
     // Starts sleeping: nothing is known about the gaps yet.
     spin.worked = true;
@@ -660,7 +661,7 @@ fn busy_polling_spins_only_while_events_come_sooner_than_a_wake_up() {
     let mut waits = 0;
     while !spin.spins() {
         assert!(waits < 64 * 20, "probes must open the window (gap {} ns)", spin.gap);
-        spin.wait(Some(Duration::from_millis(1)), true, &mut st, |_, _| Ok(true)).unwrap();
+        spin.wait(Some(Duration::from_millis(1)), true, &mut st, &wk.inner, &mut |_, _| Ok(true)).unwrap();
         spin.worked = true;
         waits += 1;
     }
@@ -668,7 +669,7 @@ fn busy_polling_spins_only_while_events_come_sooner_than_a_wake_up() {
     // Load drops: spins find nothing within the window. Spinning stops after a few.
     for _ in 0..4 {
         spin.worked = true;
-        spin.wait(Some(Duration::from_millis(1)), true, &mut st, |t, _| {
+        spin.wait(Some(Duration::from_millis(1)), true, &mut st, &wk.inner, &mut |t, _| {
             if t != Some(Duration::ZERO) {
                 std::thread::sleep(Duration::from_micros(100));
                 return Ok(true);
@@ -684,7 +685,7 @@ fn busy_polling_spins_only_while_events_come_sooner_than_a_wake_up() {
     spin.probe = PROBE_EVERY;
     spin.worked = false;
     let polls = st.spin_polls;
-    spin.wait(Some(Duration::from_micros(100)), true, &mut st, |_, _| Ok(false)).unwrap();
+    spin.wait(Some(Duration::from_micros(100)), true, &mut st, &wk.inner, &mut |_, _| Ok(false)).unwrap();
     assert_eq!(st.spin_polls, polls, "an idle loop must not spin");
 }
 
@@ -940,4 +941,79 @@ fn io_uring_connections_cost_no_register_calls() {
     }
     let s = d.stats();
     assert_eq!(s.other_calls, before.other_calls, "{s:?}");
+}
+
+/// K3: work posted to a driver that is running or spinning costs no OS signal; a parked driver
+/// is signalled once however many posts arrive, and every post is reported as a wake.
+#[test]
+fn posts_signal_only_a_parked_driver() {
+    for b in backends() {
+        let mut d = driver(b);
+        let w = d.waker();
+        let mut ev = Vec::new();
+        // Running (not parked): the post is reported by the next turn, without blocking.
+        w.post();
+        assert!(!w.inner.pending.load(std::sync::atomic::Ordering::SeqCst), "{b:?}: no signal while running");
+        let t = std::time::Instant::now();
+        d.turn(Some(Duration::from_secs(5)), &mut ev).unwrap();
+        assert!(ev.iter().any(|e| matches!(e, Event::Wake)), "{b:?}: {ev:?}");
+        assert!(t.elapsed() < Duration::from_secs(1), "{b:?}: the turn must not block");
+        ev.clear();
+        // Parked: posts from another thread wake it, with one signal for many posts.
+        let w2 = w.clone();
+        let poster = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            for _ in 0..100 {
+                w2.post();
+            }
+        });
+        let t = std::time::Instant::now();
+        while !ev.iter().any(|e| matches!(e, Event::Wake)) {
+            d.turn(Some(Duration::from_secs(5)), &mut ev).unwrap();
+        }
+        assert!(t.elapsed() < Duration::from_secs(4), "{b:?}: woken by the post");
+        poster.join().unwrap();
+        ev.clear();
+        // Drain whatever wake the later posts left, then the driver sleeps again.
+        d.turn(Some(Duration::ZERO), &mut ev).unwrap();
+        ev.clear();
+        let t = std::time::Instant::now();
+        d.turn(Some(Duration::from_millis(30)), &mut ev).unwrap();
+        assert!(!ev.iter().any(|e| matches!(e, Event::Wake)) && t.elapsed() >= Duration::from_millis(20), "{b:?}: {ev:?}");
+    }
+}
+
+/// K4: `flush_now` writes a stream's output at once on epoll and kqueue, so a response leaves
+/// before the loop runs the rest of its turn; elsewhere the next turn writes it.
+#[test]
+fn flush_now_writes_before_the_next_turn() {
+    for b in backends() {
+        let mut d = driver(b);
+        let addr = listener(&mut d);
+        let mut c = TcpStream::connect(addr).unwrap();
+        let mut id = None;
+        run(&mut d, |d, e| {
+            if let Event::Accepted { socket, .. } = e {
+                id = Some(d.stream(socket, 2).unwrap());
+                return true;
+            }
+            false
+        });
+        let id = id.unwrap();
+        d.send(id, OutBuf::Static(b"now"));
+        d.flush_now(id);
+        c.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+        let mut got = [0u8; 3];
+        let eager = matches!(b, Backend::Epoll | Backend::Kqueue);
+        if eager {
+            c.read_exact(&mut got).expect("written by flush_now, before any turn");
+            assert_eq!(&got, b"now");
+        }
+        // The Sent event still comes, with the next turn.
+        run(&mut d, |_, e| matches!(e, Event::Sent { .. }));
+        if !eager {
+            c.read_exact(&mut got).unwrap();
+            assert_eq!(&got, b"now");
+        }
+    }
 }

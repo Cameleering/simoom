@@ -52,22 +52,34 @@ fn welch(a: &[f64], b: &[f64]) -> f64 {
 
 /// Times `op` on prepared inputs: `inputs[i]` belongs to class `classes[i]`. Each measurement
 /// runs the operation `reps` times so it is well above the timer resolution.
-fn dudect<T>(name: &str, n: usize, reps: usize, mut gen: impl FnMut(bool) -> T, mut op: impl FnMut(&T)) -> f64 {
+///
+/// Before each measurement the input is copied, untimed and with the same code for both
+/// classes, into one working slot, and `op` reads the slot. The classes then differ only in
+/// the data: not in where the input lives, how it was allocated and written, or whether its
+/// page is resident. With the inputs read in place (megabytes of separate heap buffers), the
+/// first touch of a buffer paid cache, TLB and page costs that can correlate with its content
+/// (an all-zero page is cheaper for the memory manager to bring back), which is not a property
+/// of the code under test.
+fn dudect<T: Clone>(name: &str, n: usize, reps: usize, mut gen: impl FnMut(bool) -> T, mut op: impl FnMut(&T)) -> f64 {
     let mut classes = vec![false; n];
     let bits = rng::bytes(n);
     for (c, b) in classes.iter_mut().zip(bits) {
         *c = b & 1 == 1;
     }
     let inputs: Vec<T> = classes.iter().map(|&c| gen(c)).collect();
+    let mut slot = inputs[0].clone();
     // warm-up
     for x in inputs.iter().take(n / 10 + 1) {
-        op(x);
+        slot.clone_from(x);
+        op(black_box(&slot));
     }
     let mut times = vec![0f64; n];
     for (i, x) in inputs.iter().enumerate() {
+        slot.clone_from(x);
+        let s = black_box(&slot);
         let t = Instant::now();
         for _ in 0..reps {
-            op(x);
+            op(s);
         }
         times[i] = t.elapsed().as_nanos() as f64;
     }
@@ -92,6 +104,33 @@ fn dudect<T>(name: &str, n: usize, reps: usize, mut gen: impl FnMut(bool) -> T, 
 
 fn check(name: &str, t: f64) {
     assert!(t.abs() < THRESHOLD, "{name}: |t| = {:.2} suggests data-dependent timing", t.abs());
+}
+
+/// The harness itself: a data-dependent branch worth about 6% of the operation (four extra
+/// GHASH blocks on 1 KiB, taken for the zero class only) must be flagged. Keeps the
+/// working-slot copy in `dudect` from hiding real leaks.
+#[test]
+fn harness_flags_a_small_data_dependent_branch() {
+    let _g = serial();
+    let h = rng::array::<16>();
+    let soft = GhashSoft::new(&h);
+    let hw = GhashHw::new(&h);
+    let t = dudect("harness check: GHASH + 4 blocks when data[0] == 0", 20_000, 4, |c| if c { rng::bytes(1024) } else { vec![0u8; 1024] }, |x| {
+        let mut y = [0u8; 16];
+        let extra: &[u8] = if x[0] == 0 { &x[..64] } else { &[] };
+        match &hw {
+            Some(hw) => {
+                hw.update(&mut y, x);
+                hw.update(&mut y, extra);
+            }
+            None => {
+                soft.update(&mut y, x);
+                soft.update(&mut y, extra);
+            }
+        }
+        black_box(y);
+    });
+    assert!(t.abs() > THRESHOLD, "the harness missed a planted leak: |t| = {:.2}", t.abs());
 }
 
 #[test]

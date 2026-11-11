@@ -27,6 +27,16 @@
 //! ([`Reply::stream`], [`Reply::sse`] with a [`BodySink`]), offloaded work ([`Reply::offload`],
 //! [`blocking`]), or a WebSocket ([`Reply::websocket`]).
 //!
+//! # Blocking work: which path to use
+//!
+//! A service must never block a loop thread. Pick one of:
+//!
+//! | path | when |
+//! |---|---|
+//! | [`Reply::defer`] + your own threads | the host already has a worker pool, its own naming, limits and backpressure (an integration engine such as Cameleer): copy the request with [`Request::to_owned_request`], answer through the [`Responder`] from any thread. [`Limits::defer_timeout`] bounds the wait, [`Responder::is_cancelled`] tells the worker the client left. simoom's pool and CoDel are not involved. |
+//! | [`blocking`], [`Reply::blocking`], [`Reply::offload`] | blocking handlers without a pool of their own (database or HTTP calls of up to seconds). The offload pool starts up to [`Limits::offload_threads`] workers on demand (32 per CPU by default, 64 to 512) and answers a fast 503 only when its queue keeps growing past what the workers absorb (CoDel with a target of at least the jobs' mean run time). |
+//! | inline | microseconds of CPU, no I/O. The stall watchdog (feature `watchdog`) moves a route that turns out slow to the offload pool, as a safety net, not a plan: each call before the move holds the loop. |
+//!
 //! # Request bodies
 //!
 //! Bodies up to [`Limits::body_buffer`] are buffered whole ([`Request::body`]); longer ones
@@ -42,6 +52,11 @@
 //! | `tls` | TLS 1.3 listeners ([`Builder::listen_tls`]), ALPN h2 / http/1.1 |
 //! | `http3` | HTTP/3 over QUIC ([`Builder::listen_quic`]); announced with `alt-svc` |
 //! | `full` | all of them |
+//! | `compression` | gzip and deflate responses negotiated from `Accept-Encoding` (`Builder::compression`), request body decoding (`Request::decoded_body`) |
+//! | `websocket-h2` | WebSocket over HTTP/2 (RFC 8441 extended CONNECT) with the same [`Reply::websocket`] |
+//! | `h2-keepalive` | HTTP/2 PING keepalive ([`Limits::h2_keepalive`]) |
+//!
+//! The last three are not part of `default` or `full`, which keep their size budgets.
 //!
 //! # Safety nets
 //!
@@ -63,6 +78,20 @@
 // helpers and fields unused; the linker drops them.
 #![cfg_attr(not(feature = "http1"), allow(dead_code))]
 
+#[cfg(feature = "compression")]
+mod compress;
+#[cfg(feature = "conditional")]
+pub mod conditional;
+#[cfg(feature = "cookies")]
+pub mod cookie;
+#[cfg(feature = "auth")]
+pub mod auth;
+#[cfg(feature = "cors")]
+pub mod cors;
+#[cfg(any(feature = "cookies", feature = "conditional"))]
+mod httpdate;
+#[cfg(feature = "multipart")]
+pub mod multipart;
 mod conn;
 mod handle;
 #[cfg(feature = "http1")]
@@ -87,12 +116,14 @@ mod watchdog;
 #[cfg(feature = "websocket")]
 mod ws;
 
+#[cfg(feature = "compression")]
+pub use compress::{Compression, ContentCoding, DecodeBodyError, DecodedRead};
 pub use handle::{BodySink, BodySource, Ready, Responder};
 pub use limits::{FrameBudgets, Limits};
 pub use reply::Reply;
-pub use request::{OwnedRequest, Request};
+pub use request::{OwnedRequest, Request, TlsInfo};
 pub use router::Router;
-pub use server::{Builder, Server, ServerHandle, Stats};
+pub use server::{Builder, Completion, Server, ServerHandle, Stats};
 pub use service::{blocking, Blocking, Outcome, Service};
 #[doc(hidden)]
 pub use service::WatchRef;
@@ -102,6 +133,9 @@ pub use types::{Body, Response, StaticReply, Version};
 pub use util::percent_decode;
 #[cfg(feature = "websocket")]
 pub use ws::{WebSocket, WebSocketHandler, WsHandle, WsMessage};
+/// permessage-deflate settings ([`Builder::websocket_deflate`]).
+#[cfg(feature = "ws-deflate")]
+pub use simoom_http1::ws::deflate::DeflateConfig as WsDeflate;
 
 /// TLS configuration types (feature `tls`).
 #[cfg(feature = "tls")]

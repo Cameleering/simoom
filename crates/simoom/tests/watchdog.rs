@@ -187,3 +187,32 @@ fn preemption_does_not_trip_the_watchdog() {
     assert_eq!(s.offloaded_routes, 0, "{s:?}");
     assert_eq!(s.stalls, 0, "{s:?}");
 }
+
+/// K1: a handler that defers hands its work to another thread; however long the hand-off takes
+/// on the loop thread (here it sleeps and spins before deferring, as a contended queue lock
+/// would), it is never a stall and its route never moves to the offload pool.
+#[test]
+fn a_deferring_handler_is_never_a_stall() {
+    let _serial = serial();
+    fn deferring(_: &mut Request<'_>, reply: Reply<'_>) -> Outcome {
+        let on = thread_name();
+        std::thread::sleep(Duration::from_millis(3)); // blocks: a voluntary switch
+        spin(Duration::from_millis(3)); // and CPU over the budget
+        let r = reply.defer();
+        std::thread::spawn(move || {
+            r.send(simoom::Response::new(200).body(on.into_bytes()));
+        });
+        Outcome::Deferred
+    }
+    // Through a router and through a plain service (path slots).
+    for routed in [true, false] {
+        let h = if routed { serve_with(limits(), Router::new().get("/d", deferring)) } else { serve_with(limits(), deferring) };
+        let mut c = Client::new(&h);
+        for i in 0..30 {
+            let on = c.get("/d").text();
+            assert!(!offloaded(&on), "call {i} ran on {on} (routed {routed}): {:?}", h.stats());
+        }
+        let s = h.stats();
+        assert_eq!((s.stall_checks, s.stalls, s.offloaded_routes), (0, 0, 0), "routed {routed}: {s:?}");
+    }
+}

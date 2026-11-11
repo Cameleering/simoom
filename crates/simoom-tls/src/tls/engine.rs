@@ -21,6 +21,9 @@ pub(crate) enum Event {
     Ccs,
     /// Both traffic secrets of a level.
     Secrets { level: Level, client: Vec<u8>, server: Vec<u8> },
+    /// TLS 1.2: send ChangeCipherSpec, then protect everything after it with this cipher.
+    #[cfg(feature = "tls12")]
+    ChangeCipher12(super::record::RecordCipher),
 }
 
 /// State visible to the connection: negotiated parameters and the event queue.
@@ -43,6 +46,18 @@ pub(crate) struct Shared {
     /// Server: the first ClientHello offered 0-RTT, which is always rejected, so early data
     /// records must be skipped (RFC 8446 section 4.2.10).
     pub early_data_offered: bool,
+    /// TLS 1.2 negotiated: the suite.
+    #[cfg(feature = "tls12")]
+    pub tls12: Option<super::tls12::Tls12Suite>,
+    /// TLS 1.2: the read cipher to install when the peer's ChangeCipherSpec arrives.
+    #[cfg(feature = "tls12")]
+    pub pending_read12: Option<super::record::RecordCipher>,
+    /// TLS 1.2: the keying material exporter state.
+    #[cfg(feature = "tls12")]
+    pub exporter12: Option<super::tls12::Exporter12>,
+    /// The OCSP response the server stapled (client side, feature `revocation`).
+    #[cfg(feature = "revocation")]
+    pub ocsp_response: Option<Vec<u8>>,
 }
 
 impl Shared {
@@ -62,7 +77,23 @@ impl Shared {
             exporter_master: None,
             max_message,
             early_data_offered: false,
+            #[cfg(feature = "tls12")]
+            tls12: None,
+            #[cfg(feature = "tls12")]
+            pending_read12: None,
+            #[cfg(feature = "tls12")]
+            exporter12: None,
+            #[cfg(feature = "revocation")]
+            ocsp_response: None,
         }
+    }
+    /// Whether TLS 1.2 was negotiated.
+    #[inline]
+    pub fn is_tls12(&self) -> bool {
+        #[cfg(feature = "tls12")]
+        return self.tls12.is_some();
+        #[cfg(not(feature = "tls12"))]
+        false
     }
     pub fn is_quic(&self) -> bool {
         self.quic_tp.is_some()
@@ -198,6 +229,12 @@ impl Transcript {
 
 /// Parses a TLS 1.3 Certificate message body: (context, certificate DERs).
 pub(crate) fn parse_certificate(body: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>)> {
+    parse_certificate_status(body).map(|(c, l, _)| (c, l))
+}
+
+/// Like [`parse_certificate`], also returning the OCSP response in the leaf's status_request
+/// extension (RFC 8446 section 4.4.2.1), if any.
+pub(crate) fn parse_certificate_status(body: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>, Option<Vec<u8>>)> {
     use super::codec::Reader;
     let mut r = Reader::new(body, "Certificate");
     let ctx = r.vec8()?.to_vec();
@@ -205,27 +242,67 @@ pub(crate) fn parse_certificate(body: &[u8]) -> Result<(Vec<u8>, Vec<Vec<u8>>)> 
     r.finish()?;
     let mut lr = Reader::new(list, "Certificate");
     let mut certs = Vec::new();
+    let mut staple = None;
     while !lr.is_empty() {
         let c = lr.vec24()?;
         if c.is_empty() {
             return Err(Error::decode("Certificate"));
         }
-        let _exts = lr.vec16()?;
+        let exts = lr.vec16()?;
+        if certs.is_empty() && !exts.is_empty() {
+            for (t, d) in super::codec::parse_extensions(exts)? {
+                if t == 5 {
+                    staple = Some(parse_certificate_status_body(d)?);
+                }
+            }
+        }
         certs.push(c.to_vec());
         if certs.len() > 16 {
             return Err(Error::proto(alert::BAD_CERTIFICATE, "certificate chain too long"));
         }
     }
-    Ok((ctx, certs))
+    Ok((ctx, certs, staple))
 }
 
-/// Encodes a Certificate message body.
-pub(crate) fn certificate_body(ctx: &[u8], chain: &[Vec<u8>]) -> Vec<u8> {
+/// A CertificateStatus body (RFC 6066 section 8): status_type ocsp(1), then the response.
+pub(crate) fn parse_certificate_status_body(d: &[u8]) -> Result<Vec<u8>> {
+    use super::codec::Reader;
+    let mut r = Reader::new(d, "CertificateStatus");
+    if r.u8()? != 1 {
+        return Err(Error::proto(alert::BAD_CERTIFICATE_STATUS_RESPONSE, "unsupported certificate status type"));
+    }
+    let resp = r.vec24()?;
+    r.finish()?;
+    if resp.is_empty() {
+        return Err(Error::decode("CertificateStatus"));
+    }
+    Ok(resp.to_vec())
+}
+
+/// Encodes a Certificate message body; `staple` is an OCSP response carried in the leaf's
+/// status_request extension (RFC 8446 section 4.4.2.1).
+pub(crate) fn certificate_body(ctx: &[u8], chain: &[Vec<u8>], staple: Option<&[u8]>) -> Vec<u8> {
     use super::codec::{put_u16, put_vec24, put_vec8};
     let mut list = Vec::new();
-    for c in chain {
+    for (i, c) in chain.iter().enumerate() {
         put_vec24(&mut list, c);
+        // only revocation builds staple: the others leave the code out
+        #[cfg(not(feature = "revocation"))]
+        let _ = (i, staple);
+        #[cfg(not(feature = "revocation"))]
         put_u16(&mut list, 0);
+        #[cfg(feature = "revocation")]
+        match staple.filter(|_| i == 0) {
+            Some(resp) => {
+                let mut status = vec![1u8];
+                put_vec24(&mut status, resp);
+                let mut e = Vec::new();
+                put_u16(&mut e, 5);
+                super::codec::put_vec16(&mut e, &status);
+                super::codec::put_vec16(&mut list, &e);
+            }
+            None => put_u16(&mut list, 0),
+        }
     }
     let mut body = Vec::with_capacity(4 + list.len());
     put_vec8(&mut body, ctx);

@@ -15,6 +15,15 @@ use simoom::{Backend, Limits, Outcome, Reply, Request, Server, StaticReply};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// The large bodies are built on first use (K7): built at start-up and touched, they were
+/// 1.06 MiB of the server's idle memory, which the campaign then counted against simoom.
+fn body(n: usize) -> &'static [u8] {
+    static B64K: std::sync::OnceLock<&'static [u8]> = std::sync::OnceLock::new();
+    static B1M: std::sync::OnceLock<&'static [u8]> = std::sync::OnceLock::new();
+    let cell = if n == 64 * 1024 { &B64K } else { &B1M };
+    cell.get_or_init(|| Box::leak(vec![b'x'; n].into_boxed_slice()))
+}
+
 fn main() {
     let mut addr = "0.0.0.0:8080".to_string();
     let mut threads = 0usize;
@@ -52,13 +61,11 @@ fn main() {
         limits.inline_budget = None;
     }
     let hello = Arc::new(StaticReply::new(200, &[("content-type", "text/plain")], b"Hello, World!"));
-    let b64k: &'static [u8] = Box::leak(vec![b'x'; 64 * 1024].into_boxed_slice());
-    let b1m: &'static [u8] = Box::leak(vec![b'x'; 1024 * 1024].into_boxed_slice());
     let builder = mode == "builder";
     let svc = move |req: &mut Request<'_>, reply: Reply<'_>| -> Outcome {
         match req.path() {
-            b"/64k" => reply.header("content-type", "application/octet-stream").body_static(b64k),
-            b"/1m" => reply.header("content-type", "application/octet-stream").body_static(b1m),
+            b"/64k" => reply.header("content-type", "application/octet-stream").body_static(body(64 * 1024)),
+            b"/1m" => reply.header("content-type", "application/octet-stream").body_static(body(1024 * 1024)),
             b"/echo" => {
                 let body = req.body();
                 reply.header("content-type", "application/json").body_copy(body)

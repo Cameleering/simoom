@@ -70,10 +70,64 @@ pub(crate) struct Shared {
     /// Slots that are suspect or offloaded: the path is hashed only while this is not 0.
     slots_active: Arc<AtomicU32>,
     log: Arc<dyn Fn(&str) + Send + Sync>,
+    /// [`Limits::defer_timeout`] in ns (0: off).
+    pub(crate) defer_ns: u64,
+    /// [`Builder::on_complete`].
+    pub(crate) on_complete: Option<CompleteHook>,
+    /// [`Builder::compression`].
+    #[cfg(feature = "compression")]
+    pub(crate) compression: Option<Arc<crate::compress::Compression>>,
+    /// [`Builder::websocket_deflate`].
+    #[cfg(feature = "ws-deflate")]
+    pub(crate) ws_deflate: Option<simoom_http1::ws::deflate::DeflateConfig>,
+    /// The TLS configuration for new connections; [`ServerHandle::set_tls`] swaps it.
     #[cfg(feature = "tls")]
-    pub(crate) tls: Option<Arc<simoom_tls::ServerConfig>>,
+    pub(crate) tls: Option<std::sync::RwLock<Arc<simoom_tls::ServerConfig>>>,
+    /// HTTP/3's TLS configuration; [`ServerHandle::set_quic_tls`] swaps it.
+    #[cfg(feature = "http3")]
+    quic_tls: Option<Arc<crate::h3::QuicTls>>,
     /// Open connections per client IP, kept only when [`Limits::max_connections_per_ip`] is set.
     per_ip: std::sync::Mutex<crate::util::IpCounts>,
+    /// Connection rate per client IP, used only when [`Limits::reconnect_rate`] is set.
+    #[cfg(feature = "guard")]
+    reconnects: std::sync::Mutex<crate::util::Reconnects>,
+}
+
+type CompleteHook = Arc<dyn Fn(&Completion) + Send + Sync>;
+
+/// One finished request, for access logs and metrics ([`Builder::on_complete`]).
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct Completion {
+    /// The status sent (the error status for a request refused by the parser).
+    pub status: u16,
+    /// Request body bytes received.
+    pub bytes_in: u64,
+    /// Response body bytes handed to the connection (not the head or the framing).
+    pub bytes_out: u64,
+    /// From the loop turn that read the request head to the one that finished the response.
+    pub duration: Duration,
+    /// The protocol.
+    pub version: crate::types::Version,
+    /// The client's address, when known.
+    pub peer: Option<SocketAddr>,
+    /// The listener ([`Request::listener`]).
+    pub listener: usize,
+    /// The response did not complete: the client went away, the stream was reset, or a
+    /// streamed body was aborted.
+    pub aborted: bool,
+}
+
+impl Shared {
+    /// Reports a finished request to [`Builder::on_complete`]; callers check
+    /// `on_complete.is_some()` first, so a server without a hook pays one branch.
+    #[inline(never)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn complete(&self, status: u16, bytes_in: u64, bytes_out: u64, start_ns: u64, now_ns: u64, version: crate::types::Version, peer: Option<SocketAddr>, listener: u32, aborted: bool) {
+        let Some(f) = &self.on_complete else { return };
+        let c = Completion { status, bytes_in, bytes_out, duration: Duration::from_nanos(now_ns.saturating_sub(start_ns)), version, peer, listener: listener as usize, aborted };
+        let _ = catch_unwind(AssertUnwindSafe(|| f(&c)));
+    }
 }
 
 /// A connection's place in the per-IP count; released when the connection is dropped.
@@ -89,8 +143,22 @@ impl Drop for IpSlot {
 }
 
 impl Shared {
-    /// Takes a per-IP slot for a new connection; `Err` when the IP is at its cap.
+    /// [`Limits::reconnect_rate`] (out of line: off by default).
+    #[cfg(feature = "guard")]
+    #[cold]
+    #[inline(never)]
+    fn reconnect_allowed(&self, peer: Option<std::net::SocketAddr>) -> bool {
+        let Some(p) = peer else { return true };
+        self.reconnects.lock().unwrap_or_else(|e| e.into_inner()).allow(p.ip(), self.limits.reconnect_rate, simoom_sys::time::now_ns())
+    }
+
+    /// Takes a per-IP slot for a new connection; `Err` when the IP is at its cap or over its
+    /// reconnect rate.
     pub(crate) fn take_ip_slot(self: &Arc<Self>, peer: Option<std::net::SocketAddr>) -> Result<Option<IpSlot>, ()> {
+        #[cfg(feature = "guard")]
+        if self.limits.reconnect_rate != 0 && !self.reconnect_allowed(peer) {
+            return Err(());
+        }
         let cap = self.limits.max_connections_per_ip;
         let Some(peer) = peer.filter(|_| cap != 0) else { return Ok(None) };
         let ip = peer.ip();
@@ -191,18 +259,26 @@ pub(crate) fn call(sh: &Shared, req: &mut Request<'_>, t: &mut dyn Target, clock
     }
     // One call site for the service (each one inlines the reply set-up).
     let mark = if measure { Some(crate::watchdog::mark()) } else { None };
+    let mut deferred = false;
     let r = catch_unwind(AssertUnwindSafe(|| {
-        let _ = sh.service.call(req, Reply::new(t));
+        deferred = matches!(sh.service.call(req, new_reply(sh, req, t)), crate::service::Outcome::Deferred);
     }));
     if let Some(t0) = t0 {
-        if let Some(m) = mark {
-            req.sample = crate::watchdog::since(m);
-        }
         let t1 = Instant::now();
         *clock = Some(t1);
-        let took = (t1 - t0).as_nanos() as u64;
-        if took > budget || req.sample.is_some() {
-            sh.after_call(req, took);
+        // A handler that deferred (K1) handed its work to another thread: whatever the hand-off
+        // cost (a contended queue lock, a wake-up), it is never a stall, and moving its route to
+        // the offload pool would only add a second hand-off per request.
+        if deferred {
+            req.sample = None;
+        } else {
+            if let Some(m) = mark {
+                req.sample = crate::watchdog::since(m);
+            }
+            let took = (t1 - t0).as_nanos() as u64;
+            if took > budget || req.sample.is_some() {
+                sh.after_call(req, took);
+            }
         }
     }
     finish_call(sh, req, r)
@@ -212,7 +288,19 @@ pub(crate) fn call(sh: &Shared, req: &mut Request<'_>, t: &mut dyn Target, clock
 #[cold]
 #[inline(never)]
 fn offload_slot(sh: &Shared, req: &mut Request<'_>, t: &mut dyn Target, w: &Arc<Watch>) {
-    let _ = Reply::new(t).offload_watched(req, sh.service.clone(), w.clone());
+    let _ = new_reply(sh, req, t).offload_watched(req, sh.service.clone(), w.clone());
+}
+
+/// The reply for a request, with its content coding negotiated (feature `compression`).
+#[inline(always)]
+fn new_reply<'a>(sh: &Shared, req: &Request<'_>, t: &'a mut dyn Target) -> Reply<'a> {
+    #[cfg(not(feature = "compression"))]
+    let _ = (sh, req);
+    #[cfg(feature = "compression")]
+    if let Some(c) = &sh.compression {
+        return Reply::new(t).with_coding(crate::compress::negotiate(c, req.header("accept-encoding")));
+    }
+    Reply::new(t)
 }
 
 /// Path slots of the watchdog for services without routes.
@@ -324,6 +412,11 @@ pub struct Builder {
     quic_config: Option<QuicConfigure>,
     #[cfg(feature = "http3")]
     quic_gro: bool,
+    on_complete: Option<CompleteHook>,
+    #[cfg(feature = "compression")]
+    compression: Option<crate::compress::Compression>,
+    #[cfg(feature = "ws-deflate")]
+    ws_deflate: Option<simoom_http1::ws::deflate::DeflateConfig>,
 }
 
 impl Default for Builder {
@@ -348,6 +441,11 @@ impl Default for Builder {
             quic_config: None,
             #[cfg(feature = "http3")]
             quic_gro: true,
+            on_complete: None,
+            #[cfg(feature = "compression")]
+            compression: None,
+            #[cfg(feature = "ws-deflate")]
+            ws_deflate: None,
         }
     }
 }
@@ -355,6 +453,16 @@ impl Default for Builder {
 impl std::fmt::Debug for Builder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Builder").field("listeners", &self.tcp.len()).field("threads", &self.threads).field("limits", &self.limits).finish()
+    }
+}
+
+/// The ALPN list of TCP TLS listeners.
+#[cfg(feature = "tls")]
+fn tcp_alpn(http2: bool) -> Vec<Vec<u8>> {
+    if http2 {
+        vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+    } else {
+        vec![b"http/1.1".to_vec()]
     }
 }
 
@@ -485,6 +593,33 @@ impl Builder {
         self
     }
 
+    /// Calls `f` once per finished request, on the loop thread that served it, with its status,
+    /// byte counts, duration, protocol and peer: for access logs and per-request metrics.
+    /// Requests the parser refuses (400, 413, 431...) are reported too. `f` must be quick and
+    /// must not block. Without a hook (the default) the server only checks that there is none.
+    pub fn on_complete(mut self, f: impl Fn(&Completion) + Send + Sync + 'static) -> Self {
+        self.on_complete = Some(Arc::new(f));
+        self
+    }
+
+    /// Offers WebSocket permessage-deflate (RFC 7692) to clients that ask for it (feature
+    /// `ws-deflate`), on HTTP/1.1 and HTTP/2 WebSockets. Inflated messages are bounded by
+    /// [`crate::Limits::max_ws_message`] as well as `cfg.max_message`. Each compressing
+    /// WebSocket holds about 330 KiB of codec state.
+    #[cfg(feature = "ws-deflate")]
+    pub fn websocket_deflate(mut self, cfg: crate::WsDeflate) -> Self {
+        self.ws_deflate = Some(cfg);
+        self
+    }
+
+    /// Compresses responses with gzip or deflate when the client accepts it (feature
+    /// `compression`); see [`crate::Compression`] for what is compressed and how.
+    #[cfg(feature = "compression")]
+    pub fn compression(mut self, c: crate::Compression) -> Self {
+        self.compression = Some(c);
+        self
+    }
+
     /// Binds every listener, starts the loops, and returns once they run.
     pub fn start(self) -> io::Result<ServerHandle> {
         let service = self.service.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no service"))?;
@@ -493,8 +628,8 @@ impl Builder {
         #[cfg(feature = "tls")]
         let tls = match self.tls {
             Some(mut c) => {
-                c.alpn = if http2 { vec![b"h2".to_vec(), b"http/1.1".to_vec()] } else { vec![b"http/1.1".to_vec()] };
-                Some(Arc::new(c))
+                c.alpn = tcp_alpn(http2);
+                Some(std::sync::RwLock::new(Arc::new(c)))
             }
             None => None,
         };
@@ -508,6 +643,10 @@ impl Builder {
             max_header_list_size: limits.max_header_list,
             header_table_size: limits.header_table_size,
             budgets: limits.h2_frame_budgets.h2(),
+            // WebSocket over HTTP/2 (RFC 8441), feature `websocket-h2`
+            enable_connect_protocol: cfg!(feature = "websocket-h2"),
+            keepalive_interval_ms: limits.h2_keepalive.map(|d| (d.as_millis() as u64).max(1)),
+            keepalive_timeout_ms: (limits.h2_keepalive_timeout.as_millis() as u64).max(1),
             ..simoom_h2::Config::default()
         };
         let slots_active = Arc::new(AtomicU32::new(0));
@@ -525,7 +664,23 @@ impl Builder {
             slots: (0..if cfg!(feature = "watchdog") { WATCH_SLOTS } else { 0 }).map(|_| Arc::new(Watch::new(Some(slots_active.clone())))).collect(),
             slots_active,
             log: self.log,
+            defer_ns: limits.defer_timeout.map_or(0, |d| (d.as_nanos() as u64).max(1)),
+            on_complete: self.on_complete,
+            #[cfg(feature = "compression")]
+            compression: self.compression.map(Arc::new),
+            #[cfg(feature = "ws-deflate")]
+            ws_deflate: self.ws_deflate.map(|mut c| {
+                c.max_message = c.max_message.min(limits.max_ws_message);
+                c
+            }),
+            #[cfg(feature = "http3")]
+            quic_tls: match self.quic_tls {
+                Some(c) if !self.quic.is_empty() => Some(Arc::new(crate::h3::QuicTls::new(c))),
+                _ => None,
+            },
             per_ip: std::sync::Mutex::new(crate::util::IpCounts::default()),
+            #[cfg(feature = "guard")]
+            reconnects: std::sync::Mutex::new(crate::util::Reconnects::default()),
             #[cfg(feature = "tls")]
             tls,
             limits,
@@ -571,9 +726,8 @@ impl Builder {
         let quic_cfg = if self.quic.is_empty() {
             None
         } else {
-            let mut c = self.quic_tls.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "an HTTP/3 listener needs Builder::quic_tls"))?;
-            c.alpn = vec![b"h3".to_vec()];
-            let mut q = simoom_quic::Config::new(Arc::new(simoom_quic::tls::TlsProvider::server(Arc::new(c))));
+            let provider = shared.quic_tls.clone().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "an HTTP/3 listener needs Builder::quic_tls"))?;
+            let mut q = simoom_quic::Config::new(provider);
             q.transport.max_streams_bidi = u64::from(shared.limits.max_concurrent_streams);
             q.transport.max_idle_timeout = shared.limits.keep_alive_timeout.max(Duration::from_secs(1));
             q.transport.disable_active_migration = true;
@@ -676,6 +830,29 @@ impl ServerHandle {
     /// aborted.
     pub fn stop(&self, grace: Duration) {
         self.rt.stop(grace);
+    }
+
+    /// Replaces the TLS configuration of the TLS listeners without a restart (certificate
+    /// rotation): connections accepted from now on use `config`, open ones keep theirs. Its
+    /// ALPN list is set as by [`Builder::tls`]. Session tickets issued under the old
+    /// configuration resume only if `config` shares its `ticketer`. Fails when the server has
+    /// no TLS listener.
+    #[cfg(feature = "tls")]
+    pub fn set_tls(&self, mut config: simoom_tls::ServerConfig) -> io::Result<()> {
+        let Some(slot) = &self.shared.tls else { return Err(io::Error::new(io::ErrorKind::InvalidInput, "the server has no TLS listener")) };
+        config.alpn = tcp_alpn(self.shared.http2);
+        *slot.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(config);
+        Ok(())
+    }
+
+    /// Replaces the TLS configuration of the HTTP/3 listeners without a restart: QUIC
+    /// connections that start from now on use `config` (ALPN `h3`), open ones keep theirs.
+    /// Fails when the server has no HTTP/3 listener.
+    #[cfg(feature = "http3")]
+    pub fn set_quic_tls(&self, config: simoom_tls::ServerConfig) -> io::Result<()> {
+        let Some(q) = &self.shared.quic_tls else { return Err(io::Error::new(io::ErrorKind::InvalidInput, "the server has no HTTP/3 listener")) };
+        q.set(config);
+        Ok(())
     }
 
     /// Waits for the loops to exit (after [`ServerHandle::stop`]).

@@ -1,3 +1,8 @@
 * text=auto eol=lf
 *.bin binary
 *.der binary
+*.p12 binary
+*.pfx binary
+*.jks binary
+*.jceks binary
+*.crl binary

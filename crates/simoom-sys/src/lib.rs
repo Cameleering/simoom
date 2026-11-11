@@ -19,10 +19,17 @@ pub mod arch;
 mod os;
 
 pub mod alloc;
+/// Codec kernels with CPU features picked at run time: BMI2 (owned by the simoom-compress work).
+pub mod bits;
+/// Codec inner loops as unchecked pointer code (owned by the simoom-compress work).
+pub mod codec;
+/// The OS store of trusted root certificates (Windows), for TLS clients.
+pub mod certstore;
 pub mod cpu;
 /// Per-thread CPU time (owned by the facade work, for the stall watchdog).
 pub mod cputime;
 pub mod driver;
+pub mod mpsc;
 pub mod net;
 pub mod time;
 pub mod udp;

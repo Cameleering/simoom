@@ -1,0 +1,117 @@
+[package]
+name = "simoom-client"
+description = "Std-only HTTP/1.1, HTTP/2 and HTTP/3 client and WebSocket client for simoom: pooling, TLS, proxies, streaming bodies, timeouts."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Response parser, body decoder, request head writer; the WebSocket codec with `client-ws`.
+simoom-http1 = { path = "../simoom-http1", default-features = false }
+# The OS random source (WebSocket keys and masks).
+simoom-sys = { path = "../simoom-sys", default-features = false }
+simoom-h2 = { path = "../simoom-h2", optional = true }
+simoom-tls = { path = "../simoom-tls", optional = true, default-features = false, features = ["client"] }
+simoom-quic = { path = "../simoom-quic", optional = true }
+simoom-h3 = { path = "../simoom-h3", optional = true }
+simoom-rt = { path = "../simoom-rt", optional = true, default-features = false }
+simoom-compress = { path = "../simoom-compress", optional = true }
+
+[features]
+default = ["client-h1", "client-h2", "client-ws", "tls", "compress"]
+# HTTP/1.1: keep-alive pool, chunked bodies, 100-continue, CONNECT proxies, redirects.
+client-h1 = []
+# HTTP/2: h2c with prior knowledge and h2 through ALPN, one multiplexed connection per origin,
+# PING keepalive.
+client-h2 = ["dep:simoom-h2"]
+# HTTP/3 over QUIC, forced or through `Alt-Svc` (needs TLS).
+client-h3 = ["tls", "dep:simoom-quic", "dep:simoom-h3"]
+# The WebSocket client (RFC 6455), `ws://` and `wss://`.
+client-ws = ["client-h1", "simoom-http1/websocket"]
+# WebSocket permessage-deflate (RFC 7692): `WsBuilder::permessage_deflate`.
+client-ws-deflate = ["client-ws", "simoom-http1/permessage-deflate"]
+# TLS 1.3 for `https://` and `wss://`: X25519, P-256, RSA and AES-GCM. Verification is always on.
+tls = ["dep:simoom-tls", "simoom-tls/rsa"]
+# The other certificate types and suite: ECDSA P-384, Ed25519, ChaCha20-Poly1305.
+tls-extra = ["tls", "simoom-tls/p384", "simoom-tls/ed25519", "simoom-tls/chacha20"]
+# Response decompression: `Accept-Encoding: gzip, deflate` and streaming gzip/zlib/raw-deflate
+# decoding with simoom-compress (Camel's `contentCompressionDisabled=false`, the default).
+compress = ["dep:simoom-compress"]
+# The non-blocking client driven by simoom-rt's event loops (`rt::RtClient`).
+rt = ["dep:simoom-rt"]
+# An RFC 6265bis cookie jar (`cookie::CookieJar`).
+cookies = ["hooks"]
+# Digest authentication (RFC 7616: SHA-256, SHA-512-256, MD5) in `auth::Auth`; hashes from
+# simoom-tls (MD5 from its `legacy` module).
+auth-digest = ["auth", "dep:simoom-tls", "simoom-tls/legacy"]
+# NTLMv2 authentication in `auth::Auth` (MD4 and HMAC-MD5 from simoom-tls `legacy`).
+auth-ntlm = ["auth", "dep:simoom-tls", "simoom-tls/legacy"]
+# multipart/form-data request bodies (`multipart::Multipart`).
+multipart = []
+# Interceptors (`hooks::Interceptor`, `ClientBuilder::interceptor`): the plumbing cookies and
+# authentication sit on. Without it a client runs no hooks at all.
+hooks = []
+# Challenge-based authentication (`auth::Auth`: Basic and Bearer providers, proxy `CONNECT`
+# challenges); `auth-digest` and `auth-ntlm` add the schemes.
+auth = ["hooks"]
+# Form bodies and request-body compression (`RequestBuilder::form`, `RequestBuilder::compress`).
+encode = ["compress"]
+# A background thread that closes idle pooled connections when they pass the idle timeout
+# (without it they are closed when next checked out, or by the HTTP/2 keepalive thread).
+evict = []
+# Happy Eyeballs (RFC 8305): racing the addresses of a name (`Config::happy_eyeballs_delay`).
+happy-eyeballs = []
+# A timeout for name resolution (`Config::dns_timeout`; the resolver runs on a helper thread).
+dns-timeout = []
+# SOCKS5 proxies (`socks5://`, `socks5h://`).
+socks = []
+# Retries with backoff for idempotent requests (`Config::retries`).
+retry = []
+# HTTP/1.1 pipelining (`Client::pipeline`).
+pipeline = []
+# h2c through an HTTP/1.1 `Upgrade` (`Config::h2c_upgrade`).
+h2c-upgrade = ["client-h2"]
+# Brotli and zstd request-body compression (`encode::Coding::Brotli`, `Coding::Zstd`).
+compress-br = ["encode", "simoom-compress/brotli"]
+compress-zstd = ["encode", "simoom-compress/zstd"]
+full = ["client-h1", "client-h2", "client-h3", "client-ws", "tls", "tls-extra", "rt", "compress", "cookies", "auth-digest", "auth-ntlm", "multipart", "compress-br", "compress-zstd", "hooks", "auth", "encode", "happy-eyeballs", "dns-timeout", "socks", "retry", "pipeline", "h2c-upgrade", "evict"]
+
+[dev-dependencies]
+simoom = { path = "../simoom", features = ["http1", "http2", "websocket", "websocket-h2", "websocket-h3", "ws-deflate", "tls", "http3", "auth"] }
+simoom-tls = { path = "../simoom-tls" }
+simoom-h2 = { path = "../simoom-h2" }
+simoom-rt = { path = "../simoom-rt" }
+simoom-compress = { path = "../simoom-compress" }
+
+# Tests that use the shared helpers (TLS servers and a client trusting their certificate) need
+# `tls`; feature-specific test files gate themselves with `#![cfg(feature = ...)]`.
+[[test]]
+name = "http1"
+required-features = ["tls"]
+
+[[test]]
+name = "auth"
+required-features = ["tls", "auth"]
+
+[[test]]
+name = "bodies"
+required-features = ["tls"]
+
+[[test]]
+name = "interop"
+required-features = ["tls"]
+
+[[example]]
+name = "client_empty"
+path = "examples/client_empty.rs"
+
+[[example]]
+name = "client_size_server"
+path = "examples/client_size_server.rs"
+

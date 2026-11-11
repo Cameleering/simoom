@@ -116,6 +116,10 @@ impl HeaderBuf {
         self.idx.len()
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.idx.is_empty()
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&[u8], &[u8])> + '_ {
         self.idx.iter().map(move |&(s, n, v)| {
             let s = s as usize;
@@ -222,6 +226,8 @@ pub struct Response {
     pub(crate) body: Body,
     pub(crate) close: bool,
     pub(crate) invalid: bool,
+    /// Trailer fields, sent after the body ([`Response::trailer`]).
+    pub(crate) trailers: HeaderBuf,
 }
 
 impl Default for Response {
@@ -233,7 +239,7 @@ impl Default for Response {
 impl Response {
     /// A response with `status` (100 to 999), no headers and no body.
     pub fn new(status: u16) -> Response {
-        Response { status, headers: HeaderBuf::default(), body: Body::Empty, close: false, invalid: !(100..=999).contains(&status) }
+        Response { status, headers: HeaderBuf::default(), body: Body::Empty, close: false, invalid: !(100..=999).contains(&status), trailers: HeaderBuf::default() }
     }
 
     /// `200 OK` with a `text/plain` body.
@@ -249,6 +255,17 @@ impl Response {
             Pushed::Close => self.close = true,
             Pushed::Invalid => self.invalid = true,
             _ => {}
+        }
+        self
+    }
+
+    /// Adds a trailer field, sent after the body: trailing HEADERS on HTTP/2 and HTTP/3 (gRPC's
+    /// `grpc-status`), a trailer section on HTTP/1.1, which then uses chunked framing. HTTP/1.0
+    /// clients and `HEAD` requests get no trailers. Framing fields are ignored; an invalid name or
+    /// value turns the response into a 500.
+    pub fn trailer(mut self, name: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Response {
+        if self.trailers.push(name.as_ref(), value.as_ref()) == Pushed::Invalid {
+            self.invalid = true;
         }
         self
     }
@@ -402,7 +419,7 @@ impl StaticReply {
     }
 
     pub(crate) fn to_response(&self) -> Response {
-        Response { status: self.status, headers: self.headers.clone(), body: self.body.clone(), close: false, invalid: false }
+        Response { status: self.status, headers: self.headers.clone(), body: self.body.clone(), close: false, invalid: false, trailers: HeaderBuf::default() }
     }
 }
 

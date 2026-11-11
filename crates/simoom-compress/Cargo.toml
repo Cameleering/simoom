@@ -12,6 +12,16 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+# BMI2 kernels picked at run time for Brotli and zstd (the only crate with `unsafe`).
+simoom-sys = { path = "../simoom-sys", default-features = false, optional = true }
+
+[features]
+default = []
+# Brotli (RFC 7932) decoder and encoder, `Format::Brotli`; adds the static dictionary
+# (59 KB compressed in the binary).
+brotli = ["dep:simoom-sys"]
+# zstd (RFC 8878) decoder and encoder, `Format::Zstd`.
+zstd = ["dep:simoom-sys"]
 
 [[example]]
 name = "bench_compress"

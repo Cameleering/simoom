@@ -337,7 +337,13 @@ impl Spin {
     /// Waits for events with `poll`, which waits up to the given timeout (zero: does not block)
     /// and returns whether it found anything. Spins first when [`Spin::spins`] or a probe is
     /// due; `syscall_polls` paces polls that are system calls to one a microsecond.
-    pub(crate) fn wait(&mut self, timeout: Option<Duration>, syscall_polls: bool, stats: &mut DriverStats, mut poll: impl FnMut(Option<Duration>, &mut DriverStats) -> io::Result<bool>) -> io::Result<()> {
+    ///
+    /// `w` is the driver's waker: work [`Waker::post`]ed meanwhile ends a spin, and the driver
+    /// announces that it parks in the OS before it blocks, so that a post wakes it only then.
+    // One copy for every back end (K9): `poll` is a trait object, its cost is nothing next to
+    // the system call it makes.
+    #[inline(never)]
+    pub(crate) fn wait(&mut self, timeout: Option<Duration>, syscall_polls: bool, stats: &mut DriverStats, w: &WakerInner, poll: &mut dyn FnMut(Option<Duration>, &mut DriverStats) -> io::Result<bool>) -> io::Result<()> {
         if timeout == Some(Duration::ZERO) {
             return poll(timeout, stats).map(drop);
         }
@@ -357,6 +363,12 @@ impl Spin {
             let mut last = 0;
             loop {
                 let now = crate::time::now_ns() - t0;
+                if w.posted.load(Ordering::Relaxed) {
+                    // A message for the loop (no system call on either side). Not counted as
+                    // a short gap: replies from worker threads must not keep the loop
+                    // spinning, or it takes the CPU those threads need (K3).
+                    return Ok(());
+                }
                 if !syscall_polls || now - last >= 1_000 || last == 0 {
                     last = now.max(1);
                     stats.spin_polls += 1;
@@ -375,10 +387,18 @@ impl Spin {
                 self.record(u64::MAX); // nothing within the whole window
             }
         }
-        stats.sleeps += 1;
         let rest = timeout.map(|t| t.saturating_sub(Duration::from_nanos(spun)));
-        poll(rest, stats)?;
-        Ok(())
+        // Announce the park, then look for posted work once more: with both sides sequentially
+        // consistent, either this sees the post or the poster sees the park and signals.
+        w.parked.store(true, Ordering::SeqCst);
+        if w.posted.load(Ordering::SeqCst) {
+            w.parked.store(false, Ordering::Relaxed);
+            return poll(Some(Duration::ZERO), stats).map(drop);
+        }
+        stats.sleeps += 1;
+        let r = poll(rest, stats);
+        w.parked.store(false, Ordering::Relaxed);
+        r.map(drop)
     }
 }
 
@@ -396,11 +416,15 @@ pub struct Waker {
 pub(crate) struct WakerInner {
     pub(crate) pending: AtomicBool,
     pub(crate) signal: Box<dyn Fn() + Send + Sync>,
+    /// Work was [`Waker::post`]ed since the driver last reported it.
+    pub(crate) posted: AtomicBool,
+    /// The driver is blocked in the OS, or about to be (set by [`Spin::wait`]).
+    pub(crate) parked: AtomicBool,
 }
 
 impl Waker {
     pub(crate) fn new(signal: Box<dyn Fn() + Send + Sync>) -> Waker {
-        Waker { inner: Arc::new(WakerInner { pending: AtomicBool::new(false), signal }) }
+        Waker { inner: Arc::new(WakerInner { pending: AtomicBool::new(false), signal, posted: AtomicBool::new(false), parked: AtomicBool::new(false) }) }
     }
 
     /// Makes the driver's current or next [`Driver::turn`] return [`Event::Wake`].
@@ -408,6 +432,27 @@ impl Waker {
         if !self.inner.pending.swap(true, Ordering::AcqRel) {
             (self.inner.signal)();
         }
+    }
+
+    /// Like [`Waker::wake`], for work the caller has just queued for the driver's thread (with
+    /// a sequentially consistent push, such as [`crate::mpsc::Mpsc::push`]): the current or next
+    /// [`Driver::turn`] returns [`Event::Wake`], but the OS is signalled only when the driver is
+    /// parked in it. A driver that is running, or spinning in its busy poll, picks the work up
+    /// without a system call on either side, and posts that arrive together cost one signal.
+    pub fn post(&self) {
+        let i = &*self.inner;
+        // Sequentially consistent against the driver's park announcement and re-check in
+        // `Spin::wait`: either the driver sees `posted`, or this sees `parked` and signals
+        // (`wake` signals once however many posters see it).
+        i.posted.store(true, Ordering::SeqCst);
+        if i.parked.load(Ordering::SeqCst) {
+            self.wake();
+        }
+    }
+
+    /// Whether work was posted since the driver last reported it (and clears that).
+    pub(crate) fn take_posted(&self) -> bool {
+        self.inner.posted.load(Ordering::Relaxed) && self.inner.posted.swap(false, Ordering::AcqRel)
     }
 
     /// Called by the driver when it reports the wake, before the caller looks at its queues.
@@ -479,7 +524,7 @@ impl<T> Slab<T> {
     pub(crate) fn len(&self) -> usize {
         self.len
     }
-    #[cfg_attr(not(any(all(target_os = "linux", feature = "io-uring"), windows)), allow(dead_code))]
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn ids(&self) -> Vec<Id> {
         self.slots.iter().enumerate().filter(|(_, s)| s.1.is_some()).map(|(i, s)| Id::new(i as u32, s.0)).collect()
     }
@@ -598,30 +643,31 @@ impl Driver {
         let want = cfg.backend.resolve();
         #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
         let mut fallback = None;
-        let (imp, kind) = match want {
-            #[cfg(all(target_os = "linux", feature = "io-uring"))]
-            Backend::IoUring => match uring::Driver::new(cfg) {
+        // io_uring, or why it fell back to epoll: the epoll driver is built in one place below
+        // (it is inlined into the loop thread's start, so a second copy would cost its code twice).
+        #[cfg(target_os = "linux")]
+        if want == Backend::IoUring {
+            #[cfg(feature = "io-uring")]
+            match uring::Driver::new(cfg) {
                 Ok(d) => {
-                    fallback = d.degraded();
-                    (Imp::Uring(d), Backend::IoUring)
+                    let fallback = d.degraded();
+                    return Ok(Driver { imp: Imp::Uring(d), kind: Backend::IoUring, fallback, _not_send: core::marker::PhantomData });
                 }
-                Err(e) => {
-                    fallback = Some(format!("io_uring unavailable ({e}); using epoll"));
-                    (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll)
-                }
-            },
-            #[cfg(all(target_os = "linux", not(feature = "io-uring")))]
-            Backend::IoUring => {
-                fallback = Some("io_uring unavailable (built without the `io-uring` feature); using epoll".into());
-                (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll)
+                Err(e) => fallback = Some(uring_unavailable(&e)),
             }
+            #[cfg(not(feature = "io-uring"))]
+            {
+                fallback = Some("io_uring unavailable (built without the `io-uring` feature); using epoll".into());
+            }
+        }
+        let (imp, kind) = match want {
             #[cfg(target_os = "linux")]
-            Backend::Epoll => (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll),
+            Backend::Epoll | Backend::IoUring => (Imp::Epoll(readiness::Driver::new(cfg)?), Backend::Epoll),
             #[cfg(windows)]
             Backend::Iocp => (Imp::Iocp(iocp::Driver::new(cfg)?), Backend::Iocp),
             #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
             Backend::Kqueue => (Imp::Kqueue(readiness::Driver::new(cfg)?), Backend::Kqueue),
-            other => return Err(io::Error::new(io::ErrorKind::Unsupported, format!("the {} back end is not available on this OS", other.name()))),
+            other => return Err(unsupported_backend(other)),
         };
         Ok(Driver { imp, kind, fallback, _not_send: core::marker::PhantomData })
     }
@@ -716,11 +762,37 @@ impl Driver {
         dispatch!(self, d => d.set_buffer_target(n))
     }
 
+    /// Writes a stream's queued output now, where that costs no extra system call (epoll and
+    /// kqueue write each socket with its own call anyway; io_uring batches its submissions and
+    /// IOCP posts them, so there this does nothing). The results come with the next turn (K4).
+    pub fn flush_now(&mut self, id: Id) {
+        match &mut self.imp {
+            #[cfg(target_os = "linux")]
+            Imp::Epoll(d) => d.flush_now(id),
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+            Imp::Kqueue(d) => d.flush_now(id),
+            #[allow(unreachable_patterns)]
+            _ => {
+                let _ = id;
+            }
+        }
+    }
+
+    /// Frees spare receive buffers down to `keep` and lets the stock grow again from small
+    /// (an idle loop after a burst; buffers lent to an io_uring ring stay).
+    pub fn trim_buffers(&mut self, keep: usize) {
+        dispatch!(self, d => d.trim_buffers(keep))
+    }
+
     /// Flushes queued sends, waits for I/O up to `timeout` (`None` waits until something happens
     /// or a [`Waker`] fires; zero only polls) and appends what happened to `out`. Returns at once
     /// when events are already pending.
     pub fn turn(&mut self, timeout: Option<Duration>, out: &mut Vec<Event>) -> io::Result<()> {
-        dispatch!(self, d => d.turn(timeout, out))
+        dispatch!(self, d => d.turn(timeout, out))?;
+        if dispatch_ref!(self, d => d.waker.take_posted()) {
+            out.push(Event::Wake);
+        }
+        Ok(())
     }
 
     /// System call and event counters.
@@ -737,6 +809,19 @@ impl Driver {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
+
+#[cfg(all(target_os = "linux", feature = "io-uring"))]
+#[cold]
+#[inline(never)]
+fn uring_unavailable(e: &io::Error) -> String {
+    format!("io_uring unavailable ({e}); using epoll")
+}
+
+#[cold]
+#[inline(never)]
+fn unsupported_backend(b: Backend) -> io::Error {
+    io::Error::new(io::ErrorKind::Unsupported, format!("the {} back end is not available on this OS", b.name()))
 }
 
 /// Converts an optional timeout to milliseconds for epoll and IOCP, rounding up so a timer

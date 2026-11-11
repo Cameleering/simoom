@@ -25,6 +25,34 @@ pub struct Limits {
     /// Deadline for a whole request head, from its first byte (and for the first request, from
     /// the accept). Defeats slowloris. Default 10 s.
     pub head_timeout: Duration,
+    /// How long a request head that is still arriving may stay open after
+    /// [`Limits::head_timeout`] while the server is not short of connections (K6). A slow head
+    /// holds no buffer (partial heads are compacted to their size), so closing it gains nothing
+    /// until open connections pass three quarters of [`Limits::max_connections`] or of the file
+    /// descriptor limit; closing slowloris connections early only makes their attacker reconnect,
+    /// and the accept and close churn costs every other client. Under that pressure, or once a
+    /// head is this old, it is closed at its deadline as before. `Duration::ZERO` closes every
+    /// head at [`Limits::head_timeout`]. Default 300 s. Needs the `guard` cargo feature (on by
+    /// default); without it every head closes at [`Limits::head_timeout`].
+    pub slow_head_limit: Duration,
+    /// New connections per second accepted from one client IP address (TCP listeners), as a
+    /// token bucket with a burst of the same size; more are accepted and closed at once and
+    /// counted in [`crate::Stats::rejected`] (K6: an attacker whose connections are closed
+    /// cannot come straight back). 0 (the default) means no limit: behind a proxy or a NAT every
+    /// client shares one address. Only the most recent 64 Ki addresses are tracked. Needs the
+    /// `guard` cargo feature (on by default).
+    pub reconnect_rate: u32,
+    /// Admission control by backpressure (K5): when this many replies on one loop thread are
+    /// outstanding (deferred, offloaded or streaming) its HTTP/1.1 connections stop reading new
+    /// requests, and its HTTP/2 connections refuse new streams, until the count drops to three
+    /// quarters of it; the kernel's buffers and TCP flow control then hold the clients back.
+    /// With [`Limits::pending_503`] the new requests get a fast `503` instead. 0 turns it off.
+    /// Default 16 Ki, far above what a worker pool keeps in flight, so it never acts under
+    /// normal load. Needs the `guard` cargo feature (on by default).
+    pub max_pending_per_loop: usize,
+    /// Answer new requests over [`Limits::max_pending_per_loop`] with `503` and `retry-after`
+    /// (counted in [`crate::Stats::shed`]) instead of pausing. Default false.
+    pub pending_503: bool,
     /// Idle keep-alive timeout between requests (HTTP/1.1) or with no open stream (HTTP/2).
     /// Default 15 s.
     pub keep_alive_timeout: Duration,
@@ -35,6 +63,14 @@ pub struct Limits {
     pub body_rate_grace: Duration,
     /// Queued output that makes no progress for this long closes the connection. Default 30 s.
     pub write_timeout: Duration,
+    /// How long a deferred reply ([`crate::Reply::defer`], and the offload paths
+    /// [`crate::blocking`] and [`crate::Reply::offload`]) may take to start: when it expires
+    /// before the [`crate::Responder`] sent a response or a streamed head, the client gets a
+    /// `504 Gateway Timeout`, the responder is cancelled ([`crate::Responder::is_cancelled`])
+    /// and its late answer is dropped. A streamed body, once started, is bounded by
+    /// [`Limits::write_timeout`] instead. `None` (the default) waits for ever, as before; set
+    /// it to the route's SLO.
+    pub defer_timeout: Option<Duration>,
     /// Requests per keep-alive connection; 0 means unlimited (the default).
     pub max_requests_per_connection: u64,
     /// Connections in total; more are accepted and closed at once. Default 1 Mi.
@@ -56,6 +92,15 @@ pub struct Limits {
     /// PRIORITY, small WINDOW_UPDATE); exceeding one closes the connection with
     /// `GOAWAY(ENHANCE_YOUR_CALM)`. Defaults in [`FrameBudgets`].
     pub h2_frame_budgets: FrameBudgets,
+    /// HTTP/2 PING keepalive: after this long without any frame from the client, the server
+    /// sends a PING; [`Limits::h2_keepalive_timeout`] later, a client that sent nothing back is
+    /// considered dead and its connection is closed (its streams are cancelled). Finds peers that
+    /// vanished without a FIN behind long-lived streams (gRPC streaming, SSE, WebSocket over
+    /// HTTP/2). `None` (the default) sends no keepalive PINGs. Needs the `h2-keepalive` cargo
+    /// feature; without it this is ignored.
+    pub h2_keepalive: Option<Duration>,
+    /// How long a client has to answer a keepalive PING ([`Limits::h2_keepalive`]). Default 20 s.
+    pub h2_keepalive_timeout: Duration,
     /// Streamed response bytes ([`crate::BodySink`]) handed to a connection and not yet written
     /// before writers wait (backpressure). Default 64 KiB.
     pub stream_buffer: usize,
@@ -88,11 +133,18 @@ pub struct Limits {
     /// queue builds in the client and the kernel). Lag also grows when the loop thread itself
     /// is preempted (a busy VM). Opt in with a value that matches a latency SLO.
     pub shed_lag: Option<Duration>,
-    /// Offload pool threads; 0 means twice the CPU count, at least 4.
+    /// Offload pool threads ([`crate::blocking`], [`crate::Reply::offload`], routes the watchdog
+    /// moved). 0 (the default) means 32 per CPU, between 512 and 1024: enough for blocking
+    /// integration calls (512 workers serve about 5,000 calls per second of 100 ms each, as a
+    /// thread-per-request server with a pool of that size would).
+    /// Workers start on demand and exit after 10 s idle, so the cap costs nothing until used.
+    /// Set it to the concurrency your backends allow.
     pub offload_threads: usize,
     /// Offload jobs waiting; more get a 503. Default 4096.
     pub offload_queue: usize,
-    /// CoDel target sojourn time for offloaded jobs. Default 5 ms.
+    /// CoDel target sojourn time for offloaded jobs. Default 5 ms. The pool raises it to the
+    /// jobs' recent mean run time, so slow jobs (100 ms) are shed only when the queue keeps
+    /// growing past what the workers absorb, not because one waits a job's length.
     pub offload_target: Duration,
     /// CoDel interval. Default 100 ms.
     pub offload_interval: Duration,
@@ -108,10 +160,15 @@ impl Default for Limits {
             max_body: 10 * 1024 * 1024,
             body_buffer: 64 * 1024,
             head_timeout: Duration::from_secs(10),
+            slow_head_limit: Duration::from_secs(300),
+            reconnect_rate: 0,
+            max_pending_per_loop: 16 * 1024,
+            pending_503: false,
             keep_alive_timeout: Duration::from_secs(15),
             min_body_rate: 1024,
             body_rate_grace: Duration::from_secs(5),
             write_timeout: Duration::from_secs(30),
+            defer_timeout: None,
             max_requests_per_connection: 0,
             max_connections: 1 << 20,
             max_connections_per_loop: 1 << 20,
@@ -120,6 +177,8 @@ impl Default for Limits {
             max_header_list: 16 * 1024,
             header_table_size: 4096,
             h2_frame_budgets: FrameBudgets::default(),
+            h2_keepalive: None,
+            h2_keepalive_timeout: Duration::from_secs(20),
             stream_buffer: 64 * 1024,
             max_ws_message: 1 << 20,
             inline_budget: Some(Duration::from_millis(1)),

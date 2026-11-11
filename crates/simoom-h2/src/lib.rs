@@ -99,6 +99,18 @@ pub struct Config {
     pub graceful_timeout_ms: u64,
     /// Frame budgets per sliding window.
     pub budgets: Budgets,
+    /// Server: announce SETTINGS_ENABLE_CONNECT_PROTOCOL and accept extended CONNECT requests
+    /// with a `:protocol` pseudo-header (RFC 8441, WebSocket over HTTP/2). Default off; needs
+    /// the `connect-protocol` cargo feature (on by default).
+    pub enable_connect_protocol: bool,
+    /// PING keepalive: after this many milliseconds without any frame from the peer, send a
+    /// PING. `None` (the default) sends none. Needs the `keepalive` cargo feature (on by
+    /// default).
+    pub keepalive_interval_ms: Option<u64>,
+    /// PING keepalive: close the connection (GOAWAY `NO_ERROR`, then [`Event::Closed`]) when
+    /// nothing arrives from the peer within this many milliseconds of a keepalive PING.
+    /// Default 20 s.
+    pub keepalive_timeout_ms: u64,
 }
 
 impl Default for Config {
@@ -119,6 +131,9 @@ impl Default for Config {
             settings_timeout_ms: 10_000,
             graceful_timeout_ms: 1_000,
             budgets: Budgets::default(),
+            enable_connect_protocol: false,
+            keepalive_interval_ms: None,
+            keepalive_timeout_ms: 20_000,
         }
     }
 }
@@ -177,6 +192,9 @@ pub enum Error {
     /// The header block is larger than the peer's SETTINGS_MAX_HEADER_LIST_SIZE; nothing was
     /// sent.
     HeaderListTooLarge,
+    /// An extended CONNECT before the server enabled it with SETTINGS_ENABLE_CONNECT_PROTOCOL
+    /// (RFC 8441 §3); nothing was sent.
+    ConnectProtocolDisabled,
 }
 
 impl fmt::Display for Error {

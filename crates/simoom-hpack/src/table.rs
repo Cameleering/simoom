@@ -5,7 +5,10 @@ use std::collections::VecDeque;
 use crate::bytes_eq;
 
 /// The static table, 1-based in the protocol (index `i` is `STATIC_TABLE[i - 1]`).
-pub static STATIC_TABLE: [(&[u8], &[u8]); 61] = [
+pub static STATIC_TABLE: [(&[u8], &[u8]); 61] = STATIC_ENTRIES;
+
+/// [`STATIC_TABLE`] as a constant, for the name lookup built at compile time.
+const STATIC_ENTRIES: [(&[u8], &[u8]); 61] = [
     (b":authority", b""),
     (b":method", b"GET"),
     (b":method", b"POST"),
@@ -69,38 +72,68 @@ pub static STATIC_TABLE: [(&[u8], &[u8]); 61] = [
     (b"www-authenticate", b""),
 ];
 
+/// The longest name in the static table (`access-control-allow-origin`).
+const MAX_NAME: usize = 27;
+
+/// The static names by length, built at compile time: `NAMES.0[NAMES.1[n]..NAMES.1[n + 1]]`
+/// holds (first index, entries) of each distinct name of length `n`. A lookup compares a few
+/// names of the right length; a `match` on the names cost about 2 KB of code per caller.
+static NAMES: ([(u8, u8); 61], [u8; MAX_NAME + 2]) = names_by_len();
+
+const fn same(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+const fn names_by_len() -> ([(u8, u8); 61], [u8; MAX_NAME + 2]) {
+    let t = &STATIC_ENTRIES;
+    let mut names = [(0u8, 0u8); 61];
+    let mut starts = [0u8; MAX_NAME + 2];
+    let mut k = 0;
+    let mut len = 0;
+    while len <= MAX_NAME {
+        starts[len] = k as u8;
+        let mut i = 0;
+        while i < t.len() {
+            assert!(t[i].0.len() <= MAX_NAME);
+            if t[i].0.len() == len && (i == 0 || !same(t[i - 1].0, t[i].0)) {
+                let mut n = 1;
+                while i + n < t.len() && same(t[i + n].0, t[i].0) {
+                    n += 1;
+                }
+                names[k] = (i as u8 + 1, n as u8);
+                k += 1;
+            }
+            i += 1;
+        }
+        len += 1;
+    }
+    starts[MAX_NAME + 1] = k as u8;
+    (names, starts)
+}
+
 /// The 1-based static indices that carry `name`: (first, count).
 pub(crate) fn static_name(name: &[u8]) -> Option<(usize, usize)> {
-    let r = match name {
-        b":authority" => (1, 1),
-        b":method" => (2, 2),
-        b":path" => (4, 2),
-        b":scheme" => (6, 2),
-        b":status" => (8, 7),
-        b"accept-encoding" => (16, 1),
-        b"accept" => (19, 1),
-        b"authorization" => (23, 1),
-        b"cache-control" => (24, 1),
-        b"content-encoding" => (26, 1),
-        b"content-length" => (28, 1),
-        b"content-type" => (31, 1),
-        b"cookie" => (32, 1),
-        b"date" => (33, 1),
-        b"etag" => (34, 1),
-        b"host" => (38, 1),
-        b"location" => (46, 1),
-        b"server" => (54, 1),
-        b"set-cookie" => (55, 1),
-        b"user-agent" => (58, 1),
-        b"vary" => (59, 1),
-        _ if name.first() == Some(&b':') => return None,
-        _ => {
-            // the less common names
-            let i = STATIC_TABLE[14..].iter().position(|(n, _)| *n == name)?;
-            (i + 15, 1)
+    let n = name.len();
+    if n > MAX_NAME {
+        return None;
+    }
+    let (names, starts) = &NAMES;
+    for &(first, count) in &names[starts[n] as usize..starts[n + 1] as usize] {
+        if bytes_eq(STATIC_TABLE[first as usize - 1].0, name) {
+            return Some((first as usize, count as usize));
         }
-    };
-    Some(r)
+    }
+    None
 }
 
 /// A dynamic table entry: offset of the name in the byte buffer, name and value lengths.

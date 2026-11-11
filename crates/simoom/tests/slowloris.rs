@@ -10,7 +10,9 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn a_slowloris_wave_is_closed_in_paced_batches() {
-    let limits = Limits { head_timeout: Duration::from_millis(300), ..Limits::default() };
+    // `slow_head_limit: ZERO`: every slow head closes at its deadline (by default they close
+    // only while the server is short of connections, and only down to three quarters, K6).
+    let limits = Limits { head_timeout: Duration::from_millis(300), slow_head_limit: Duration::ZERO, ..Limits::default() };
     let h = simoom::Server::builder()
         .listen("127.0.0.1:0")
         .threads(1)

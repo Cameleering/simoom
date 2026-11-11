@@ -112,6 +112,9 @@ pub struct Config {
     pub qpack_encoder_capacity: u64,
     /// Body bytes buffered per stream before reading from QUIC stops (backpressure).
     pub body_buffer: usize,
+    /// Server: announce SETTINGS_ENABLE_CONNECT_PROTOCOL and accept extended CONNECT with
+    /// `:protocol` (RFC 9220, WebSocket over HTTP/3). Without it such requests are malformed.
+    pub enable_connect_protocol: bool,
 }
 
 impl Default for Config {
@@ -122,6 +125,7 @@ impl Default for Config {
             qpack_blocked_streams: 16,
             qpack_encoder_capacity: 0,
             body_buffer: 64 << 10,
+            enable_connect_protocol: false,
         }
     }
 }
@@ -239,6 +243,12 @@ impl Http3 {
         self.events.pop_front()
     }
 
+    /// The peer (a server) accepts extended CONNECT (RFC 9220): its SETTINGS carried
+    /// SETTINGS_ENABLE_CONNECT_PROTOCOL = 1. `None` until its SETTINGS arrived.
+    pub fn peer_connect_protocol(&self) -> Option<bool> {
+        self.peer_settings.as_ref().map(|s| s.enable_connect_protocol == Some(1))
+    }
+
     /// The peer's SETTINGS, once received.
     pub fn peer_settings(&self) -> Option<&Settings> {
         self.peer_settings.as_ref()
@@ -261,6 +271,7 @@ impl Http3 {
             max_field_section_size: Some(self.cfg.max_field_section_size),
             qpack_max_table_capacity: Some(self.cfg.qpack_max_table_capacity),
             qpack_blocked_streams: Some(self.cfg.qpack_blocked_streams),
+            enable_connect_protocol: (self.is_server && self.cfg.enable_connect_protocol).then_some(1),
         }
         .encode(&mut b);
         self.control_out = self.open_uni(conn, b);
@@ -766,7 +777,10 @@ impl Http3 {
         let is_server = self.is_server;
         let Some(r) = self.reqs.get_mut(&id) else { return };
         if !r.headers_done {
-            let res = if is_server { validate_request(&fields) } else { validate_response(&fields) };
+            let mut res = if is_server { validate_request(&fields) } else { validate_response(&fields) };
+            if is_server && !self.cfg.enable_connect_protocol && fields.iter().any(|f| f.name == b":protocol") {
+                res = Err(());
+            }
             match res {
                 Ok(v) => {
                     if !v.informational {

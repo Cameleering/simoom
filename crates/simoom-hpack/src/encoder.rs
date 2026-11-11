@@ -9,13 +9,22 @@ pub fn is_sensitive(name: &[u8]) -> bool {
     matches!(name, b"authorization" | b"proxy-authorization" | b"cookie" | b"set-cookie")
 }
 
+/// Static indices (bits of a mask) of the sensitive names: `authorization` (23), `cookie` (32),
+/// `proxy-authorization` (49), `set-cookie` (55). They are all in the static table.
+const SENSITIVE: u64 = 1 << 23 | 1 << 32 | 1 << 49 | 1 << 55;
+
+/// Static indices of names whose values rarely repeat: `age` (21), `content-length` (28),
+/// `content-range` (30), `etag` (34), `if-match` (39), `if-modified-since` (40),
+/// `if-none-match` (41), `last-modified` (44), `location` (46).
+const RARE: u64 = 1 << 21 | 1 << 28 | 1 << 30 | 1 << 34 | 1 << 39 | 1 << 40 | 1 << 41 | 1 << 44 | 1 << 46;
+
 /// Fields whose values rarely repeat on a connection: indexing them would only churn the table.
-fn rarely_repeats(name: &[u8], value: &[u8]) -> bool {
-    match name {
-        b":path" => value.len() > 64 || value.contains(&b'?'),
-        b"content-length" | b"content-range" | b"etag" | b"if-none-match" | b"if-modified-since" | b"if-match"
-        | b"last-modified" | b"age" | b"location" | b"x-request-id" | b"traceparent" | b"tracestate" => true,
-        _ => false,
+/// `idx` is the name's first static index (0: not in the table).
+fn rarely_repeats(idx: usize, name: &[u8], value: &[u8]) -> bool {
+    match idx {
+        4 => value.len() > 64 || value.contains(&b'?'), // :path
+        0 => matches!(name, b"x-request-id" | b"traceparent" | b"tracestate"),
+        i => RARE >> i & 1 != 0,
     }
 }
 
@@ -114,7 +123,9 @@ impl Encoder {
                 }
             }
         }
-        let sensitive = is_sensitive(name);
+        let static_idx = name_idx;
+        // the same as `is_sensitive(name)`, from the static index
+        let sensitive = SENSITIVE >> static_idx & 1 != 0;
         let (full, by_name) = self.table.find(name, value);
         if let (Some(i), false) = (full, sensitive) {
             encode_integer(STATIC_TABLE.len() + 1 + i, 7, 0x80, out);
@@ -125,7 +136,7 @@ impl Encoder {
         }
         let index = self.indexing
             && !sensitive
-            && !rarely_repeats(name, value)
+            && !rarely_repeats(static_idx, name, value)
             && field_size(name, value) <= self.table.max() / 2;
         let (prefix, first) = if sensitive {
             (4, 0x10)
@@ -142,5 +153,32 @@ impl Encoder {
         if index {
             self.table.insert(Name::Bytes(name), value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The index masks agree with the names they stand for.
+    #[test]
+    fn masks_match_the_names() {
+        let rare: [&[u8]; 9] = [b"content-length", b"content-range", b"etag", b"if-none-match", b"if-modified-since", b"if-match", b"last-modified", b"age", b"location"];
+        for (i, (n, _)) in STATIC_TABLE.iter().enumerate() {
+            let first = static_name(n).unwrap().0;
+            if first != i + 1 {
+                continue;
+            }
+            assert_eq!(SENSITIVE >> first & 1 != 0, is_sensitive(n), "{}", String::from_utf8_lossy(n));
+            if first != 4 {
+                assert_eq!(rarely_repeats(first, n, b"x"), rare.contains(n), "{}", String::from_utf8_lossy(n));
+            }
+        }
+        assert!(rarely_repeats(4, b":path", b"/a?b=1"));
+        assert!(!rarely_repeats(4, b":path", b"/a"));
+        for n in [&b"x-request-id"[..], b"traceparent", b"tracestate"] {
+            assert!(rarely_repeats(0, n, b"1"));
+        }
+        assert!(!rarely_repeats(0, b"x-other", b"1"));
     }
 }

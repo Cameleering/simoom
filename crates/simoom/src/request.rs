@@ -16,6 +16,131 @@ pub(crate) enum HeaderView<'a> {
 /// A route parameter: name, and its range in the request target.
 pub(crate) type Param = (Arc<str>, u32, u32);
 
+/// What a connection knows about itself, shared by its requests: the local address, the
+/// listener, and the TLS session.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Meta {
+    pub(crate) local: Addr,
+    pub(crate) listener: u32,
+    #[cfg(feature = "tls")]
+    pub(crate) tls: Option<Arc<TlsInfo>>,
+}
+
+impl Meta {
+    pub(crate) fn new(local: Option<SocketAddr>, listener: u32) -> Meta {
+        Meta {
+            local: Addr::new(local),
+            listener,
+            #[cfg(feature = "tls")]
+            tls: None,
+        }
+    }
+
+    fn tls(&self) -> Option<&TlsInfo> {
+        #[cfg(feature = "tls")]
+        {
+            self.tls.as_deref()
+        }
+        #[cfg(not(feature = "tls"))]
+        {
+            None
+        }
+    }
+}
+
+/// A socket address in 16 bytes (an `Option<SocketAddr>` takes 32): IPv4 inline, IPv6 boxed.
+/// Connections keep two (K8).
+#[derive(Clone, Debug, Default)]
+pub(crate) enum Addr {
+    #[default]
+    None,
+    V4(std::net::Ipv4Addr, u16),
+    V6(Box<std::net::SocketAddrV6>),
+}
+
+impl Addr {
+    pub(crate) fn new(a: Option<SocketAddr>) -> Addr {
+        match a {
+            None => Addr::None,
+            Some(SocketAddr::V4(a)) => Addr::V4(*a.ip(), a.port()),
+            Some(SocketAddr::V6(a)) => Addr::V6(Box::new(a)),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn get(&self) -> Option<SocketAddr> {
+        match self {
+            Addr::None => None,
+            Addr::V4(ip, port) => Some(SocketAddr::from((*ip, *port))),
+            Addr::V6(a) => Some(SocketAddr::V6(**a)),
+        }
+    }
+}
+
+/// The TLS session of a connection ([`Request::tls`]): what Camel exposes as
+/// `CamelHttpSslSession` and the `CamelHttpSslClientCert` headers. Captured once, when the
+/// handshake completes.
+#[derive(Clone, Debug, Default)]
+pub struct TlsInfo {
+    pub(crate) cipher: u16,
+    pub(crate) sni: Option<Box<str>>,
+    pub(crate) alpn: Option<Box<[u8]>>,
+    pub(crate) peer_certs: Vec<Vec<u8>>,
+}
+
+impl TlsInfo {
+    /// The protocol version as on the wire: `0x0304` (TLS 1.3, the only one simoom speaks).
+    pub fn version(&self) -> u16 {
+        0x0304
+    }
+
+    /// The protocol version's name, `"TLSv1.3"` (Java's `SSLSession.getProtocol()` spelling).
+    pub fn version_name(&self) -> &'static str {
+        "TLSv1.3"
+    }
+
+    /// The negotiated cipher suite's IANA code (`0x1301` is `TLS_AES_128_GCM_SHA256`).
+    pub fn cipher_suite(&self) -> u16 {
+        self.cipher
+    }
+
+    /// The negotiated cipher suite's IANA name, or `""` for an unknown code.
+    pub fn cipher_suite_name(&self) -> &'static str {
+        match self.cipher {
+            0x1301 => "TLS_AES_128_GCM_SHA256",
+            0x1302 => "TLS_AES_256_GCM_SHA384",
+            0x1303 => "TLS_CHACHA20_POLY1305_SHA256",
+            _ => "",
+        }
+    }
+
+    /// The server name the client asked for (SNI), if it sent one.
+    pub fn server_name(&self) -> Option<&str> {
+        self.sni.as_deref()
+    }
+
+    /// The negotiated ALPN protocol (`h2`, `http/1.1`, `h3`), if any.
+    pub fn alpn(&self) -> Option<&[u8]> {
+        self.alpn.as_deref()
+    }
+
+    /// The client's certificate chain as DER, leaf first, verified against the configured roots
+    /// (`ClientAuth::Optional` or `Required`); empty when the client sent none.
+    pub fn peer_certificates(&self) -> &[Vec<u8>] {
+        &self.peer_certs
+    }
+
+    #[cfg(feature = "tls")]
+    pub(crate) fn of(c: &simoom_tls::Connection) -> TlsInfo {
+        TlsInfo {
+            cipher: c.negotiated_cipher_suite().map_or(0, |s| s.id()),
+            sni: c.server_name().map(Into::into),
+            alpn: c.alpn_protocol().map(Into::into),
+            peer_certs: c.peer_certificates().to_vec(),
+        }
+    }
+}
+
 /// A request, borrowed from the connection for the duration of [`crate::Service::call`].
 ///
 /// The head is zero-copy on HTTP/1.1. The body is either buffered whole ([`Request::body`]) or,
@@ -39,6 +164,7 @@ pub struct Request<'a> {
     pub(crate) sample: Option<crate::watchdog::Sample>,
     pub(crate) websocket: bool,
     pub(crate) loop_index: usize,
+    pub(crate) meta: Option<&'a Meta>,
 }
 
 impl std::fmt::Debug for Request<'_> {
@@ -92,6 +218,7 @@ impl<'a> Request<'a> {
             sample: None,
             websocket: false,
             loop_index: 0,
+            meta: None,
         }
     }
 
@@ -222,6 +349,25 @@ impl<'a> Request<'a> {
         self.loop_index
     }
 
+    /// The local address of the connection: the address the client connected to (on a
+    /// wildcard TCP listener, the concrete address; on HTTP/3, the bound UDP address).
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.meta.and_then(|m| m.local.get())
+    }
+
+    /// The index of the listener that accepted the connection: TCP and TLS listeners in the
+    /// order of the `listen*` calls ([`crate::ServerHandle::local_addrs`]), HTTP/3 listeners in
+    /// the order of the `listen_quic` calls ([`crate::ServerHandle::quic_addrs`]).
+    pub fn listener(&self) -> usize {
+        self.meta.map_or(0, |m| m.listener as usize)
+    }
+
+    /// The TLS session (version, cipher suite, SNI, ALPN, the verified client certificate
+    /// chain); `None` on plain connections.
+    pub fn tls(&self) -> Option<&'a TlsInfo> {
+        self.meta.and_then(|m| m.tls())
+    }
+
     /// Copies the request (head and buffered body) and takes the body source, so the request
     /// can move to another thread.
     pub fn to_owned_request(&mut self) -> OwnedRequest {
@@ -249,6 +395,7 @@ impl<'a> Request<'a> {
             route: self.route,
             websocket: false,
             loop_index: self.loop_index,
+            meta: self.meta.cloned().unwrap_or_default(),
         }
     }
 }
@@ -268,6 +415,7 @@ pub struct OwnedRequest {
     pub(crate) route: u32,
     pub(crate) websocket: bool,
     pub(crate) loop_index: usize,
+    pub(crate) meta: Meta,
 }
 
 impl OwnedRequest {
@@ -324,6 +472,18 @@ impl OwnedRequest {
     pub fn is_secure(&self) -> bool {
         self.secure
     }
+    /// The local address ([`Request::local_addr`]).
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.meta.local.get()
+    }
+    /// The listener index ([`Request::listener`]).
+    pub fn listener(&self) -> usize {
+        self.meta.listener as usize
+    }
+    /// The TLS session ([`Request::tls`]).
+    pub fn tls(&self) -> Option<&TlsInfo> {
+        self.meta.tls()
+    }
     /// The buffered body (empty if it streams).
     pub fn body(&self) -> &[u8] {
         &self.body
@@ -374,6 +534,7 @@ impl OwnedRequest {
             sample: None,
             websocket: self.websocket,
             loop_index: self.loop_index,
+            meta: Some(&self.meta),
         }
     }
 }

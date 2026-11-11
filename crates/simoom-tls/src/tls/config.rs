@@ -205,6 +205,27 @@ pub struct ServerConfig {
     /// Largest handshake message accepted.
     pub max_handshake_message: usize,
     pub time: Arc<dyn TimeSource>,
+    /// Lowest protocol version accepted (feature `tls12`; default TLS 1.2).
+    #[cfg(feature = "tls12")]
+    pub min_version: super::ProtocolVersion,
+    /// Highest protocol version offered (feature `tls12`; default TLS 1.3, chosen whenever the
+    /// client supports it).
+    #[cfg(feature = "tls12")]
+    pub max_version: super::ProtocolVersion,
+    /// TLS 1.2 cipher suites in preference order (feature `tls12`).
+    #[cfg(feature = "tls12")]
+    pub suites12: Vec<super::tls12::Tls12Suite>,
+    /// TLS 1.2 session-ID resumption for clients without ticket support (None disables it;
+    /// tickets use `ticketer`).
+    #[cfg(feature = "tls12")]
+    pub session_ids: Option<Arc<super::tls12::SessionIdCache>>,
+    /// The OCSP response stapled for clients that send `status_request` (feature
+    /// `revocation`). The caller fetches and refreshes it; each handshake reads the current one.
+    #[cfg(feature = "revocation")]
+    pub ocsp_staple: Option<crate::revocation::StapleSource>,
+    /// Revocation checks of client certificates (feature `revocation`): CRLs and online OCSP.
+    #[cfg(feature = "revocation")]
+    pub client_revocation: Option<crate::revocation::RevocationPolicy>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -214,6 +235,16 @@ impl std::fmt::Debug for ServerConfig {
 }
 
 impl ServerConfig {
+    /// Accept TLS 1.3 only. Without the `tls12` feature that is already the only version, so
+    /// this is a no-op; with it, it raises `min_version` to TLS 1.3. Lets code that must never
+    /// accept TLS 1.2 say so whatever features feature unification switched on.
+    pub fn require_tls13(&mut self) {
+        #[cfg(feature = "tls12")]
+        {
+            self.min_version = super::ProtocolVersion::Tls13;
+        }
+    }
+
     /// A configuration serving one certificate chain; tickets on, no client authentication.
     pub fn new(cert: CertifiedKey) -> ServerConfig {
         ServerConfig {
@@ -229,6 +260,18 @@ impl ServerConfig {
             strict_sni: false,
             max_handshake_message: 64 * 1024,
             time: Arc::new(SystemClock),
+            #[cfg(feature = "tls12")]
+            min_version: super::ProtocolVersion::Tls12,
+            #[cfg(feature = "tls12")]
+            max_version: super::ProtocolVersion::Tls13,
+            #[cfg(feature = "tls12")]
+            suites12: super::tls12::Tls12Suite::default_order(),
+            #[cfg(feature = "tls12")]
+            session_ids: Some(Arc::new(super::tls12::SessionIdCache::new(1024))),
+            #[cfg(feature = "revocation")]
+            ocsp_staple: None,
+            #[cfg(feature = "revocation")]
+            client_revocation: None,
         }
     }
 
@@ -280,6 +323,8 @@ pub(crate) struct StoredSession {
 #[cfg(feature = "client")]
 pub struct SessionCache {
     map: Mutex<HashMap<String, VecDeque<StoredSession>>>,
+    #[cfg(feature = "tls12")]
+    map12: Mutex<HashMap<String, super::tls12::ClientSession12>>,
     max_servers: usize,
     per_server: usize,
 }
@@ -294,8 +339,42 @@ impl std::fmt::Debug for SessionCache {
 #[cfg(feature = "client")]
 impl SessionCache {
     pub fn new(max_servers: usize) -> SessionCache {
-        SessionCache { map: Mutex::new(HashMap::new()), max_servers: max_servers.max(1), per_server: 4 }
+        SessionCache {
+            map: Mutex::new(HashMap::new()),
+            #[cfg(feature = "tls12")]
+            map12: Mutex::new(HashMap::new()),
+            max_servers: max_servers.max(1),
+            per_server: 4,
+        }
     }
+
+    /// Stores a TLS 1.2 session (one per server name; a newer one replaces it).
+    #[cfg(feature = "tls12")]
+    pub(crate) fn put12(&self, server: &str, s: super::tls12::ClientSession12) {
+        let mut m = self.map12.lock().unwrap_or_else(|e| e.into_inner());
+        if !m.contains_key(server) && m.len() >= self.max_servers {
+            if let Some(k) = m.keys().next().cloned() {
+                m.remove(&k);
+            }
+        }
+        m.insert(server.to_string(), s);
+    }
+
+    /// The TLS 1.2 session for `server`, if still valid (it stays cached: TLS 1.2 tickets and
+    /// session IDs may be reused, unlike TLS 1.3 tickets).
+    #[cfg(feature = "tls12")]
+    pub(crate) fn get12(&self, server: &str, now: u64) -> Option<super::tls12::ClientSession12> {
+        let mut m = self.map12.lock().unwrap_or_else(|e| e.into_inner());
+        match m.get(server) {
+            Some(s) if now < s.received_ms + s.lifetime_secs as u64 * 1000 => Some(s.clone()),
+            Some(_) => {
+                m.remove(server);
+                None
+            }
+            None => None,
+        }
+    }
+
 
     pub(crate) fn put(&self, server: &str, s: StoredSession) {
         let mut m = self.map.lock().unwrap_or_else(|e| e.into_inner());
@@ -346,6 +425,19 @@ pub struct ClientConfig {
     pub enable_sni: bool,
     pub max_handshake_message: usize,
     pub time: Arc<dyn TimeSource>,
+    /// Lowest protocol version offered (feature `tls12`; default TLS 1.2).
+    #[cfg(feature = "tls12")]
+    pub min_version: super::ProtocolVersion,
+    /// Highest protocol version offered (feature `tls12`; default TLS 1.3).
+    #[cfg(feature = "tls12")]
+    pub max_version: super::ProtocolVersion,
+    /// TLS 1.2 cipher suites in preference order (feature `tls12`).
+    #[cfg(feature = "tls12")]
+    pub suites12: Vec<super::tls12::Tls12Suite>,
+    /// Revocation checks of the server certificate (feature `revocation`): OCSP stapling
+    /// (`status_request`), CRLs and online OCSP. None checks nothing.
+    #[cfg(feature = "revocation")]
+    pub revocation: Option<crate::revocation::RevocationPolicy>,
 }
 
 #[cfg(feature = "client")]
@@ -368,6 +460,14 @@ impl ClientConfig {
             enable_sni: true,
             max_handshake_message: 64 * 1024,
             time: Arc::new(SystemClock),
+            #[cfg(feature = "tls12")]
+            min_version: super::ProtocolVersion::Tls12,
+            #[cfg(feature = "tls12")]
+            max_version: super::ProtocolVersion::Tls13,
+            #[cfg(feature = "tls12")]
+            suites12: super::tls12::Tls12Suite::default_order(),
+            #[cfg(feature = "revocation")]
+            revocation: None,
         }
     }
 

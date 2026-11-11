@@ -239,7 +239,8 @@ impl Sha256 {
     }
 }
 
-/// SHA-512 core, also used (with another IV and a truncated output) for SHA-384.
+/// SHA-512 core, also used (with another IV and a truncated output) for SHA-384 and
+/// SHA-512/256 (HTTP Digest `SHA-512-256`, RFC 7616).
 #[derive(Clone)]
 pub struct Sha512 {
     state: [u64; 8],
@@ -255,6 +256,11 @@ const IV384: [u64; 8] = [
     0xcbbb9d5dc1059ed8, 0x629a292a367cd507, 0x9159015a3070dd17, 0x152fecd8f70e5939, 0x67332667ffc00b31,
     0x8eb44a8768581511, 0xdb0c2e0d64f98fa7, 0x47b5481dbefa4fa4,
 ];
+/// FIPS 180-4 section 5.3.6.2.
+const IV512_256: [u64; 8] = [
+    0x22312194fc2bf72c, 0x9f555fa3c84c64c2, 0x2393b86b6f53b151, 0x963877195940eabd, 0x96283ee2a88effe3,
+    0xbe5e1e2553863992, 0x2b0199fc2c85b8aa, 0x0eb72ddc81c52ca2,
+];
 
 impl Sha512 {
     pub const fn new() -> Sha512 {
@@ -262,6 +268,10 @@ impl Sha512 {
     }
     pub const fn new384() -> Sha512 {
         Sha512 { state: IV384, buf: Buf::new(), out_words: 6 }
+    }
+    /// SHA-512/256 (FIPS 180-4): SHA-512 with its own IV, truncated to 32 bytes.
+    pub const fn new512_256() -> Sha512 {
+        Sha512 { state: IV512_256, buf: Buf::new(), out_words: 4 }
     }
     pub fn update(&mut self, data: &[u8]) {
         let st = &mut self.state;
@@ -470,6 +480,14 @@ mod tests {
         assert_eq!(
             hex(&HashAlg::Sha384.hash(b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu")),
             "09330c33f71147e83d192fc782cd1b4753111b173b3b05d22fa08086e3b0f712fcc7c71a557e2db966c3e9fa91746039"
+        );
+        assert_eq!(
+            hex(&{
+                let mut h = Sha512::new512_256();
+                h.update(b"abc");
+                h.finish()
+            }),
+            "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23"
         );
         assert_eq!(
             hex(&HashAlg::Sha512.hash(b"abc")),

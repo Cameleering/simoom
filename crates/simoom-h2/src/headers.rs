@@ -15,6 +15,7 @@ const SCHEME: usize = 1;
 const AUTHORITY: usize = 2;
 const PATH: usize = 3;
 const STATUS: usize = 4;
+const PROTOCOL: usize = 5;
 
 /// tchar (RFC 9110 §5.6.2) without upper-case letters.
 const fn name_table() -> [bool; 256] {
@@ -87,12 +88,14 @@ pub struct Headers {
     /// (start in buf, name length, value length)
     fields: Vec<(u32, u32, u32)>,
     /// index + 1 into `fields` for each pseudo-header, 0 when absent
-    pseudo: [u16; 5],
+    pseudo: [u16; 6],
     npseudo: usize,
     host: u16,
     content_length: Option<u64>,
     malformed: Option<&'static str>,
     kind: Kind,
+    /// `:protocol` is accepted (extended CONNECT, RFC 8441).
+    pub(crate) allow_protocol: bool,
 }
 
 impl Default for Headers {
@@ -100,12 +103,13 @@ impl Default for Headers {
         Headers {
             buf: Vec::new(),
             fields: Vec::new(),
-            pseudo: [0; 5],
+            pseudo: [0; 6],
             npseudo: 0,
             host: 0,
             content_length: None,
             malformed: None,
             kind: Kind::Request,
+            allow_protocol: false,
         }
     }
 }
@@ -114,7 +118,7 @@ impl Headers {
     pub(crate) fn reset(&mut self, kind: Kind) {
         self.buf.clear();
         self.fields.clear();
-        self.pseudo = [0; 5];
+        self.pseudo = [0; 6];
         self.npseudo = 0;
         self.host = 0;
         self.content_length = None;
@@ -157,6 +161,7 @@ impl Headers {
                 (Kind::Request, b":scheme") => SCHEME,
                 (Kind::Request, b":authority") => AUTHORITY,
                 (Kind::Request, b":path") => PATH,
+                (Kind::Request, b":protocol") if cfg!(feature = "connect-protocol") && self.allow_protocol => PROTOCOL,
                 (Kind::Response, b":status") => STATUS,
                 _ => return self.fail("unknown or misplaced pseudo-header"),
             };
@@ -193,7 +198,19 @@ impl Headers {
         match self.kind {
             Kind::Request => {
                 let Some(method) = self.method() else { return self.fail("missing :method") };
-                if method == b"CONNECT" {
+                if cfg!(feature = "connect-protocol") && self.protocol().is_some() {
+                    // Extended CONNECT (RFC 8441 §4): CONNECT with :scheme, :path and
+                    // :authority.
+                    if method != b"CONNECT" {
+                        return self.fail(":protocol without CONNECT");
+                    }
+                    let (Some(scheme), Some(path), Some(_)) = (self.scheme(), self.path(), self.authority()) else {
+                        return self.fail("extended CONNECT without :scheme, :path or :authority");
+                    };
+                    if (scheme == b"http" || scheme == b"https") && path.first() != Some(&b'/') {
+                        return self.fail("invalid :path");
+                    }
+                } else if method == b"CONNECT" {
                     if self.authority().is_none() || self.scheme().is_some() || self.path().is_some() {
                         return self.fail("malformed CONNECT");
                     }
@@ -257,6 +274,11 @@ impl Headers {
     /// `:path`.
     pub fn path(&self) -> Option<&[u8]> {
         self.pseudo(PATH)
+    }
+    /// `:protocol` of an extended CONNECT request (RFC 8441), for example `websocket`; only
+    /// accepted when [`crate::Config::enable_connect_protocol`] is set.
+    pub fn protocol(&self) -> Option<&[u8]> {
+        self.pseudo(PROTOCOL)
     }
     /// `:status` as a number.
     pub fn status(&self) -> Option<u16> {
@@ -364,6 +386,41 @@ mod tests {
         for (i, c) in cases.iter().enumerate() {
             assert!(req(c).malformed().is_some(), "case {i}: {c:?}");
         }
+    }
+
+    #[cfg(feature = "connect-protocol")]
+    #[test]
+    fn extended_connect() {
+        let ext = |fields: &[(&str, &str)]| {
+            let mut h = Headers { allow_protocol: true, ..Headers::default() };
+            h.reset(Kind::Request);
+            for (n, v) in fields {
+                h.push(n.as_bytes(), v.as_bytes());
+            }
+            h.finish();
+            h
+        };
+        let ws = [(":method", "CONNECT"), (":protocol", "websocket"), (":scheme", "https"), (":path", "/chat"), (":authority", "a")];
+        let h = ext(&ws);
+        assert_eq!(h.malformed(), None);
+        assert_eq!(h.protocol(), Some(&b"websocket"[..]));
+        assert_eq!(h.path(), Some(&b"/chat"[..]));
+        // classic CONNECT still works with the setting on, and has no :protocol
+        let h = ext(&[(":method", "CONNECT"), (":authority", "a:443")]);
+        assert_eq!((h.malformed(), h.protocol()), (None, None));
+        let bad: Vec<Vec<(&str, &str)>> = vec![
+            vec![ws[0], ws[1], ws[2], ws[4]],                     // no :path
+            vec![ws[0], ws[1], ws[3], ws[4]],                     // no :scheme
+            vec![ws[0], ws[1], ws[2], ws[3]],                     // no :authority
+            vec![(":method", "GET"), ws[1], ws[2], ws[3], ws[4]], // not CONNECT
+            vec![ws[0], ws[1], ws[1], ws[2], ws[3], ws[4]],       // duplicate
+            vec![ws[0], ws[1], ws[2], (":path", "chat"), ws[4]],  // relative path
+        ];
+        for (i, c) in bad.iter().enumerate() {
+            assert!(ext(c).malformed().is_some(), "case {i}");
+        }
+        // without the setting, :protocol is refused (RFC 8441 §3)
+        assert!(req(&ws).malformed().is_some());
     }
 
     #[test]
