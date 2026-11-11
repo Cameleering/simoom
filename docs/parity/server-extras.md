@@ -234,6 +234,36 @@ MB/s, log 280/305/346 -> 372/581/640, source 162/195/228 -> 197/262/264, binary 
   Both directions are verified against libzstd byte for byte (libzstd decoded every stream we
   produced at levels 1, 2, 3, 5, 9 and 19 on all five inputs after the pass).
 
+**Fourth pass (2026-11-11).** Brotli qualities 0 and 1 now parse with the fast match finder
+(`fastlz.rs`, shared with zstd levels 1-3: one hash table, the last distance checked first,
+matches extended backwards, skipping faster without matches; quality 0 with 8-byte hashes and
+faster skipping), in pieces no longer than the window, and write one literal, command and
+distance code per meta-block as the reference's two-pass fragment compressor does. Results
+(Windows, both on the same machine, best of 3):
+
+| input | quality | ratio ours / reference | compress x | decode x (reference's stream) |
+|---|---:|---|---:|---:|
+| json | 0 | 0.153 / 0.246 | 0.83 | 0.90 |
+| json | 1 | 0.173 / 0.179 | 1.07 | 1.05 |
+| log | 0 | 0.141 / 0.178 | 0.80 | 1.16 |
+| log | 1 | 0.142 / 0.151 | 1.15 | 1.18 |
+| source | 0 | 0.322 / 0.312 | 0.98 | 0.91 |
+| source | 1 | 0.285 / 0.287 | 1.00 | 0.90 |
+| binary | 0 | 0.557 / 0.532 | 1.43 | 1.07 |
+| binary | 1 | 0.508 / 0.517 | 1.56 | 1.22 |
+
+Decoding at qualities 5 and 9: json 1.01/1.07, log 1.35/1.48, source 0.84/0.90, machine code
+0.85/0.85 (a command's literals, distance and copy now run in one transaction when the input
+allows, instead of four). Tried and measured, then taken out: the reference's sampled literal
+code at quality 0 (every 29th byte: about 5% faster, output up to 19% larger, over 5% larger
+than the reference on machine code), a smaller quality-0 hash table (source output 8% larger),
+and per-block-type literal batching in the decoder (slower). The reference decoder decodes
+every stream we produce at qualities 0, 1, 2, 5, 9 and 11 on all five inputs, and a new test
+covers meta-blocks longer than the window. Found on the way: the fast match finder assumes a
+block no longer than the window; `simoom_sys::codec::zstd_fast` now asserts it (it would
+otherwise have read before the buffer), and the Brotli encoder splits its meta-blocks into
+window-sized pieces for it.
+
 **Third pass (2026-11-09, owner: "Yes, close the gap").** The hot loops are now unchecked
 pointer code in `simoom_sys::codec`, each `unsafe` block with its invariant: `zstd_sequences`
 (the sequence decode/execute loop: lengths, offsets and the bitstream checked per sequence,
@@ -396,14 +426,14 @@ SHA-256, SHA-512/256 and HMAC from simoom-tls, the Digest verifier and the wrapp
 - The Brotli encoder has no context modelling, block splitting or dictionary references (output
   1-12% larger than the reference at the same quality); the zstd encoder has no dictionary
   support (decoding dictionaries works) and no long-distance matching.
-- Speed targets not reached after three passes (2026-11-09; the third with the owner's approval
-  of pointer code in simoom-sys): zstd decoding 0.77-0.91x libzstd (target 0.9x; 1.24-1.27x its
-  instructions per byte); zstd compression at levels 1-3 0.50-0.73x (target 0.8x; 1.5-1.8x its
-  instructions, mostly the match finder and the sequence bookkeeping around the writer); Brotli
-  decoding 0.75-0.77x on source code and machine code at qualities 5-9; Brotli quality-1
-  compression 0.54-0.70x with up to 20% larger output (the reference's one-pass fragment
-  compressor for qualities 0-1 is not built). libzstd's remaining edge is its hand-tuned
-  loops (assembly Huffman decoding on x86-64, fewer live values per sequence).
+- Speed targets not reached after four passes (last run 2026-11-11, wall clock only: perf was
+  no longer installed in WSL after a restart): zstd decoding 0.79-0.92x libzstd on its streams
+  (target 0.9x; 1.01-1.04x on stored blocks); zstd compression at levels 1-3 0.49-0.76x (target
+  0.8x; random input 0.25-0.29x); Brotli decoding 0.84-0.90x on source code and machine code at
+  qualities 5-9 (0.90-1.48x elsewhere). Met: Brotli quality 0-1 compression 0.80-1.56x with
+  output within 5% of the reference or smaller; zstd output within 5% of libzstd at levels 1-3.
+  Tried and measured slower in the zstd decoder: a batched decode-then-execute loop (more
+  mispredicted branches, the same instructions) and one-sequence pipelining with a prefetch.
 - WebSocket over HTTP/3 has no close-handshake timeout on the server (QUIC's idle timeout ends
   an abandoned stream); HTTP/1.1 and HTTP/2 have the 5 s wait.
 - Once, under heavy machine load, simoom-client's WebSocket-over-HTTP/3 test spun a core

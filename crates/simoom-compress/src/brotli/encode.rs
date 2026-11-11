@@ -27,9 +27,7 @@ struct Bits {
 impl Bits {
     #[inline(always)]
     fn put(&mut self, out: &mut Vec<u8>, v: u32, bits: u32) {
-        if bits == 0 {
-            return;
-        }
+        // (no early return for 0 bits: the mask is then 0)
         self.acc |= ((v as u64) & ((1u64 << bits) - 1)) << self.n;
         self.n += bits;
         if self.n >= 32 {
@@ -197,6 +195,8 @@ impl BrotliEncoder {
         }
         self.seqs = seqs;
         let mut lit_f = [0u32; 256];
+        // (Quality 0 with the literal code from every 29th byte, as the reference's one-pass
+        // fragment compressor does, was measured: about 5% faster, output up to 19% larger.)
         let mut cmd_f = vec![0u32; 704];
         let mut dist_f = vec![0u32; 64];
         // (command code, insert extra, copy extra, distance code, distance extra bits, value)

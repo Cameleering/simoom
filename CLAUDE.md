@@ -53,9 +53,13 @@ Read [docs/design/plan.md](docs/design/plan.md) (section 0 overrides the rest) a
 
 - Each agent owns one or more crates and edits only those directories, unless its brief says
   otherwise. The root `Cargo.toml` is edited by the coordinator only.
-- Use your own target directory so builds don't block each other, for example
-  `CARGO_TARGET_DIR=target-<crate>`, and test with `cargo test -p <crate>`.
-- Linux tests: `wsl -e bash -lc 'cd /mnt/e/Work/DataHQ/Code/simoom && CARGO_TARGET_DIR=$HOME/simoom-target-<crate> cargo test -p <crate>'`.
+- To keep parallel builds from blocking each other, use one of the four shared target slots:
+  `CARGO_TARGET_DIR=target-1` through `target-4`. If cargo prints "Blocking waiting for file
+  lock", switch to another slot. Never create a new `target-*` name, because each new one is
+  a full build of several GB (40 of them once filled the disk). Test with
+  `cargo test -p <crate>`.
+- Linux tests: `wsl -e bash -lc 'cd /mnt/e/Work/DataHQ/Code/simoom && CARGO_TARGET_DIR=$HOME/simoom-target-1 cargo test -p <crate>'`
+  (slots `simoom-target-1` to `simoom-target-4`, same rule).
   WSL has 5 GB of RAM, so run at most one heavy Linux build at a time.
 - Agents don't commit. The coordinator reviews and commits.
 
