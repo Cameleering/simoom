@@ -581,7 +581,7 @@ enum Imp {
     #[cfg(target_os = "linux")]
     Epoll(readiness::Driver<epoll::Poller>),
     #[cfg(all(target_os = "linux", feature = "io-uring"))]
-    Uring(uring::Driver),
+    Uring(Box<uring::Driver>),
     #[cfg(windows)]
     Iocp(iocp::Driver),
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]

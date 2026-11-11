@@ -39,10 +39,31 @@ pub(crate) struct Counters {
 /// Counter slots, indexed by loop number modulo this (loops beyond it share slots).
 const COUNTER_SLOTS: usize = 64;
 
+impl Counters {
+    const fn zero() -> Counters {
+        Counters {
+            requests: AtomicU64::new(0),
+            bad_requests: AtomicU64::new(0),
+            too_large: AtomicU64::new(0),
+            timeouts: AtomicU64::new(0),
+            panics: AtomicU64::new(0),
+            stalls: AtomicU64::new(0),
+            stall_checks: AtomicU64::new(0),
+            offloaded_routes: AtomicU64::new(0),
+            overloaded: AtomicU64::new(0),
+            shed: AtomicU64::new(0),
+            upgrades: AtomicU64::new(0),
+            h2_connections: AtomicU64::new(0),
+            h3_connections: AtomicU64::new(0),
+            quic_endpoints: AtomicU64::new(0),
+            tls_errors: AtomicU64::new(0),
+        }
+    }
+}
+
 fn new_counters() -> Box<[Counters; COUNTER_SLOTS]> {
-    // An opaque trip count keeps the loop rolled (unrolled, it costs about 5 KB of code).
-    let v: Box<[Counters]> = (0..std::hint::black_box(COUNTER_SLOTS)).map(|_| Counters::default()).collect();
-    v.try_into().unwrap_or_else(|_| unreachable!())
+    // All zero bytes: filled with one memset, not field by field in a loop.
+    Box::new([const { Counters::zero() }; COUNTER_SLOTS])
 }
 
 pub(crate) fn bump(c: &AtomicU64) {

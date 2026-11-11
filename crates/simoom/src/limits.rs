@@ -152,46 +152,51 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Limits {
-            max_request_line: 8 * 1024,
-            max_head: 16 * 1024,
-            max_headers: 100,
-            max_header_line: 8 * 1024,
-            max_body: 10 * 1024 * 1024,
-            body_buffer: 64 * 1024,
-            head_timeout: Duration::from_secs(10),
-            slow_head_limit: Duration::from_secs(300),
-            reconnect_rate: 0,
-            max_pending_per_loop: 16 * 1024,
-            pending_503: false,
-            keep_alive_timeout: Duration::from_secs(15),
-            min_body_rate: 1024,
-            body_rate_grace: Duration::from_secs(5),
-            write_timeout: Duration::from_secs(30),
-            defer_timeout: None,
-            max_requests_per_connection: 0,
-            max_connections: 1 << 20,
-            max_connections_per_loop: 1 << 20,
-            max_connections_per_ip: 0,
-            max_concurrent_streams: 100,
-            max_header_list: 16 * 1024,
-            header_table_size: 4096,
-            h2_frame_budgets: FrameBudgets::default(),
-            h2_keepalive: None,
-            h2_keepalive_timeout: Duration::from_secs(20),
-            stream_buffer: 64 * 1024,
-            max_ws_message: 1 << 20,
-            inline_budget: Some(Duration::from_millis(1)),
-            stalls_before_offload: 5,
-            stall_window: Duration::from_secs(1),
-            stall_recovery: 64,
-            shed_lag: None,
-            offload_threads: 0,
-            offload_queue: 4096,
-            offload_target: Duration::from_millis(5),
-            offload_interval: Duration::from_millis(100),
-        }
+        // A constant: copied from read-only data instead of built field by field in code.
+        Limits::DEFAULT
     }
+}
+
+impl Limits {
+    const DEFAULT: Limits = Limits {
+        max_request_line: 8 * 1024,
+        max_head: 16 * 1024,
+        max_headers: 100,
+        max_header_line: 8 * 1024,
+        max_body: 10 * 1024 * 1024,
+        body_buffer: 64 * 1024,
+        head_timeout: Duration::from_secs(10),
+        slow_head_limit: Duration::from_secs(300),
+        reconnect_rate: 0,
+        max_pending_per_loop: 16 * 1024,
+        pending_503: false,
+        keep_alive_timeout: Duration::from_secs(15),
+        min_body_rate: 1024,
+        body_rate_grace: Duration::from_secs(5),
+        write_timeout: Duration::from_secs(30),
+        defer_timeout: None,
+        max_requests_per_connection: 0,
+        max_connections: 1 << 20,
+        max_connections_per_loop: 1 << 20,
+        max_connections_per_ip: 0,
+        max_concurrent_streams: 100,
+        max_header_list: 16 * 1024,
+        header_table_size: 4096,
+        h2_frame_budgets: FrameBudgets::DEFAULT,
+        h2_keepalive: None,
+        h2_keepalive_timeout: Duration::from_secs(20),
+        stream_buffer: 64 * 1024,
+        max_ws_message: 1 << 20,
+        inline_budget: Some(Duration::from_millis(1)),
+        stalls_before_offload: 5,
+        stall_window: Duration::from_secs(1),
+        stall_recovery: 64,
+        shed_lag: None,
+        offload_threads: 0,
+        offload_queue: 4096,
+        offload_target: Duration::from_millis(5),
+        offload_interval: Duration::from_millis(100),
+    };
 }
 
 /// HTTP/2 frame budgets ([`Limits::h2_frame_budgets`]): how many of each frame kind a peer may
@@ -221,17 +226,21 @@ pub struct FrameBudgets {
 
 impl Default for FrameBudgets {
     fn default() -> Self {
-        FrameBudgets {
-            window: Duration::from_secs(10),
-            rst_received: 200,
-            rst_sent: 200,
-            ping: 100,
-            settings: 100,
-            empty_frames: 200,
-            priority: 1000,
-            small_window_updates: 500,
-        }
+        FrameBudgets::DEFAULT
     }
+}
+
+impl FrameBudgets {
+    const DEFAULT: FrameBudgets = FrameBudgets {
+        window: Duration::from_secs(10),
+        rst_received: 200,
+        rst_sent: 200,
+        ping: 100,
+        settings: 100,
+        empty_frames: 200,
+        priority: 1000,
+        small_window_updates: 500,
+    };
 }
 
 #[cfg(feature = "http2")]

@@ -67,6 +67,7 @@ pub const EPOLLET: u32 = 1 << 31;
 pub const EFD_CLOEXEC: c_int = 0o2000000;
 pub const EFD_NONBLOCK: c_int = 0o4000;
 
+pub const CLOCK_REALTIME: c_int = 0;
 pub const CLOCK_MONOTONIC: c_int = 1;
 pub const CLOCK_PROCESS_CPUTIME_ID: c_int = 2;
 pub const CLOCK_THREAD_CPUTIME_ID: c_int = 3;

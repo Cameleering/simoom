@@ -221,9 +221,9 @@ impl OffloadPool {
     pub fn shutdown(&self, deadline: Duration) -> bool {
         self.inner.state.lock().unwrap_or_else(PoisonError::into_inner).stop = true;
         self.inner.cv.notify_all();
-        let end = Instant::now() + deadline;
+        let end = simoom_sys::time::now_ns().saturating_add(deadline.as_nanos().min(u64::MAX as u128) as u64);
         while self.inner.alive.load(Ordering::Acquire) > 0 {
-            if Instant::now() >= end {
+            if simoom_sys::time::now_ns() >= end {
                 return false;
             }
             std::thread::sleep(Duration::from_millis(1));

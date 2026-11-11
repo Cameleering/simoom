@@ -114,10 +114,11 @@ pub fn available(level: Level) -> bool {
         Level::Scalar => true,
         #[cfg(target_arch = "x86_64")]
         Level::Sse42 => {
-            std::is_x86_feature_detected!("sse4.2") && std::is_x86_feature_detected!("ssse3")
+            use crate::cpu::x86;
+            crate::cpu::x86_features() & (x86::SSE42 | x86::SSSE3) == x86::SSE42 | x86::SSSE3
         }
         #[cfg(target_arch = "x86_64")]
-        Level::Avx2 => available(Level::Sse42) && std::is_x86_feature_detected!("avx2"),
+        Level::Avx2 => available(Level::Sse42) && crate::cpu::x86_features() & crate::cpu::x86::AVX2 != 0,
         #[cfg(target_arch = "aarch64")]
         Level::Neon => std::arch::is_aarch64_feature_detected!("neon"),
         #[allow(unreachable_patterns)]

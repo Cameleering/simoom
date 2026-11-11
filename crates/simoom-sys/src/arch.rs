@@ -34,21 +34,22 @@ fn detect() -> u8 {
     let mut f = 0u8;
     #[cfg(target_arch = "x86_64")]
     {
-        let ssse3 =
-            std::is_x86_feature_detected!("ssse3") && std::is_x86_feature_detected!("sse4.1");
-        if ssse3 && std::is_x86_feature_detected!("aes") {
+        use crate::cpu::x86;
+        let x = crate::cpu::x86_features();
+        let ssse3 = x & x86::SSSE3 != 0 && x & x86::SSE41 != 0;
+        if ssse3 && x & x86::AES != 0 {
             f |= F_AES;
         }
-        if ssse3 && std::is_x86_feature_detected!("pclmulqdq") {
+        if ssse3 && x & x86::PCLMULQDQ != 0 {
             f |= F_CLMUL;
         }
-        if ssse3 && std::is_x86_feature_detected!("sha") {
+        if ssse3 && x & x86::SHA != 0 {
             f |= F_SHA256;
         }
         if ssse3 {
             f |= F_SIMD4;
         }
-        if ssse3 && std::is_x86_feature_detected!("avx2") {
+        if ssse3 && x & x86::AVX2 != 0 {
             f |= F_SIMD8;
         }
     }
@@ -1275,7 +1276,7 @@ pub fn has_mulx() -> bool {
     let mut v = MULX.load(Ordering::Relaxed);
     if v == 0 {
         #[cfg(target_arch = "x86_64")]
-        let yes = std::is_x86_feature_detected!("bmi2") && std::is_x86_feature_detected!("adx");
+        let yes = crate::cpu::x86_features() & (crate::cpu::x86::BMI2 | crate::cpu::x86::ADX) == crate::cpu::x86::BMI2 | crate::cpu::x86::ADX;
         #[cfg(not(target_arch = "x86_64"))]
         let yes = false;
         v = if yes { 2 } else { 1 };

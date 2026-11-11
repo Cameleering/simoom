@@ -86,10 +86,6 @@ thread_local! {
     static DATE: RefCell<Option<DateState>> = const { RefCell::new(None) };
 }
 
-fn wall_ns() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64)
-}
-
 fn date_state<R>(now_ns: u64, f: impl FnOnce(&DateState) -> R) -> R {
     DATE.with(|d| {
         let mut d = d.borrow_mut();
@@ -108,7 +104,7 @@ fn date_refresh(d: &mut Option<DateState>, now_ns: u64) -> &DateState {
     if !d.as_ref().is_some_and(|st| now_ns.wrapping_sub(st.mono_base) < 60_000_000_000) {
         *d = None;
     }
-    let st = d.get_or_insert_with(|| DateState { mono_base: now_ns, wall_base: wall_ns(), secs: u64::MAX, bytes: [b' '; 29], line: [b' '; 37] });
+    let st = d.get_or_insert_with(|| DateState { mono_base: now_ns, wall_base: simoom_sys::time::wall_ns(), secs: u64::MAX, bytes: [b' '; 29], line: [b' '; 37] });
     let secs = (st.wall_base + now_ns.saturating_sub(st.mono_base)) / 1_000_000_000;
     if secs != st.secs {
         st.secs = secs;
@@ -303,7 +299,7 @@ impl IpCounts {
             let mut b = [0u8; 16];
             if !simoom_sys::arch::os_random(&mut b) {
                 // No OS randomness: the table still works, with a less secret hash.
-                b = (std::time::Instant::now().elapsed().as_nanos() ^ (&b as *const _ as usize as u128)).to_le_bytes();
+                b = (u128::from(simoom_sys::time::now_ns()) << 64 | u128::from(simoom_sys::time::wall_ns()) ^ (&b as *const _ as usize as u128)).to_le_bytes();
             }
             let [s0, s1] = [&b[..8], &b[8..]].map(|h| h.iter().fold(0u64, |a, &x| a << 8 | u64::from(x)));
             self.seed = [s0, s1];

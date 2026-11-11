@@ -398,6 +398,18 @@ impl Core {
 
     /// Calls `f` with the connection's handler and a context; puts the handler back after.
     fn with_conn(&mut self, key: u64, f: impl FnOnce(&mut dyn Connection, &mut Ctx<'_>)) {
+        let mut f = Some(f);
+        self.with_conn_dyn(key, &mut |h, cx| {
+            if let Some(f) = f.take() {
+                f(h, cx)
+            }
+        });
+    }
+
+    /// The body of [`Core::with_conn`], once for every callback (none of them is on the data
+    /// path, which goes through `call_data`).
+    #[inline(never)]
+    fn with_conn_dyn(&mut self, key: u64, f: &mut dyn FnMut(&mut dyn Connection, &mut Ctx<'_>)) {
         let Some(c) = self.conns.get_mut(key) else { return };
         if c.closed {
             return;
@@ -943,7 +955,7 @@ pub(crate) fn build(mut setup: LoopSetup) -> io::Result<(Core, Arc<Queue>)> {
         offload: setup.offload,
         shared: setup.shared,
         listeners: setup.listeners,
-        endpoints: setup.udps.iter().map(|_| None).collect(),
+        endpoints: if cfg!(feature = "udp") { setup.udps.iter().map(|_| None).collect() } else { Vec::new() },
         udps: setup.udps,
         redeliver: Vec::new(),
         drains: Vec::new(),
@@ -1248,7 +1260,7 @@ impl Core {
             }
             return;
         }
-        if key & UDP_BIT != 0 {
+        if cfg!(feature = "udp") && key & UDP_BIT != 0 {
             let i = (key & !UDP_BIT) as usize;
             if let Some(u) = self.udps.get_mut(i) {
                 u.id = None;
@@ -1321,7 +1333,17 @@ impl Core {
     /// During a stop: every connection is gone, the listeners are closed and no UDP endpoint is
     /// busy (or the deadline passed).
     fn stop_done(&self, aborted: bool) -> bool {
-        self.conns.len == 0 && !self.listeners.iter().any(|l| l.id.is_some()) && (aborted || !(0..self.endpoints.len()).any(|i| self.endpoint_busy(i)))
+        self.conns.len == 0 && !self.listeners.iter().any(|l| l.id.is_some()) && (aborted || !(0..self.udp_count()).any(|i| self.endpoint_busy(i)))
+    }
+
+    /// UDP slots (endpoints have the same count); none without the `udp` feature, so the
+    /// loops over them are left out.
+    fn udp_count(&self) -> usize {
+        if cfg!(feature = "udp") {
+            self.udps.len()
+        } else {
+            0
+        }
     }
 
     fn endpoint_busy(&self, i: usize) -> bool {
@@ -1341,7 +1363,7 @@ impl Core {
                 }
             });
         }
-        for i in 0..self.udps.len() {
+        for i in 0..self.udp_count() {
             self.with_udp(i, |h, cx| h.on_stop(cx));
         }
     }
@@ -1445,7 +1467,7 @@ impl Core {
                     for key in self.conns.keys() {
                         self.close_now(key, CloseReason::Stopped);
                     }
-                    for i in 0..self.endpoints.len() {
+                    for i in 0..self.udp_count() {
                         if self.endpoint_busy(i) {
                             self.with_udp(i, |h, cx| h.on_abort(cx));
                         }
@@ -1456,7 +1478,7 @@ impl Core {
                 }
             }
         }
-        for i in 0..self.udps.len() {
+        for i in 0..self.udp_count() {
             if let Some(id) = self.udps[i].id.take() {
                 self.driver.close(id);
             }

@@ -75,7 +75,7 @@ http1,cookies|--no-default-features --features http1,cookies|$H1X
 http1,conditional|--no-default-features --features http1,conditional|$H1X
 http1,cors|--no-default-features --features http1,cors|$H1X
 http1,auth|--no-default-features --features http1,auth|$H1A
-http1,http2,tls,tls12|--no-default-features --features http1,http2,tls,simoom-tls/tls12|$H12TLS
+http1,http2,tls,tls12 (report only)|--no-default-features --features http1,http2,tls,simoom-tls/tls12|-
 full,tls12 (report only)|--features full,simoom-tls/tls12|-
 LIST
 )

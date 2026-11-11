@@ -32,7 +32,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // --- ABI constants (include/uapi/linux/io_uring.h) --------------------------------------------
 
@@ -351,8 +351,8 @@ impl Ring {
         let all = SETUP_CQSIZE | SETUP_CLAMP | SETUP_SUBMIT_ALL | SETUP_DEFER_TASKRUN | SETUP_SINGLE_ISSUER | SETUP_TASKRUN_FLAG;
         let mut p: Params;
         let mut i = 0;
-        // Not unrolled (cold code): the table goes through `black_box`.
-        let drops = core::hint::black_box(&SETUP_DROPS);
+        // Not unrolled (cold code): the table, length included, goes through `black_box`.
+        let drops: &[u32] = core::hint::black_box(&SETUP_DROPS[..]);
         let (fd, drop) = loop {
             let Some(&drop) = drops.get(i) else {
                 return Err(step("io_uring_setup", io::Error::from_raw_os_error(sys::EINVAL)));
@@ -727,7 +727,7 @@ impl Driver {
     }
 
     #[inline(never)]
-    pub(crate) fn new(cfg: &DriverConfig) -> io::Result<Driver> {
+    pub(crate) fn new(cfg: &DriverConfig) -> io::Result<Box<Driver>> {
         // Cold, run once per loop: kept small rather than fast.
         let fail = cfg.uring_simulate_failure.or_else(|| super::env_u64("SIMOOM_IO_URING_FAIL").map(|v| v.min(i32::MAX as u64) as i32));
         if let Some(errno) = fail {
@@ -763,7 +763,8 @@ impl Driver {
         }
         let efd = Arc::new(eventfd()?);
         let waker = eventfd_waker(efd.clone());
-        let mut d = Driver {
+        // Boxed here: the driver is large and lives behind a pointer in `super::Driver`.
+        let mut d = Box::new(Driver {
             ring,
             bufring,
             bufs: (0..entries).map(|_| None).collect(),
@@ -796,7 +797,7 @@ impl Driver {
             dropped,
             spin: super::Spin::new(cfg),
             skips: 0,
-        };
+        });
         d.arm_wake();
         Ok(d)
     }
@@ -853,7 +854,9 @@ impl Driver {
                 }
                 Sqe { opcode: OP_RECV, fd, flags: ff | SQE_BUFFER_SELECT, ioprio: RECV_MULTISHOT, buf_index: BGID, user_data: user_data(Op::Recv, id), ..Default::default() }
             }
-            Kind::Udp => Sqe { opcode: OP_POLL_ADD, fd, flags: ff, len: POLL_ADD_MULTI, op_flags: POLLIN, user_data: user_data(Op::Poll, id), ..Default::default() },
+            Kind::Udp if cfg!(feature = "udp") => Sqe { opcode: OP_POLL_ADD, fd, flags: ff, len: POLL_ADD_MULTI, op_flags: POLLIN, user_data: user_data(Op::Poll, id), ..Default::default() },
+            // Without the `udp` feature no UDP socket is ever added.
+            Kind::Udp => return,
         };
         e.active = true;
         self.push(sqe);
@@ -1137,8 +1140,9 @@ impl Driver {
     }
 
     fn flush(&mut self) {
-        let list = std::mem::take(&mut self.flush_list);
-        for id in list {
+        // By index, keeping the list's allocation (nothing below adds to it).
+        for i in 0..self.flush_list.len() {
+            let id = self.flush_list[i];
             let Some(e) = self.slab.get_mut(id) else { continue };
             e.in_flush = false;
             if e.send.is_some() || e.out.is_empty() || e.closing || e.failed {
@@ -1181,6 +1185,7 @@ impl Driver {
             e.send = Some(op);
             self.push(sqe);
         }
+        self.flush_list.clear();
     }
 
     fn complete(&mut self, c: Cqe, out: &mut Vec<Event>) {
@@ -1280,7 +1285,8 @@ impl Driver {
                     }
                 }
             }
-            x if x == Op::Poll as u8 => {
+            // Without the `udp` feature no UDP socket is ever added: leave the code out.
+            x if cfg!(feature = "udp") && x == Op::Poll as u8 => {
                 if !more {
                     e.active = false;
                     if !e.closing {
@@ -1406,13 +1412,14 @@ impl Driver {
         self.refill_ring();
         // Re-arm what stopped: ended multishots, and receives that ran out of ring buffers.
         if self.in_ring() > 0 {
-            let starved = std::mem::take(&mut self.starved);
-            self.rearm.extend(starved);
+            self.rearm.append(&mut self.starved);
         }
-        let rearm = std::mem::take(&mut self.rearm);
-        for id in rearm {
+        // By index, keeping the list's allocation (`arm` doesn't add to it).
+        for i in 0..self.rearm.len() {
+            let id = self.rearm[i];
             self.arm(id);
         }
+        self.rearm.clear();
         if !self.wake_armed {
             self.arm_wake();
         }
@@ -1443,11 +1450,11 @@ impl Driver {
             Ok(!cqes.is_empty())
         })?;
         self.stats.os_events += self.cqes.len() as u64;
-        let cqes = std::mem::take(&mut self.cqes);
-        for c in &cqes {
-            self.complete(*c, out);
+        // By index, keeping the array's allocation (`complete` doesn't touch it).
+        for i in 0..self.cqes.len() {
+            let c = self.cqes[i];
+            self.complete(c, out);
         }
-        self.cqes = cqes;
         self.cqes.clear();
         // Without the `udp` feature no UDP socket is ever added: leave the code out.
         if cfg!(feature = "udp") {
@@ -1506,15 +1513,16 @@ impl Driver {
         // reach the kernel even when nothing is in flight any more.
         self.stats.waits += 1;
         let _ = self.ring.enter(0, Some(Duration::ZERO));
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = crate::time::now_ns() + 2_000_000_000;
         let mut sink = Vec::new();
-        while self.busy() && Instant::now() <= deadline {
+        while self.busy() && crate::time::now_ns() <= deadline {
             let _ = self.ring.enter(1, Some(Duration::from_millis(50)));
             self.ring.reap(&mut self.cqes);
-            let cqes = std::mem::take(&mut self.cqes);
-            for c in &cqes {
-                self.complete(*c, &mut sink);
+            for i in 0..self.cqes.len() {
+                let c = self.cqes[i];
+                self.complete(c, &mut sink);
             }
+            self.cqes.clear();
             // Ring buffers taken by those completions are dropped with the events.
             sink.clear();
         }
@@ -1525,9 +1533,7 @@ impl Driver {
                     std::mem::forget(op);
                 }
             }
-            for b in self.bufs.drain(..).flatten() {
-                std::mem::forget(b);
-            }
+            std::mem::forget(std::mem::take(&mut self.bufs));
             let map = std::mem::replace(&mut self.bufring.map, Mmap { ptr: core::ptr::null_mut(), len: 0 });
             map.leak();
         }

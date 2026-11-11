@@ -38,6 +38,25 @@ pub fn now_ns() -> u64 {
     }
 }
 
+/// Nanoseconds since the Unix epoch on the wall clock (0 if it is set before 1970). On Linux a
+/// direct `clock_gettime`: `SystemTime` costs code for its error path.
+pub fn wall_ns() -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        let mut ts = sys::timespec { tv_sec: 0, tv_nsec: 0 };
+        // SAFETY: `ts` is a valid output struct; CLOCK_REALTIME always exists.
+        unsafe { sys::clock_gettime(sys::CLOCK_REALTIME, &mut ts) };
+        if ts.tv_sec < 0 {
+            return 0;
+        }
+        ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64)
+    }
+}
+
 /// Nanoseconds on the cheapest monotonic clock (kernel-tick resolution on Linux).
 #[inline]
 pub fn coarse_ns() -> u64 {
