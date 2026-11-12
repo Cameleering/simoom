@@ -1,0 +1,6 @@
+2026-11-12T11:48:04Z round=3 variant=hyper
+2026-11-12T11:54:01Z round=3 variant=epoll
+2026-11-12T11:59:41Z round=3 variant=uring
+2026-11-12T12:05:39Z round=3 variant=may-minihttp
+2026-11-12T12:11:29Z round=3 variant=epoll-old
+2026-11-12T12:17:23Z round=3 variant=uring-old

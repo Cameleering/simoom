@@ -1,0 +1,9 @@
+# batch B (droplet set 1, build ca3d108: loops keep off the receive-interrupt CPU; the old build
+# 21cbbfc kept as /root/simoom-server-old): S1 SLO search and fixed rates, new against old and the
+# competitors
+hyper hyper S1
+epoll simoom S1,FR SIMOOM_EXTRA="--stats-s 5"
+uring simoom-uring S1,FR SIMOOM_EXTRA="--stats-s 5"
+may-minihttp may-minihttp S1
+epoll-old simoom S1 SIMOOM_EXTRA="--stats-s 5" SIMOOM_BIN=/root/simoom-server-old
+uring-old simoom-uring S1 SIMOOM_EXTRA="--stats-s 5" SIMOOM_BIN=/root/simoom-server-old

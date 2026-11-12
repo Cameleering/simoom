@@ -9,6 +9,29 @@ _2026-11-07._ The repository was created and the workspace scaffolded. The desig
 Wave 1, crates built in parallel: `simoom-sys` + `simoom-rt`, `simoom-http1`, `simoom-hpack` +
 `simoom-h2`, `simoom-tls`, `simoom-quic` + `simoom-qpack` + `simoom-h3`.
 
+## The epoll gap (K12 follow-up)
+
+_2026-11-12._ Same-droplet A/B on DigitalOcean (`bench/cloud/ab.sh` with the new fixed-rate `FR`
+and repeated-handshake `S7H` scenarios; results and analysis in `bench/results/2026-11-12-epoll/`).
+
+- Cause: the three loops of the K12 fix were unpinned, and the scheduler kept putting a loop woken
+  by the receive softirq on that interrupt CPU (sampled there more than on any other CPU). That
+  loop's connections stalled: p99 in seconds at fixed rates, with no drops and a handful of
+  retransmits. The readiness driver's turn was not the cause (one recv and one sendmsg per
+  request, about 1.5 requests per wakeup).
+- Fix: the loop threads keep off the CPU with the most softirq time in `/proc/stat`
+  (`simoom_sys::cpu::keep_current_thread_off_net_rx`); the concentration test reads `/proc/stat`
+  too, because the `NET_RX` counts pointed at the transmit-completion CPU.
+- S1 at 64/256/1024 connections, median of three rounds on one droplet: epoll 170.6k/172.6k/138.6k
+  (before 117.0k/133.8k/87.6k), io_uring 152.7k/172.3k/148.4k, hyper 122.2k/144.4k/115.1k,
+  may-minihttp 158.6k/150.7k/120.6k. epoll leads at 64 and 256 in every round.
+- The -14% epoll handshakes were the same effect: 8.7k full / 9.8k resumed over four runs (before
+  6.3k/6.9k; four loops 7.4k/8.1k). S3, S5, S7 over TLS, S8 level or better; CPU per request -5%
+  (epoll) and -7% (io_uring). Size: `http1,http2,tls,io-uring` at 583,680 of 614,400 bytes (5.0%
+  headroom), `http1,io-uring` 242,568 of 256,000 (5.2%).
+- Tests: `cargo test --workspace` 777 passed on Windows and 791 on WSL2, zero warnings with
+  `--all-targets`. 9.4 droplet-hours, nothing left.
+
 ## K12 / K13 fix round
 
 _2026-11-12._ Same-droplet A/B on DigitalOcean (`bench/cloud/ab.sh`, results and analysis in

@@ -1,0 +1,8 @@
+# batch C (droplet set 1, build ca3d108 against the old build 21cbbfc): the other scenarios, and
+# the TLS handshakes repeated (S7 once and S7H twice: three runs of each kind), also with four loops
+epoll-reg simoom S3,S5,S7,S7H,S8,CPU SIMOOM_EXTRA="--stats-s 5"
+epoll-old-reg simoom S3,S5,S7,S7H,S8,CPU SIMOOM_EXTRA="--stats-s 5" SIMOOM_BIN=/root/simoom-server-old
+uring-reg simoom-uring S3,S5,S7,S7H,S8,CPU SIMOOM_EXTRA="--stats-s 5"
+uring-old-reg simoom-uring S3,S5,S7,S7H,S8,CPU SIMOOM_EXTRA="--stats-s 5" SIMOOM_BIN=/root/simoom-server-old
+epoll-t4 simoom S7H SIMOOM_EXTRA="--stats-s 5 --threads 4"
+uring-t4 simoom-uring S7H SIMOOM_EXTRA="--stats-s 5 --threads 4"

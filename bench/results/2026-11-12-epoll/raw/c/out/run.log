@@ -1,0 +1,972 @@
+  node 0: 83275 req/s, node cpu 40.1%, generator cpu 33.5%
+  node 1: 84026 req/s, node cpu 36.3%, generator cpu 28.9%
+  167301 req/s achieved (offered 0), 2509513 samples, errors 0, incomplete 0
+  latency ms: p50 0.196  p90 1.028  p99 1.374  p99.9 209.453  max 826.278
+  generator: cpu 33.5% of the machine, busiest loop 44.1%, node busy 40.1%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 80620 req/s, node cpu 43.1%, generator cpu 35.5%
+  node 1: 85319 req/s, node cpu 39.4%, generator cpu 31.6%
+  165940 req/s achieved (offered 0), 497819 samples, errors 0, incomplete 0
+  latency ms: p50 0.202  p90 0.985  p99 1.417  p99.9 208.536  max 212.206
+  generator: cpu 35.5% of the machine, busiest loop 47.8%, node busy 43.1%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 84329 req/s, node cpu 50.6%, generator cpu 51.0%
+  node 1: 84978 req/s, node cpu 42.0%, generator cpu 45.0%
+  169308 req/s achieved (offered 174237), 871181 samples, errors 0, incomplete 0
+  latency ms: p50 0.243  p90 101.515  p99 318.505  p99.9 500.957  max 679.477
+  generator: cpu 51.0% of the machine, busiest loop 71.0%, node busy 50.6%, timer lag p99 0.089 ms, backend io_uring
+  node 0: 74998 req/s, node cpu 47.2%, generator cpu 48.5%
+  node 1: 75000 req/s, node cpu 39.2%, generator cpu 42.3%
+  149998 req/s achieved (offered 150000), 749991 samples, errors 0, incomplete 0
+  latency ms: p50 0.220  p90 0.281  p99 0.479  p99.9 1.873  max 6.455
+  generator: cpu 48.5% of the machine, busiest loop 68.6%, node busy 47.2%, timer lag p99 0.070 ms, backend io_uring
+  node 0: 86041 req/s, node cpu 53.0%, generator cpu 53.3%
+  node 1: 86185 req/s, node cpu 44.7%, generator cpu 47.0%
+  172226 req/s achieved (offered 173025), 865119 samples, errors 0, incomplete 0
+  latency ms: p50 0.242  p90 0.326  p99 111.149  p99.9 336.069  max 468.976
+  generator: cpu 53.3% of the machine, busiest loop 73.7%, node busy 53.0%, timer lag p99 0.085 ms, backend io_uring
+sweep: 173025 req/s fails: p99 111149 us > 1000 us
+  node 0: 80757 req/s, node cpu 50.5%, generator cpu 51.1%
+  node 1: 80757 req/s, node cpu 41.5%, generator cpu 45.0%
+  161514 req/s achieved (offered 161513), 807549 samples, errors 0, incomplete 0
+  latency ms: p50 0.224  p90 0.294  p99 0.454  p99.9 1.181  max 2.859
+  generator: cpu 51.1% of the machine, busiest loop 71.0%, node busy 50.5%, timer lag p99 0.080 ms, backend io_uring
+  node 0: 83634 req/s, node cpu 57.7%, generator cpu 49.7%
+  node 1: 83635 req/s, node cpu 43.2%, generator cpu 46.0%
+  167269 req/s achieved (offered 167269), 836344 samples, errors 0, incomplete 0
+  latency ms: p50 0.239  p90 0.386  p99 2.580  p99.9 3.621  max 9.282
+  generator: cpu 49.7% of the machine, busiest loop 70.3%, node busy 57.7%, timer lag p99 1.289 ms, backend io_uring
+sweep: 167269 req/s fails: p99 2580 us > 1000 us
+  node 0: 72681 req/s, node cpu 45.9%, generator cpu 46.6%
+  node 1: 72681 req/s, node cpu 37.7%, generator cpu 40.6%
+  145362 req/s achieved (offered 145362), 2180439 samples, errors 0, incomplete 0
+  latency ms: p50 0.217  p90 0.273  p99 0.466  p99.9 1.826  max 4.108
+  generator: cpu 46.6% of the machine, busiest loop 63.5%, node busy 45.9%, timer lag p99 0.068 ms, backend io_uring
+  node 0: 80756 req/s, node cpu 51.1%, generator cpu 51.7%
+  node 1: 80757 req/s, node cpu 41.8%, generator cpu 44.9%
+  161513 req/s achieved (offered 161513), 2422678 samples, errors 0, incomplete 0
+  latency ms: p50 0.225  p90 0.292  p99 0.478  p99.9 1.211  max 4.575
+  generator: cpu 51.7% of the machine, busiest loop 71.5%, node busy 51.1%, timer lag p99 0.082 ms, backend io_uring
+  node 0: 12562 req/s, node cpu 37.4%, generator cpu 13.8%
+  node 1: 12643 req/s, node cpu 28.2%, generator cpu 16.4%
+  25205 req/s achieved (offered 0), 75614 samples, errors 0, incomplete 0
+  latency ms: p50 7.623  p90 7.909  p99 8.167  p99.9 9.314  max 19.153
+  generator: cpu 16.4% of the machine, busiest loop 1.3%, node busy 37.4%, timer lag p99 0.000 ms, backend threads
+  node 0: 12470 req/s, node cpu 36.0%, generator cpu 24.8%
+  node 1: 12552 req/s, node cpu 28.6%, generator cpu 18.0%
+  25022 req/s achieved (offered 26465), 132326 samples, errors 0, incomplete 0
+  latency ms: p50 267.256  p90 376.963  p99 422.838  p99.9 428.081  max 428.605
+  generator: cpu 24.8% of the machine, busiest loop 1.4%, node busy 36.0%, timer lag p99 23.560 ms, backend threads
+  node 0: 10991 req/s, node cpu 34.6%, generator cpu 0.7%
+  node 1: 10995 req/s, node cpu 35.8%, generator cpu 15.7%
+  21986 req/s achieved (offered 22000), 110000 samples, errors 0, incomplete 0
+  latency ms: p50 0.515  p90 0.643  p99 0.997  p99.9 3.400  max 15.639
+  generator: cpu 15.7% of the machine, busiest loop 1.4%, node busy 35.8%, timer lag p99 0.113 ms, backend threads
+  node 0: 12434 req/s, node cpu 36.5%, generator cpu 24.8%
+  node 1: 12520 req/s, node cpu 27.9%, generator cpu 17.3%
+  24955 req/s achieved (offered 26242), 131210 samples, errors 0, incomplete 0
+  latency ms: p50 200.802  p90 308.543  p99 358.613  p99.9 364.118  max 365.429
+  generator: cpu 24.8% of the machine, busiest loop 1.5%, node busy 36.5%, timer lag p99 13.656 ms, backend threads
+sweep: 26242 req/s fails: achieved 24955 < 98% of 26242
+  node 0: 12052 req/s, node cpu 39.0%, generator cpu 2.0%
+  node 1: 12052 req/s, node cpu 31.6%, generator cpu 0.0%
+  24105 req/s achieved (offered 24121), 120604 samples, errors 0, incomplete 0
+  latency ms: p50 0.559  p90 0.754  p99 1.479  p99.9 3.867  max 13.427
+  generator: cpu 2.0% of the machine, busiest loop 1.6%, node busy 39.0%, timer lag p99 0.151 ms, backend threads
+  node 0: 12518 req/s, node cpu 37.7%, generator cpu 25.7%
+  node 1: 12587 req/s, node cpu 28.4%, generator cpu 14.8%
+  25105 req/s achieved (offered 25182), 125910 samples, errors 0, incomplete 0
+  latency ms: p50 18.481  p90 40.567  p99 45.351  p99.9 46.891  max 57.442
+  generator: cpu 25.7% of the machine, busiest loop 1.3%, node busy 37.7%, timer lag p99 5.865 ms, backend threads
+sweep: 25182 req/s fails: p99 45351 us > 5000 us
+  node 0: 12317 req/s, node cpu 39.8%, generator cpu 11.8%
+  node 1: 12318 req/s, node cpu 31.6%, generator cpu 0.0%
+  24635 req/s achieved (offered 24652), 123260 samples, errors 0, incomplete 0
+  latency ms: p50 0.581  p90 0.787  p99 1.321  p99.9 3.625  max 15.639
+  generator: cpu 11.8% of the machine, busiest loop 1.6%, node busy 39.8%, timer lag p99 0.128 ms, backend threads
+  node 0: 11092 req/s, node cpu 36.8%, generator cpu 9.0%
+  node 1: 11092 req/s, node cpu 28.7%, generator cpu 6.3%
+  22184 req/s achieved (offered 22187), 332804 samples, errors 0, incomplete 0
+  latency ms: p50 0.511  p90 0.635  p99 0.940  p99.9 2.400  max 9.306
+  generator: cpu 9.0% of the machine, busiest loop 1.3%, node busy 36.8%, timer lag p99 0.098 ms, backend threads
+  node 0: 12324 req/s, node cpu 39.3%, generator cpu 24.9%
+  node 1: 12324 req/s, node cpu 31.9%, generator cpu 9.7%
+  24648 req/s achieved (offered 24652), 369780 samples, errors 0, incomplete 0
+  latency ms: p50 0.599  p90 0.856  p99 1.547  p99.9 2.515  max 14.090
+  generator: cpu 24.9% of the machine, busiest loop 1.5%, node busy 39.3%, timer lag p99 0.118 ms, backend threads
+  node 0: 4340 req/s, node cpu 53.0%, generator cpu 47.3%
+  node 1: 4377 req/s, node cpu 44.4%, generator cpu 41.5%
+  8716 req/s achieved (offered 0), 130744 samples, errors 0, incomplete 0
+  latency ms: p50 4.784  p90 61.112  p99 66.224  p99.9 68.551  max 71.172
+  generator: cpu 47.3% of the machine, busiest loop 2.3%, node busy 53.0%, timer lag p99 0.000 ms, backend threads
+  node 0: 4882 req/s, node cpu 46.9%, generator cpu 41.9%
+  node 1: 4911 req/s, node cpu 38.3%, generator cpu 33.2%
+  9793 req/s achieved (offered 0), 146890 samples, errors 0, incomplete 0
+  latency ms: p50 4.076  p90 54.591  p99 58.950  p99.9 61.112  max 63.013
+  generator: cpu 41.9% of the machine, busiest loop 2.0%, node busy 46.9%, timer lag p99 0.000 ms, backend threads
+  node 0: 86042 req/s, node cpu 44.0%, generator cpu 36.6%
+  node 1: 80481 req/s, node cpu 38.5%, generator cpu 30.4%
+  166522 req/s achieved (offered 0), 499567 samples, errors 0, incomplete 0
+  latency ms: p50 0.206  p90 0.948  p99 1.234  p99.9 209.191  max 211.943
+  generator: cpu 36.6% of the machine, busiest loop 41.5%, node busy 44.0%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 79830 req/s, node cpu 42.5%, generator cpu 37.8%
+  node 1: 82432 req/s, node cpu 37.1%, generator cpu 32.7%
+  162262 req/s achieved (offered 174848), 874240 samples, errors 0, incomplete 0
+  latency ms: p50 769.655  p90 1414.529  p99 1938.817  p99.9 2325.742  max 2497.708
+  generator: cpu 37.8% of the machine, busiest loop 52.7%, node busy 42.5%, timer lag p99 0.163 ms, backend io_uring
+  node 0: 75000 req/s, node cpu 47.4%, generator cpu 47.8%
+  node 1: 75000 req/s, node cpu 39.7%, generator cpu 42.5%
+  150000 req/s achieved (offered 150000), 749991 samples, errors 0, incomplete 0
+  latency ms: p50 0.219  p90 0.277  p99 0.436  p99.9 2.472  max 4.350
+  generator: cpu 47.8% of the machine, busiest loop 64.3%, node busy 47.4%, timer lag p99 0.061 ms, backend io_uring
+  node 0: 84790 req/s, node cpu 51.1%, generator cpu 51.9%
+  node 1: 84914 req/s, node cpu 42.9%, generator cpu 45.8%
+  169704 req/s achieved (offered 173606), 868039 samples, errors 0, incomplete 0
+  latency ms: p50 0.238  p90 0.496  p99 241.041  p99.9 378.798  max 458.228
+  generator: cpu 51.9% of the machine, busiest loop 72.4%, node busy 51.1%, timer lag p99 0.078 ms, backend io_uring
+sweep: 173606 req/s fails: achieved 169704 < 98% of 173606
+  node 0: 80901 req/s, node cpu 54.1%, generator cpu 50.1%
+  node 1: 80902 req/s, node cpu 44.1%, generator cpu 45.8%
+  161802 req/s achieved (offered 161803), 809006 samples, errors 0, incomplete 0
+  latency ms: p50 0.226  p90 0.310  p99 1.859  p99.9 4.985  max 13.328
+  generator: cpu 50.1% of the machine, busiest loop 68.3%, node busy 54.1%, timer lag p99 0.103 ms, backend io_uring
+sweep: 161803 req/s fails: p99 1859 us > 1000 us
+  node 0: 77952 req/s, node cpu 50.4%, generator cpu 50.1%
+  node 1: 77951 req/s, node cpu 41.7%, generator cpu 44.4%
+  155903 req/s achieved (offered 155902), 779512 samples, errors 0, incomplete 0
+  latency ms: p50 0.226  p90 0.285  p99 0.464  p99.9 1.606  max 5.538
+  generator: cpu 50.1% of the machine, busiest loop 67.2%, node busy 50.4%, timer lag p99 0.068 ms, backend io_uring
+  node 0: 70156 req/s, node cpu 45.3%, generator cpu 45.7%
+  node 1: 70156 req/s, node cpu 37.5%, generator cpu 40.3%
+  140311 req/s achieved (offered 140312), 2104686 samples, errors 0, incomplete 0
+  latency ms: p50 0.217  p90 0.271  p99 0.394  p99.9 2.322  max 11.272
+  generator: cpu 45.7% of the machine, busiest loop 61.7%, node busy 45.3%, timer lag p99 0.062 ms, backend io_uring
+  node 0: 77951 req/s, node cpu 49.5%, generator cpu 49.5%
+  node 1: 77951 req/s, node cpu 41.2%, generator cpu 44.3%
+  155902 req/s achieved (offered 155902), 2338533 samples, errors 0, incomplete 0
+  latency ms: p50 0.226  p90 0.289  p99 0.446  p99.9 1.108  max 3.809
+  generator: cpu 49.5% of the machine, busiest loop 67.2%, node busy 49.5%, timer lag p99 0.068 ms, backend io_uring
+  node 0: 4315 req/s, node cpu 52.2%, generator cpu 49.2%
+  node 1: 4369 req/s, node cpu 43.5%, generator cpu 41.1%
+  8684 req/s achieved (offered 0), 130263 samples, errors 0, incomplete 0
+  latency ms: p50 4.608  p90 61.276  p99 66.224  p99.9 68.092  max 70.451
+  generator: cpu 49.2% of the machine, busiest loop 2.2%, node busy 52.2%, timer lag p99 0.000 ms, backend threads
+  node 0: 4877 req/s, node cpu 47.6%, generator cpu 41.9%
+  node 1: 4886 req/s, node cpu 38.4%, generator cpu 34.3%
+  9763 req/s achieved (offered 0), 146441 samples, errors 0, incomplete 0
+  latency ms: p50 3.996  p90 54.591  p99 58.982  p99.9 60.817  max 63.865
+  generator: cpu 41.9% of the machine, busiest loop 2.0%, node busy 47.6%, timer lag p99 0.000 ms, backend threads
+  node 0: 4373 req/s, node cpu 53.8%, generator cpu 49.4%
+  node 1: 4417 req/s, node cpu 45.3%, generator cpu 41.0%
+  8790 req/s achieved (offered 0), 131849 samples, errors 0, incomplete 0
+  latency ms: p50 5.517  p90 59.441  p99 64.946  p99.9 67.502  max 71.041
+  generator: cpu 49.4% of the machine, busiest loop 2.3%, node busy 53.8%, timer lag p99 0.000 ms, backend threads
+  node 0: 4887 req/s, node cpu 46.6%, generator cpu 41.0%
+  node 1: 4941 req/s, node cpu 39.3%, generator cpu 34.8%
+  9828 req/s achieved (offered 0), 147419 samples, errors 0, incomplete 0
+  latency ms: p50 3.932  p90 54.624  p99 58.982  p99.9 60.981  max 63.013
+  generator: cpu 41.0% of the machine, busiest loop 2.0%, node busy 46.6%, timer lag p99 0.000 ms, backend threads
+  node 0: 4316 req/s, node cpu 51.9%, generator cpu 46.6%
+  node 1: 4386 req/s, node cpu 44.0%, generator cpu 40.7%
+  8702 req/s achieved (offered 0), 130527 samples, errors 0, incomplete 0
+  latency ms: p50 4.801  p90 61.047  p99 66.257  p99.9 68.485  max 77.136
+  generator: cpu 46.6% of the machine, busiest loop 2.3%, node busy 51.9%, timer lag p99 0.000 ms, backend threads
+  node 0: 4881 req/s, node cpu 46.0%, generator cpu 39.7%
+  node 1: 4919 req/s, node cpu 38.7%, generator cpu 34.5%
+  9801 req/s achieved (offered 0), 147008 samples, errors 0, incomplete 0
+  latency ms: p50 4.219  p90 54.166  p99 58.819  p99.9 60.948  max 63.144
+  generator: cpu 39.7% of the machine, busiest loop 2.0%, node busy 46.0%, timer lag p99 0.000 ms, backend threads
+  node 0: 77069 req/s, node cpu 42.6%, generator cpu 35.8%
+  node 1: 89244 req/s, node cpu 42.3%, generator cpu 35.2%
+  166313 req/s achieved (offered 0), 498938 samples, errors 0, incomplete 0
+  latency ms: p50 0.209  p90 0.287  p99 0.408  p99.9 0.846  max 210.108
+  generator: cpu 35.8% of the machine, busiest loop 47.7%, node busy 42.6%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 87314 req/s, node cpu 53.4%, generator cpu 53.8%
+  node 1: 87313 req/s, node cpu 46.5%, generator cpu 49.8%
+  174627 req/s achieved (offered 174628), 873140 samples, errors 0, incomplete 0
+  latency ms: p50 0.237  p90 0.329  p99 135.791  p99.9 199.492  max 210.108
+  generator: cpu 53.8% of the machine, busiest loop 77.6%, node busy 53.4%, timer lag p99 0.081 ms, backend io_uring
+  node 0: 75000 req/s, node cpu 48.3%, generator cpu 49.8%
+  node 1: 75001 req/s, node cpu 40.9%, generator cpu 45.0%
+  150001 req/s achieved (offered 150000), 750000 samples, errors 0, incomplete 0
+  latency ms: p50 0.215  p90 0.268  p99 0.384  p99.9 0.714  max 2.048
+  generator: cpu 49.8% of the machine, busiest loop 70.0%, node busy 48.3%, timer lag p99 0.077 ms, backend io_uring
+  node 0: 86675 req/s, node cpu 55.1%, generator cpu 53.0%
+  node 1: 86696 req/s, node cpu 46.4%, generator cpu 50.1%
+  173371 req/s achieved (offered 173397), 866981 samples, errors 0, incomplete 0
+  latency ms: p50 0.231  p90 0.304  p99 93.979  p99.9 194.904  max 210.239
+  generator: cpu 53.0% of the machine, busiest loop 72.9%, node busy 55.1%, timer lag p99 0.079 ms, backend io_uring
+sweep: 173397 req/s fails: p99 93979 us > 5000 us
+  node 0: 80851 req/s, node cpu 52.3%, generator cpu 52.8%
+  node 1: 80849 req/s, node cpu 44.8%, generator cpu 48.5%
+  161700 req/s achieved (offered 161699), 808497 samples, errors 0, incomplete 0
+  latency ms: p50 0.220  p90 0.270  p99 0.367  p99.9 0.755  max 4.547
+  generator: cpu 52.8% of the machine, busiest loop 72.0%, node busy 52.3%, timer lag p99 0.065 ms, backend io_uring
+  node 0: 83776 req/s, node cpu 51.9%, generator cpu 52.1%
+  node 1: 83776 req/s, node cpu 46.1%, generator cpu 49.2%
+  167552 req/s achieved (offered 167548), 837740 samples, errors 0, incomplete 0
+  latency ms: p50 0.255  p90 0.559  p99 0.786  p99.9 1.109  max 3.903
+  generator: cpu 52.1% of the machine, busiest loop 71.6%, node busy 51.9%, timer lag p99 0.070 ms, backend io_uring
+  node 0: 75397 req/s, node cpu 49.3%, generator cpu 49.9%
+  node 1: 75396 req/s, node cpu 41.9%, generator cpu 45.9%
+  150793 req/s achieved (offered 150793), 2261894 samples, errors 0, incomplete 0
+  latency ms: p50 0.223  p90 0.274  p99 0.426  p99.9 7.127  max 25.690
+  generator: cpu 49.9% of the machine, busiest loop 69.5%, node busy 49.3%, timer lag p99 0.064 ms, backend io_uring
+  node 0: 83774 req/s, node cpu 52.9%, generator cpu 53.3%
+  node 1: 83774 req/s, node cpu 44.6%, generator cpu 49.5%
+  167548 req/s achieved (offered 167548), 2513219 samples, errors 0, incomplete 0
+  latency ms: p50 0.230  p90 0.290  p99 0.407  p99.9 0.774  max 2.716
+  generator: cpu 53.3% of the machine, busiest loop 73.8%, node busy 52.9%, timer lag p99 0.067 ms, backend io_uring
+  node 0: 25000 req/s, node cpu 15.1%, generator cpu 17.5%
+  node 1: 25000 req/s, node cpu 12.7%, generator cpu 15.1%
+  50001 req/s achieved (offered 50000), 750006 samples, errors 0, incomplete 0
+  latency ms: p50 0.206  p90 0.254  p99 0.332  p99.9 0.521  max 3.281
+  generator: cpu 17.5% of the machine, busiest loop 20.2%, node busy 15.1%, timer lag p99 0.038 ms, backend io_uring
+  node 0: 79093 req/s, node cpu 39.1%, generator cpu 32.3%
+  node 1: 87636 req/s, node cpu 38.0%, generator cpu 30.5%
+  166729 req/s achieved (offered 0), 2500939 samples, errors 0, incomplete 0
+  latency ms: p50 0.198  p90 1.048  p99 1.361  p99.9 209.453  max 418.906
+  generator: cpu 32.3% of the machine, busiest loop 41.8%, node busy 39.1%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 83851 req/s, node cpu 42.6%, generator cpu 35.3%
+  node 1: 81840 req/s, node cpu 37.2%, generator cpu 30.0%
+  165691 req/s achieved (offered 0), 497073 samples, errors 0, incomplete 0
+  latency ms: p50 0.205  p90 0.986  p99 1.340  p99.9 209.191  max 212.206
+  generator: cpu 35.3% of the machine, busiest loop 43.2%, node busy 42.6%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 79714 req/s, node cpu 48.5%, generator cpu 47.6%
+  node 1: 78603 req/s, node cpu 40.1%, generator cpu 41.6%
+  158317 req/s achieved (offered 173976), 869885 samples, errors 0, incomplete 0
+  latency ms: p50 0.254  p90 1268.777  p99 1646.264  p99.9 1686.110  max 1709.179
+  generator: cpu 47.6% of the machine, busiest loop 65.5%, node busy 48.5%, timer lag p99 0.101 ms, backend io_uring
+  node 0: 75723 req/s, node cpu 44.3%, generator cpu 42.3%
+  node 1: 75134 req/s, node cpu 36.4%, generator cpu 35.5%
+  150858 req/s achieved (offered 150000), 749991 samples, errors 0, incomplete 0
+  latency ms: p50 0.277  p90 257.950  p99 354.157  p99.9 442.237  max 507.773
+  generator: cpu 42.3% of the machine, busiest loop 59.6%, node busy 44.3%, timer lag p99 0.079 ms, backend io_uring
+sweep: 150000 req/s fails: p99 354157 us > 1000 us
+  node 0: 52500 req/s, node cpu 33.8%, generator cpu 35.0%
+  node 1: 52501 req/s, node cpu 27.6%, generator cpu 30.5%
+  105001 req/s achieved (offered 105000), 525007 samples, errors 0, incomplete 0
+  latency ms: p50 0.202  p90 0.252  p99 0.335  p99.9 0.536  max 1.775
+  generator: cpu 35.0% of the machine, busiest loop 46.1%, node busy 33.8%, timer lag p99 0.051 ms, backend io_uring
+  node 0: 62695 req/s, node cpu 39.5%, generator cpu 39.9%
+  node 1: 62997 req/s, node cpu 32.6%, generator cpu 35.1%
+  125692 req/s achieved (offered 127500), 637491 samples, errors 0, incomplete 0
+  latency ms: p50 0.212  p90 50.627  p99 257.819  p99.9 293.601  max 311.689
+  generator: cpu 39.9% of the machine, busiest loop 55.7%, node busy 39.5%, timer lag p99 0.063 ms, backend io_uring
+sweep: 127500 req/s fails: p99 257819 us > 1000 us
+  node 0: 58124 req/s, node cpu 37.2%, generator cpu 38.0%
+  node 1: 58124 req/s, node cpu 29.8%, generator cpu 33.4%
+  116248 req/s achieved (offered 116250), 581253 samples, errors 0, incomplete 0
+  latency ms: p50 0.204  p90 0.257  p99 0.368  p99.9 0.855  max 2.267
+  generator: cpu 38.0% of the machine, busiest loop 51.4%, node busy 37.2%, timer lag p99 0.061 ms, backend io_uring
+  node 0: 60936 req/s, node cpu 38.9%, generator cpu 40.0%
+  node 1: 60938 req/s, node cpu 31.7%, generator cpu 34.6%
+  121873 req/s achieved (offered 121875), 609367 samples, errors 0, incomplete 0
+  latency ms: p50 0.210  p90 0.264  p99 0.397  p99.9 2.675  max 5.476
+  generator: cpu 40.0% of the machine, busiest loop 54.0%, node busy 38.9%, timer lag p99 0.066 ms, backend io_uring
+  node 0: 54799 req/s, node cpu 35.8%, generator cpu 35.7%
+  node 1: 54805 req/s, node cpu 29.1%, generator cpu 30.4%
+  109604 req/s achieved (offered 109688), 1645322 samples, errors 0, incomplete 0
+  latency ms: p50 0.214  p90 16.237  p99 60.981  p99.9 78.381  max 93.389
+  generator: cpu 35.7% of the machine, busiest loop 47.3%, node busy 35.8%, timer lag p99 0.060 ms, backend io_uring
+  node 0: 60937 req/s, node cpu 40.7%, generator cpu 39.6%
+  node 1: 60938 req/s, node cpu 31.5%, generator cpu 34.9%
+  121875 req/s achieved (offered 121875), 1828119 samples, errors 0, incomplete 0
+  latency ms: p50 0.208  p90 0.263  p99 0.483  p99.9 2.226  max 4.645
+  generator: cpu 39.6% of the machine, busiest loop 53.6%, node busy 40.7%, timer lag p99 0.071 ms, backend io_uring
+  node 0: 12569 req/s, node cpu 36.4%, generator cpu 21.3%
+  node 1: 12655 req/s, node cpu 27.1%, generator cpu 14.9%
+  25224 req/s achieved (offered 0), 75673 samples, errors 0, incomplete 0
+  latency ms: p50 7.651  p90 7.975  p99 8.544  p99.9 14.795  max 23.658
+  generator: cpu 21.3% of the machine, busiest loop 1.3%, node busy 36.4%, timer lag p99 0.000 ms, backend threads
+  node 0: 12506 req/s, node cpu 35.7%, generator cpu 23.6%
+  node 1: 12570 req/s, node cpu 27.3%, generator cpu 17.7%
+  25075 req/s achieved (offered 26486), 132430 samples, errors 0, incomplete 0
+  latency ms: p50 230.425  p90 333.709  p99 380.895  p99.9 386.138  max 393.740
+  generator: cpu 23.6% of the machine, busiest loop 1.3%, node busy 35.7%, timer lag p99 9.683 ms, backend threads
+  node 0: 10991 req/s, node cpu 42.4%, generator cpu 0.0%
+  node 1: 10993 req/s, node cpu 28.4%, generator cpu 2.9%
+  21984 req/s achieved (offered 22000), 110000 samples, errors 0, incomplete 0
+  latency ms: p50 0.517  p90 7.492  p99 38.961  p99.9 55.607  max 60.588
+  generator: cpu 2.9% of the machine, busiest loop 1.3%, node busy 42.4%, timer lag p99 0.106 ms, backend threads
+sweep: 22000 req/s fails: p99 38961 us > 5000 us
+  node 0: 7696 req/s, node cpu 25.1%, generator cpu 7.2%
+  node 1: 7699 req/s, node cpu 19.3%, generator cpu 0.0%
+  15395 req/s achieved (offered 15400), 77000 samples, errors 0, incomplete 0
+  latency ms: p50 0.485  p90 0.677  p99 1.033  p99.9 2.042  max 8.913
+  generator: cpu 7.2% of the machine, busiest loop 1.0%, node busy 25.1%, timer lag p99 0.083 ms, backend threads
+  node 0: 9344 req/s, node cpu 29.5%, generator cpu 0.0%
+  node 1: 9347 req/s, node cpu 24.1%, generator cpu 4.3%
+  18691 req/s achieved (offered 18700), 93498 samples, errors 0, incomplete 0
+  latency ms: p50 0.460  p90 0.565  p99 1.286  p99.9 7.369  max 11.928
+  generator: cpu 4.3% of the machine, busiest loop 1.1%, node busy 29.5%, timer lag p99 0.093 ms, backend threads
+  node 0: 10168 req/s, node cpu 32.0%, generator cpu 9.1%
+  node 1: 10169 req/s, node cpu 26.4%, generator cpu 0.0%
+  20337 req/s achieved (offered 20350), 101750 samples, errors 0, incomplete 0
+  latency ms: p50 0.493  p90 0.636  p99 25.084  p99.9 37.880  max 42.271
+  generator: cpu 9.1% of the machine, busiest loop 1.3%, node busy 32.0%, timer lag p99 0.105 ms, backend threads
+sweep: 20350 req/s fails: p99 25084 us > 5000 us
+  node 0: 9706 req/s, node cpu 30.7%, generator cpu 22.9%
+  node 1: 9745 req/s, node cpu 25.0%, generator cpu 15.0%
+  19451 req/s achieved (offered 19525), 97626 samples, errors 0, incomplete 0
+  latency ms: p50 0.491  p90 5.644  p99 38.470  p99.9 44.696  max 47.874
+  generator: cpu 22.9% of the machine, busiest loop 1.4%, node busy 30.7%, timer lag p99 0.092 ms, backend threads
+sweep: 19525 req/s fails: p99 38470 us > 5000 us
+  node 0: 8414 req/s, node cpu 26.8%, generator cpu 3.7%
+  node 1: 8414 req/s, node cpu 21.5%, generator cpu 1.6%
+  16828 req/s achieved (offered 16830), 252450 samples, errors 0, incomplete 0
+  latency ms: p50 0.482  p90 0.867  p99 1.475  p99.9 2.218  max 5.816
+  generator: cpu 3.7% of the machine, busiest loop 1.0%, node busy 26.8%, timer lag p99 0.082 ms, backend threads
+  node 0: 9344 req/s, node cpu 29.6%, generator cpu 21.6%
+  node 1: 9341 req/s, node cpu 23.8%, generator cpu 17.1%
+  18685 req/s achieved (offered 18700), 280500 samples, errors 0, incomplete 0
+  latency ms: p50 0.479  p90 0.616  p99 7.356  p99.9 32.326  max 40.108
+  generator: cpu 21.6% of the machine, busiest loop 1.1%, node busy 29.6%, timer lag p99 0.085 ms, backend threads
+  node 0: 3197 req/s, node cpu 36.7%, generator cpu 34.3%
+  node 1: 3120 req/s, node cpu 31.6%, generator cpu 28.4%
+  6317 req/s achieved (offered 0), 94754 samples, errors 0, incomplete 0
+  latency ms: p50 2.736  p90 88.801  p99 93.258  p99.9 95.355  max 98.173
+  generator: cpu 34.3% of the machine, busiest loop 1.6%, node busy 36.7%, timer lag p99 0.000 ms, backend threads
+  node 0: 3516 req/s, node cpu 30.9%, generator cpu 27.0%
+  node 1: 3521 req/s, node cpu 26.7%, generator cpu 22.6%
+  7037 req/s achieved (offered 0), 105551 samples, errors 0, incomplete 0
+  latency ms: p50 2.140  p90 80.347  p99 85.066  p99.9 87.294  max 90.767
+  generator: cpu 27.0% of the machine, busiest loop 1.3%, node busy 30.9%, timer lag p99 0.000 ms, backend threads
+  node 0: 82088 req/s, node cpu 42.7%, generator cpu 34.8%
+  node 1: 83189 req/s, node cpu 36.9%, generator cpu 30.4%
+  165277 req/s achieved (offered 0), 495830 samples, errors 0, incomplete 0
+  latency ms: p50 0.202  p90 0.947  p99 1.286  p99.9 209.846  max 419.693
+  generator: cpu 34.8% of the machine, busiest loop 41.7%, node busy 42.7%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 83029 req/s, node cpu 51.2%, generator cpu 51.4%
+  node 1: 82817 req/s, node cpu 43.8%, generator cpu 46.0%
+  165847 req/s achieved (offered 173541), 867696 samples, errors 0, incomplete 0
+  latency ms: p50 0.236  p90 0.367  p99 595.591  p99.9 611.320  max 693.633
+  generator: cpu 51.4% of the machine, busiest loop 70.2%, node busy 51.2%, timer lag p99 0.080 ms, backend io_uring
+  node 0: 71422 req/s, node cpu 42.9%, generator cpu 44.2%
+  node 1: 71377 req/s, node cpu 37.7%, generator cpu 38.8%
+  142799 req/s achieved (offered 150000), 749991 samples, errors 0, incomplete 0
+  latency ms: p50 0.242  p90 598.213  p99 844.628  p99.9 887.620  max 908.067
+  generator: cpu 44.2% of the machine, busiest loop 60.7%, node busy 42.9%, timer lag p99 0.068 ms, backend io_uring
+sweep: 150000 req/s fails: achieved 142799 < 98% of 150000
+  node 0: 52501 req/s, node cpu 34.4%, generator cpu 36.1%
+  node 1: 52500 req/s, node cpu 27.7%, generator cpu 31.1%
+  105001 req/s achieved (offered 105000), 525007 samples, errors 0, incomplete 0
+  latency ms: p50 0.204  p90 0.249  p99 0.350  p99.9 3.908  max 6.160
+  generator: cpu 36.1% of the machine, busiest loop 46.0%, node busy 34.4%, timer lag p99 0.054 ms, backend io_uring
+  node 0: 63749 req/s, node cpu 38.9%, generator cpu 41.5%
+  node 1: 63750 req/s, node cpu 34.2%, generator cpu 36.5%
+  127499 req/s achieved (offered 127500), 637491 samples, errors 0, incomplete 0
+  latency ms: p50 0.213  p90 0.300  p99 178.651  p99.9 209.060  max 219.152
+  generator: cpu 41.5% of the machine, busiest loop 54.9%, node busy 38.9%, timer lag p99 0.056 ms, backend io_uring
+sweep: 127500 req/s fails: p99 178651 us > 1000 us
+  node 0: 58125 req/s, node cpu 38.8%, generator cpu 39.0%
+  node 1: 58125 req/s, node cpu 31.0%, generator cpu 34.1%
+  116250 req/s achieved (offered 116250), 581253 samples, errors 0, incomplete 0
+  latency ms: p50 0.208  p90 0.259  p99 0.340  p99.9 0.600  max 2.320
+  generator: cpu 39.0% of the machine, busiest loop 51.4%, node busy 38.8%, timer lag p99 0.058 ms, backend io_uring
+  node 0: 60936 req/s, node cpu 40.4%, generator cpu 40.5%
+  node 1: 60937 req/s, node cpu 32.6%, generator cpu 35.4%
+  121873 req/s achieved (offered 121875), 609367 samples, errors 0, incomplete 0
+  latency ms: p50 0.208  p90 0.253  p99 0.346  p99.9 1.036  max 3.097
+  generator: cpu 40.5% of the machine, busiest loop 54.1%, node busy 40.4%, timer lag p99 0.057 ms, backend io_uring
+  node 0: 54648 req/s, node cpu 37.0%, generator cpu 36.4%
+  node 1: 54630 req/s, node cpu 29.0%, generator cpu 31.8%
+  109278 req/s achieved (offered 109688), 1645322 samples, errors 0, incomplete 0
+  latency ms: p50 0.207  p90 0.370  p99 141.820  p99.9 177.209  max 235.143
+  generator: cpu 36.4% of the machine, busiest loop 47.6%, node busy 37.0%, timer lag p99 0.061 ms, backend io_uring
+  node 0: 56116 req/s, node cpu 35.7%, generator cpu 35.8%
+  node 1: 55533 req/s, node cpu 29.3%, generator cpu 30.9%
+  111649 req/s achieved (offered 121875), 1828119 samples, errors 0, incomplete 0
+  latency ms: p50 0.222  p90 2571.108  p99 3265.266  p99.9 3378.512  max 3456.106
+  generator: cpu 35.8% of the machine, busiest loop 44.6%, node busy 35.7%, timer lag p99 0.052 ms, backend io_uring
+  node 0: 3962 req/s, node cpu 53.0%, generator cpu 44.4%
+  node 1: 3996 req/s, node cpu 39.7%, generator cpu 37.1%
+  7958 req/s achieved (offered 0), 119364 samples, errors 0, incomplete 0
+  latency ms: p50 6.185  p90 75.891  p99 91.095  p99.9 94.175  max 100.205
+  generator: cpu 44.4% of the machine, busiest loop 2.0%, node busy 53.0%, timer lag p99 0.000 ms, backend threads
+  node 0: 3447 req/s, node cpu 30.8%, generator cpu 26.7%
+  node 1: 3433 req/s, node cpu 25.2%, generator cpu 21.5%
+  6880 req/s achieved (offered 0), 103204 samples, errors 0, incomplete 0
+  latency ms: p50 2.062  p90 82.313  p99 86.639  p99.9 89.063  max 93.258
+  generator: cpu 26.7% of the machine, busiest loop 1.3%, node busy 30.8%, timer lag p99 0.000 ms, backend threads
+  node 0: 3090 req/s, node cpu 37.4%, generator cpu 33.8%
+  node 1: 3124 req/s, node cpu 30.4%, generator cpu 28.5%
+  6215 req/s achieved (offered 0), 93218 samples, errors 0, incomplete 0
+  latency ms: p50 2.572  p90 90.636  p99 95.093  p99.9 97.321  max 203.031
+  generator: cpu 33.8% of the machine, busiest loop 1.7%, node busy 37.4%, timer lag p99 0.000 ms, backend threads
+  node 0: 3469 req/s, node cpu 31.5%, generator cpu 26.5%
+  node 1: 3432 req/s, node cpu 24.8%, generator cpu 22.1%
+  6900 req/s achieved (offered 0), 103505 samples, errors 0, incomplete 0
+  latency ms: p50 2.122  p90 81.986  p99 85.983  p99.9 88.015  max 89.981
+  generator: cpu 26.5% of the machine, busiest loop 1.4%, node busy 31.5%, timer lag p99 0.000 ms, backend threads
+  node 0: 3148 req/s, node cpu 37.6%, generator cpu 33.8%
+  node 1: 3146 req/s, node cpu 31.7%, generator cpu 25.9%
+  6294 req/s achieved (offered 0), 94414 samples, errors 0, incomplete 0
+  latency ms: p50 2.650  p90 89.391  p99 94.044  p99.9 97.059  max 101.646
+  generator: cpu 33.8% of the machine, busiest loop 1.7%, node busy 37.6%, timer lag p99 0.000 ms, backend threads
+  node 0: 3428 req/s, node cpu 31.3%, generator cpu 27.0%
+  node 1: 3420 req/s, node cpu 26.3%, generator cpu 22.6%
+  6848 req/s achieved (offered 0), 102713 samples, errors 0, incomplete 0
+  latency ms: p50 2.095  p90 82.706  p99 86.901  p99.9 89.194  max 92.340
+  generator: cpu 27.0% of the machine, busiest loop 1.3%, node busy 31.3%, timer lag p99 0.000 ms, backend threads
+  node 0: 82386 req/s, node cpu 44.3%, generator cpu 36.6%
+  node 1: 93112 req/s, node cpu 42.9%, generator cpu 35.7%
+  175498 req/s achieved (offered 0), 526493 samples, errors 0, incomplete 0
+  latency ms: p50 0.277  p90 0.408  p99 0.509  p99.9 0.693  max 209.977
+  generator: cpu 36.6% of the machine, busiest loop 46.2%, node busy 44.3%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 92076 req/s, node cpu 52.5%, generator cpu 53.0%
+  node 1: 92061 req/s, node cpu 45.0%, generator cpu 48.2%
+  184137 req/s achieved (offered 184273), 921366 samples, errors 0, incomplete 0
+  latency ms: p50 0.244  p90 21.545  p99 189.137  p99.9 205.783  max 210.633
+  generator: cpu 53.0% of the machine, busiest loop 75.9%, node busy 52.5%, timer lag p99 0.126 ms, backend io_uring
+  node 0: 74999 req/s, node cpu 48.4%, generator cpu 48.8%
+  node 1: 75000 req/s, node cpu 38.8%, generator cpu 43.6%
+  149999 req/s achieved (offered 150000), 750000 samples, errors 0, incomplete 0
+  latency ms: p50 0.235  p90 2.378  p99 5.165  p99.9 6.361  max 8.004
+  generator: cpu 48.8% of the machine, busiest loop 68.2%, node busy 48.4%, timer lag p99 0.093 ms, backend io_uring
+sweep: 150000 req/s fails: p99 5165 us > 5000 us
+  node 0: 52496 req/s, node cpu 35.8%, generator cpu 35.9%
+  node 1: 52497 req/s, node cpu 28.4%, generator cpu 32.8%
+  104993 req/s achieved (offered 105000), 525003 samples, errors 0, incomplete 0
+  latency ms: p50 0.214  p90 0.313  p99 1.165  p99.9 1.528  max 3.977
+  generator: cpu 35.9% of the machine, busiest loop 46.9%, node busy 35.8%, timer lag p99 0.053 ms, backend io_uring
+  node 0: 63753 req/s, node cpu 41.3%, generator cpu 41.3%
+  node 1: 63752 req/s, node cpu 33.2%, generator cpu 38.0%
+  127505 req/s achieved (offered 127500), 637498 samples, errors 0, incomplete 0
+  latency ms: p50 0.220  p90 1.197  p99 1.668  p99.9 2.091  max 3.293
+  generator: cpu 41.3% of the machine, busiest loop 55.1%, node busy 41.3%, timer lag p99 0.064 ms, backend io_uring
+  node 0: 69367 req/s, node cpu 46.9%, generator cpu 46.1%
+  node 1: 69372 req/s, node cpu 37.8%, generator cpu 42.0%
+  138739 req/s achieved (offered 138750), 693751 samples, errors 0, incomplete 0
+  latency ms: p50 0.215  p90 0.268  p99 1.067  p99.9 2.308  max 4.444
+  generator: cpu 46.1% of the machine, busiest loop 62.2%, node busy 46.9%, timer lag p99 0.063 ms, backend io_uring
+  node 0: 72188 req/s, node cpu 47.5%, generator cpu 47.5%
+  node 1: 72188 req/s, node cpu 39.9%, generator cpu 44.0%
+  144376 req/s achieved (offered 144375), 721872 samples, errors 0, incomplete 0
+  latency ms: p50 0.230  p90 0.298  p99 0.479  p99.9 1.395  max 5.116
+  generator: cpu 47.5% of the machine, busiest loop 64.1%, node busy 47.5%, timer lag p99 0.069 ms, backend io_uring
+  node 0: 64971 req/s, node cpu 44.4%, generator cpu 44.3%
+  node 1: 64971 req/s, node cpu 35.8%, generator cpu 39.9%
+  129942 req/s achieved (offered 129938), 1949069 samples, errors 0, incomplete 0
+  latency ms: p50 0.212  p90 0.289  p99 1.861  p99.9 5.161  max 20.169
+  generator: cpu 44.3% of the machine, busiest loop 60.0%, node busy 44.4%, timer lag p99 0.069 ms, backend io_uring
+  node 0: 72186 req/s, node cpu 48.2%, generator cpu 47.4%
+  node 1: 72187 req/s, node cpu 39.3%, generator cpu 43.8%
+  144374 req/s achieved (offered 144375), 2165625 samples, errors 0, incomplete 0
+  latency ms: p50 0.225  p90 0.286  p99 1.793  p99.9 3.881  max 6.058
+  generator: cpu 47.4% of the machine, busiest loop 64.6%, node busy 48.2%, timer lag p99 0.064 ms, backend io_uring
+  node 0: 25000 req/s, node cpu 16.6%, generator cpu 17.7%
+  node 1: 25000 req/s, node cpu 12.6%, generator cpu 15.2%
+  50000 req/s achieved (offered 50000), 750006 samples, errors 0, incomplete 0
+  latency ms: p50 0.217  p90 0.302  p99 0.433  p99.9 0.987  max 3.475
+  generator: cpu 17.7% of the machine, busiest loop 20.2%, node busy 16.6%, timer lag p99 0.039 ms, backend io_uring
+  node 0: 81705 req/s, node cpu 39.4%, generator cpu 33.0%
+  node 1: 84979 req/s, node cpu 34.9%, generator cpu 29.3%
+  166683 req/s achieved (offered 0), 2500252 samples, errors 0, incomplete 0
+  latency ms: p50 0.200  p90 1.076  p99 2.179  p99.9 209.060  max 416.285
+  generator: cpu 33.0% of the machine, busiest loop 42.6%, node busy 39.4%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 86315 req/s, node cpu 44.3%, generator cpu 36.2%
+  node 1: 79350 req/s, node cpu 36.9%, generator cpu 29.2%
+  165665 req/s achieved (offered 0), 496995 samples, errors 0, incomplete 0
+  latency ms: p50 0.210  p90 1.112  p99 1.378  p99.9 209.715  max 212.599
+  generator: cpu 36.2% of the machine, busiest loop 41.8%, node busy 44.3%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 85976 req/s, node cpu 52.4%, generator cpu 52.5%
+  node 1: 85963 req/s, node cpu 43.2%, generator cpu 45.3%
+  171939 req/s achieved (offered 173948), 869728 samples, errors 0, incomplete 0
+  latency ms: p50 0.245  p90 56.394  p99 305.136  p99.9 464.257  max 544.211
+  generator: cpu 52.5% of the machine, busiest loop 73.8%, node busy 52.4%, timer lag p99 0.094 ms, backend io_uring
+  node 0: 74998 req/s, node cpu 47.3%, generator cpu 47.9%
+  node 1: 75000 req/s, node cpu 39.4%, generator cpu 41.8%
+  149998 req/s achieved (offered 150000), 749991 samples, errors 0, incomplete 0
+  latency ms: p50 0.222  p90 0.284  p99 0.450  p99.9 1.100  max 3.445
+  generator: cpu 47.9% of the machine, busiest loop 67.2%, node busy 47.3%, timer lag p99 0.075 ms, backend io_uring
+  node 0: 83993 req/s, node cpu 43.7%, generator cpu 41.7%
+  node 1: 85412 req/s, node cpu 36.5%, generator cpu 35.1%
+  169405 req/s achieved (offered 172751), 863756 samples, errors 0, incomplete 0
+  latency ms: p50 368.312  p90 875.037  p99 1519.387  p99.9 2144.338  max 2376.073
+  generator: cpu 41.7% of the machine, busiest loop 60.9%, node busy 43.7%, timer lag p99 0.182 ms, backend io_uring
+sweep: 172751 req/s fails: p99 1519387 us > 1000 us
+  node 0: 80685 req/s, node cpu 49.7%, generator cpu 50.5%
+  node 1: 80688 req/s, node cpu 41.6%, generator cpu 44.6%
+  161374 req/s achieved (offered 161376), 806873 samples, errors 0, incomplete 0
+  latency ms: p50 0.232  p90 0.291  p99 0.435  p99.9 0.906  max 2.345
+  generator: cpu 50.5% of the machine, busiest loop 69.8%, node busy 49.7%, timer lag p99 0.078 ms, backend io_uring
+  node 0: 83530 req/s, node cpu 51.0%, generator cpu 51.8%
+  node 1: 83532 req/s, node cpu 43.3%, generator cpu 46.0%
+  167062 req/s achieved (offered 167064), 835325 samples, errors 0, incomplete 0
+  latency ms: p50 0.237  p90 0.308  p99 0.490  p99.9 1.337  max 3.713
+  generator: cpu 51.8% of the machine, busiest loop 73.5%, node busy 51.0%, timer lag p99 0.085 ms, backend io_uring
+  node 0: 75179 req/s, node cpu 47.7%, generator cpu 48.4%
+  node 1: 75179 req/s, node cpu 39.6%, generator cpu 42.5%
+  150358 req/s achieved (offered 150358), 2255370 samples, errors 0, incomplete 0
+  latency ms: p50 0.224  p90 0.286  p99 0.428  p99.9 1.082  max 6.197
+  generator: cpu 48.4% of the machine, busiest loop 68.6%, node busy 47.7%, timer lag p99 0.078 ms, backend io_uring
+  node 0: 82909 req/s, node cpu 50.6%, generator cpu 50.9%
+  node 1: 83067 req/s, node cpu 42.0%, generator cpu 44.8%
+  165976 req/s achieved (offered 167064), 2505957 samples, errors 0, incomplete 0
+  latency ms: p50 0.242  p90 0.730  p99 207.880  p99.9 431.489  max 675.807
+  generator: cpu 50.9% of the machine, busiest loop 71.2%, node busy 50.6%, timer lag p99 0.090 ms, backend io_uring
+  node 0: 12577 req/s, node cpu 36.7%, generator cpu 16.5%
+  node 1: 12642 req/s, node cpu 28.3%, generator cpu 17.0%
+  25219 req/s achieved (offered 0), 75658 samples, errors 0, incomplete 0
+  latency ms: p50 7.651  p90 7.967  p99 8.294  p99.9 14.156  max 22.921
+  generator: cpu 17.0% of the machine, busiest loop 1.4%, node busy 36.7%, timer lag p99 0.000 ms, backend threads
+  node 0: 12463 req/s, node cpu 40.4%, generator cpu 23.8%
+  node 1: 12569 req/s, node cpu 28.3%, generator cpu 17.3%
+  25032 req/s achieved (offered 26480), 132400 samples, errors 0, incomplete 0
+  latency ms: p50 250.610  p90 377.225  p99 436.732  p99.9 443.548  max 445.383
+  generator: cpu 23.8% of the machine, busiest loop 1.2%, node busy 40.4%, timer lag p99 14.975 ms, backend threads
+  node 0: 10991 req/s, node cpu 41.1%, generator cpu 7.4%
+  node 1: 10993 req/s, node cpu 26.1%, generator cpu 0.0%
+  21984 req/s achieved (offered 22000), 110000 samples, errors 0, incomplete 0
+  latency ms: p50 0.505  p90 0.626  p99 1.391  p99.9 7.881  max 17.170
+  generator: cpu 7.4% of the machine, busiest loop 1.6%, node busy 41.1%, timer lag p99 0.107 ms, backend threads
+  node 0: 12549 req/s, node cpu 36.9%, generator cpu 24.9%
+  node 1: 12637 req/s, node cpu 27.7%, generator cpu 17.6%
+  25186 req/s achieved (offered 26256), 131280 samples, errors 0, incomplete 0
+  latency ms: p50 149.815  p90 245.236  p99 290.193  p99.9 294.650  max 295.961
+  generator: cpu 24.9% of the machine, busiest loop 1.3%, node busy 36.9%, timer lag p99 8.036 ms, backend threads
+sweep: 26256 req/s fails: achieved 25186 < 98% of 26256
+  node 0: 12055 req/s, node cpu 38.9%, generator cpu 13.1%
+  node 1: 12056 req/s, node cpu 28.9%, generator cpu 7.7%
+  24111 req/s achieved (offered 24128), 120640 samples, errors 0, incomplete 0
+  latency ms: p50 0.569  p90 0.742  p99 1.182  p99.9 3.803  max 17.121
+  generator: cpu 13.1% of the machine, busiest loop 1.7%, node busy 38.9%, timer lag p99 0.127 ms, backend threads
+  node 0: 12624 req/s, node cpu 37.1%, generator cpu 19.4%
+  node 1: 12645 req/s, node cpu 28.3%, generator cpu 17.7%
+  25269 req/s achieved (offered 25192), 125960 samples, errors 0, incomplete 0
+  latency ms: p50 42.631  p90 72.614  p99 81.854  p99.9 83.034  max 86.049
+  generator: cpu 19.4% of the machine, busiest loop 1.4%, node busy 37.1%, timer lag p99 6.582 ms, backend threads
+sweep: 25192 req/s fails: p99 81854 us > 5000 us
+  node 0: 12321 req/s, node cpu 39.7%, generator cpu 0.0%
+  node 1: 12323 req/s, node cpu 32.1%, generator cpu 7.7%
+  24643 req/s achieved (offered 24660), 123300 samples, errors 0, incomplete 0
+  latency ms: p50 0.587  p90 0.784  p99 1.384  p99.9 4.114  max 12.771
+  generator: cpu 7.7% of the machine, busiest loop 1.5%, node busy 39.7%, timer lag p99 0.121 ms, backend threads
+  node 0: 11095 req/s, node cpu 35.7%, generator cpu 13.4%
+  node 1: 11094 req/s, node cpu 28.7%, generator cpu 0.0%
+  22189 req/s achieved (offered 22194), 332910 samples, errors 0, incomplete 0
+  latency ms: p50 0.507  p90 0.622  p99 0.879  p99.9 2.286  max 16.687
+  generator: cpu 13.4% of the machine, busiest loop 1.3%, node busy 35.7%, timer lag p99 0.098 ms, backend threads
+  node 0: 12327 req/s, node cpu 39.2%, generator cpu 0.0%
+  node 1: 12327 req/s, node cpu 32.1%, generator cpu 4.2%
+  24654 req/s achieved (offered 24660), 369900 samples, errors 0, incomplete 0
+  latency ms: p50 0.606  p90 0.859  p99 2.082  p99.9 3.637  max 20.890
+  generator: cpu 4.2% of the machine, busiest loop 1.4%, node busy 39.2%, timer lag p99 0.112 ms, backend threads
+  node 0: 4405 req/s, node cpu 54.3%, generator cpu 51.8%
+  node 1: 4619 req/s, node cpu 48.7%, generator cpu 46.2%
+  9024 req/s achieved (offered 0), 135361 samples, errors 0, incomplete 0
+  latency ms: p50 7.254  p90 56.951  p99 67.305  p99.9 72.548  max 79.430
+  generator: cpu 51.8% of the machine, busiest loop 2.4%, node busy 54.3%, timer lag p99 0.000 ms, backend threads
+  node 0: 4881 req/s, node cpu 46.7%, generator cpu 43.3%
+  node 1: 5075 req/s, node cpu 41.2%, generator cpu 38.1%
+  9957 req/s achieved (offered 0), 149349 samples, errors 0, incomplete 0
+  latency ms: p50 5.362  p90 53.281  p99 60.981  p99.9 66.650  max 70.844
+  generator: cpu 43.3% of the machine, busiest loop 2.0%, node busy 46.7%, timer lag p99 0.000 ms, backend threads
+  node 0: 80669 req/s, node cpu 42.7%, generator cpu 36.0%
+  node 1: 84910 req/s, node cpu 40.0%, generator cpu 31.9%
+  165579 req/s achieved (offered 0), 496737 samples, errors 0, incomplete 0
+  latency ms: p50 0.203  p90 0.968  p99 1.309  p99.9 209.191  max 211.550
+  generator: cpu 36.0% of the machine, busiest loop 53.5%, node busy 42.7%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 85505 req/s, node cpu 52.2%, generator cpu 52.2%
+  node 1: 85885 req/s, node cpu 45.1%, generator cpu 46.4%
+  171390 req/s achieved (offered 173858), 869299 samples, errors 0, incomplete 0
+  latency ms: p50 0.242  p90 0.845  p99 288.621  p99.9 459.801  max 589.300
+  generator: cpu 52.2% of the machine, busiest loop 71.5%, node busy 52.2%, timer lag p99 0.074 ms, backend io_uring
+  node 0: 74998 req/s, node cpu 48.9%, generator cpu 48.4%
+  node 1: 75000 req/s, node cpu 36.9%, generator cpu 42.3%
+  149998 req/s achieved (offered 150000), 749991 samples, errors 0, incomplete 0
+  latency ms: p50 0.225  p90 0.290  p99 0.458  p99.9 1.143  max 2.720
+  generator: cpu 48.4% of the machine, busiest loop 64.6%, node busy 48.9%, timer lag p99 0.061 ms, backend io_uring
+  node 0: 86275 req/s, node cpu 53.6%, generator cpu 53.8%
+  node 1: 86232 req/s, node cpu 44.5%, generator cpu 47.5%
+  172507 req/s achieved (offered 172665), 863312 samples, errors 0, incomplete 0
+  latency ms: p50 0.239  p90 0.328  p99 1.150  p99.9 7.193  max 209.060
+  generator: cpu 53.8% of the machine, busiest loop 73.1%, node busy 53.6%, timer lag p99 0.084 ms, backend io_uring
+sweep: 172665 req/s fails: p99 1150 us > 1000 us
+  node 0: 80669 req/s, node cpu 51.4%, generator cpu 51.6%
+  node 1: 80668 req/s, node cpu 42.3%, generator cpu 45.2%
+  161337 req/s achieved (offered 161333), 806671 samples, errors 0, incomplete 0
+  latency ms: p50 0.239  p90 0.329  p99 0.629  p99.9 2.122  max 3.731
+  generator: cpu 51.6% of the machine, busiest loop 71.1%, node busy 51.4%, timer lag p99 0.094 ms, backend io_uring
+  node 0: 83500 req/s, node cpu 51.0%, generator cpu 51.4%
+  node 1: 83499 req/s, node cpu 43.8%, generator cpu 46.4%
+  166999 req/s achieved (offered 166999), 834983 samples, errors 0, incomplete 0
+  latency ms: p50 0.246  p90 0.364  p99 1.236  p99.9 5.444  max 9.200
+  generator: cpu 51.4% of the machine, busiest loop 69.7%, node busy 51.0%, timer lag p99 0.089 ms, backend io_uring
+sweep: 166999 req/s fails: p99 1236 us > 1000 us
+  node 0: 72600 req/s, node cpu 47.8%, generator cpu 47.6%
+  node 1: 72600 req/s, node cpu 38.6%, generator cpu 41.5%
+  145200 req/s achieved (offered 145200), 2177994 samples, errors 0, incomplete 0
+  latency ms: p50 0.222  p90 0.286  p99 0.453  p99.9 4.833  max 209.977
+  generator: cpu 47.6% of the machine, busiest loop 64.4%, node busy 47.8%, timer lag p99 0.066 ms, backend io_uring
+  node 0: 80667 req/s, node cpu 51.9%, generator cpu 50.8%
+  node 1: 80666 req/s, node cpu 42.5%, generator cpu 44.9%
+  161334 req/s achieved (offered 161333), 2420003 samples, errors 0, incomplete 0
+  latency ms: p50 0.236  p90 0.306  p99 0.727  p99.9 3.082  max 8.626
+  generator: cpu 50.8% of the machine, busiest loop 70.0%, node busy 51.9%, timer lag p99 0.082 ms, backend io_uring
+  node 0: 4372 req/s, node cpu 53.3%, generator cpu 49.0%
+  node 1: 4485 req/s, node cpu 46.9%, generator cpu 44.7%
+  8857 req/s achieved (offered 0), 132858 samples, errors 0, incomplete 0
+  latency ms: p50 6.492  p90 58.786  p99 68.485  p99.9 73.925  max 78.184
+  generator: cpu 49.0% of the machine, busiest loop 2.5%, node busy 53.3%, timer lag p99 0.000 ms, backend threads
+  node 0: 5215 req/s, node cpu 51.5%, generator cpu 48.4%
+  node 1: 5382 req/s, node cpu 44.9%, generator cpu 42.8%
+  10597 req/s achieved (offered 0), 158948 samples, errors 0, incomplete 0
+  latency ms: p50 10.830  p90 43.811  p99 55.640  p99.9 62.620  max 71.107
+  generator: cpu 48.4% of the machine, busiest loop 2.2%, node busy 51.5%, timer lag p99 0.000 ms, backend threads
+  node 0: 4601 req/s, node cpu 56.8%, generator cpu 54.3%
+  node 1: 4781 req/s, node cpu 51.1%, generator cpu 48.8%
+  9382 req/s achieved (offered 0), 140727 samples, errors 0, incomplete 0
+  latency ms: p50 14.189  p90 47.055  p99 61.866  p99.9 69.730  max 77.529
+  generator: cpu 54.3% of the machine, busiest loop 2.5%, node busy 56.8%, timer lag p99 0.000 ms, backend threads
+  node 0: 4933 req/s, node cpu 46.9%, generator cpu 41.6%
+  node 1: 5034 req/s, node cpu 41.7%, generator cpu 38.3%
+  9967 req/s achieved (offered 0), 149507 samples, errors 0, incomplete 0
+  latency ms: p50 5.517  p90 52.953  p99 61.014  p99.9 66.814  max 72.810
+  generator: cpu 41.6% of the machine, busiest loop 2.0%, node busy 46.9%, timer lag p99 0.000 ms, backend threads
+  node 0: 4599 req/s, node cpu 56.5%, generator cpu 53.0%
+  node 1: 4755 req/s, node cpu 50.7%, generator cpu 48.3%
+  9354 req/s achieved (offered 0), 140306 samples, errors 0, incomplete 0
+  latency ms: p50 13.402  p90 49.742  p99 63.996  p99.9 71.303  max 77.070
+  generator: cpu 53.0% of the machine, busiest loop 2.5%, node busy 56.5%, timer lag p99 0.000 ms, backend threads
+  node 0: 4908 req/s, node cpu 47.1%, generator cpu 43.2%
+  node 1: 5024 req/s, node cpu 41.3%, generator cpu 38.4%
+  9932 req/s achieved (offered 0), 148984 samples, errors 0, incomplete 0
+  latency ms: p50 5.325  p90 53.182  p99 60.981  p99.9 67.174  max 71.369
+  generator: cpu 43.2% of the machine, busiest loop 2.0%, node busy 47.1%, timer lag p99 0.000 ms, backend threads
+  node 0: 78251 req/s, node cpu 43.2%, generator cpu 36.3%
+  node 1: 89708 req/s, node cpu 40.4%, generator cpu 34.9%
+  167959 req/s achieved (offered 0), 503877 samples, errors 0, incomplete 0
+  latency ms: p50 0.213  p90 0.291  p99 0.398  p99.9 0.968  max 210.239
+  generator: cpu 36.3% of the machine, busiest loop 47.6%, node busy 43.2%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 87925 req/s, node cpu 52.0%, generator cpu 52.4%
+  node 1: 87923 req/s, node cpu 45.2%, generator cpu 48.0%
+  175848 req/s achieved (offered 176357), 881783 samples, errors 0, incomplete 0
+  latency ms: p50 0.244  p90 6.615  p99 177.603  p99.9 204.210  max 212.992
+  generator: cpu 52.4% of the machine, busiest loop 71.1%, node busy 52.0%, timer lag p99 0.103 ms, backend io_uring
+  node 0: 75000 req/s, node cpu 48.0%, generator cpu 49.7%
+  node 1: 75000 req/s, node cpu 37.1%, generator cpu 45.1%
+  150001 req/s achieved (offered 150000), 750000 samples, errors 0, incomplete 0
+  latency ms: p50 0.218  p90 0.274  p99 0.379  p99.9 0.926  max 3.178
+  generator: cpu 49.7% of the machine, busiest loop 69.6%, node busy 48.0%, timer lag p99 0.077 ms, backend io_uring
+  node 0: 87465 req/s, node cpu 53.8%, generator cpu 53.6%
+  node 1: 87491 req/s, node cpu 47.5%, generator cpu 50.6%
+  174956 req/s achieved (offered 175039), 875195 samples, errors 0, incomplete 0
+  latency ms: p50 0.224  p90 0.292  p99 148.505  p99.9 200.278  max 209.977
+  generator: cpu 53.6% of the machine, busiest loop 73.4%, node busy 53.8%, timer lag p99 0.076 ms, backend io_uring
+sweep: 175039 req/s fails: p99 148505 us > 5000 us
+  node 0: 81258 req/s, node cpu 51.9%, generator cpu 52.0%
+  node 1: 81260 req/s, node cpu 45.1%, generator cpu 48.6%
+  162518 req/s achieved (offered 162520), 812601 samples, errors 0, incomplete 0
+  latency ms: p50 0.223  p90 0.276  p99 0.418  p99.9 1.591  max 4.493
+  generator: cpu 52.0% of the machine, busiest loop 72.9%, node busy 51.9%, timer lag p99 0.069 ms, backend io_uring
+  node 0: 84390 req/s, node cpu 54.0%, generator cpu 54.4%
+  node 1: 84390 req/s, node cpu 46.6%, generator cpu 50.3%
+  168779 req/s achieved (offered 168780), 843898 samples, errors 0, incomplete 0
+  latency ms: p50 0.227  p90 0.294  p99 0.496  p99.9 1.094  max 2.818
+  generator: cpu 54.4% of the machine, busiest loop 74.0%, node busy 54.0%, timer lag p99 0.083 ms, backend io_uring
+  node 0: 75950 req/s, node cpu 49.1%, generator cpu 49.9%
+  node 1: 75951 req/s, node cpu 42.1%, generator cpu 46.3%
+  151901 req/s achieved (offered 151902), 2278528 samples, errors 0, incomplete 0
+  latency ms: p50 0.222  p90 0.275  p99 0.426  p99.9 2.699  max 16.777
+  generator: cpu 49.9% of the machine, busiest loop 67.8%, node busy 49.1%, timer lag p99 0.064 ms, backend io_uring
+  node 0: 84390 req/s, node cpu 53.4%, generator cpu 53.0%
+  node 1: 84390 req/s, node cpu 45.7%, generator cpu 49.5%
+  168780 req/s achieved (offered 168780), 2531701 samples, errors 0, incomplete 0
+  latency ms: p50 0.235  p90 0.301  p99 0.531  p99.9 151.126  max 211.026
+  generator: cpu 53.0% of the machine, busiest loop 72.0%, node busy 53.4%, timer lag p99 0.074 ms, backend io_uring
+  node 0: 25000 req/s, node cpu 16.7%, generator cpu 18.0%
+  node 1: 25000 req/s, node cpu 12.8%, generator cpu 15.4%
+  50000 req/s achieved (offered 50000), 750006 samples, errors 0, incomplete 0
+  latency ms: p50 0.210  p90 0.261  p99 0.347  p99.9 0.948  max 6.533
+  generator: cpu 18.0% of the machine, busiest loop 21.0%, node busy 16.7%, timer lag p99 0.038 ms, backend io_uring
+  node 0: 82233 req/s, node cpu 39.7%, generator cpu 33.2%
+  node 1: 81593 req/s, node cpu 34.9%, generator cpu 28.2%
+  163827 req/s achieved (offered 0), 2457401 samples, errors 0, incomplete 0
+  latency ms: p50 0.210  p90 1.229  p99 2.337  p99.9 209.453  max 420.217
+  generator: cpu 33.2% of the machine, busiest loop 42.0%, node busy 39.7%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 84258 req/s, node cpu 42.6%, generator cpu 35.9%
+  node 1: 91586 req/s, node cpu 41.0%, generator cpu 33.4%
+  175844 req/s achieved (offered 0), 527533 samples, errors 0, incomplete 0
+  latency ms: p50 0.989  p90 1.711  p99 2.007  p99.9 208.929  max 213.123
+  generator: cpu 35.9% of the machine, busiest loop 46.1%, node busy 42.6%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 83612 req/s, node cpu 44.9%, generator cpu 43.1%
+  node 1: 83669 req/s, node cpu 37.6%, generator cpu 37.5%
+  167282 req/s achieved (offered 184637), 923194 samples, errors 0, incomplete 0
+  latency ms: p50 203.424  p90 747.110  p99 1218.445  p99.9 1561.330  max 1762.656
+  generator: cpu 43.1% of the machine, busiest loop 58.8%, node busy 44.9%, timer lag p99 0.096 ms, backend io_uring
+  node 0: 74997 req/s, node cpu 46.3%, generator cpu 45.8%
+  node 1: 75000 req/s, node cpu 38.7%, generator cpu 40.4%
+  149997 req/s achieved (offered 150000), 749991 samples, errors 0, incomplete 0
+  latency ms: p50 0.236  p90 62.521  p99 152.830  p99.9 169.869  max 186.384
+  generator: cpu 45.8% of the machine, busiest loop 63.6%, node busy 46.3%, timer lag p99 0.096 ms, backend io_uring
+sweep: 150000 req/s fails: p99 152830 us > 1000 us
+  node 0: 52499 req/s, node cpu 34.8%, generator cpu 35.3%
+  node 1: 52500 req/s, node cpu 26.7%, generator cpu 30.7%
+  104999 req/s achieved (offered 105000), 525007 samples, errors 0, incomplete 0
+  latency ms: p50 0.217  p90 0.533  p99 0.891  p99.9 1.318  max 2.451
+  generator: cpu 35.3% of the machine, busiest loop 46.7%, node busy 34.8%, timer lag p99 0.057 ms, backend io_uring
+  node 0: 63818 req/s, node cpu 39.8%, generator cpu 40.3%
+  node 1: 63778 req/s, node cpu 32.9%, generator cpu 35.4%
+  127596 req/s achieved (offered 127500), 637491 samples, errors 0, incomplete 0
+  latency ms: p50 0.221  p90 1.958  p99 3.865  p99.9 119.472  max 141.165
+  generator: cpu 40.3% of the machine, busiest loop 54.7%, node busy 39.8%, timer lag p99 0.063 ms, backend io_uring
+sweep: 127500 req/s fails: p99 3865 us > 1000 us
+  node 0: 58124 req/s, node cpu 37.6%, generator cpu 38.5%
+  node 1: 58125 req/s, node cpu 30.2%, generator cpu 33.4%
+  116249 req/s achieved (offered 116250), 581253 samples, errors 0, incomplete 0
+  latency ms: p50 0.205  p90 0.256  p99 0.350  p99.9 0.752  max 2.404
+  generator: cpu 38.5% of the machine, busiest loop 53.0%, node busy 37.6%, timer lag p99 0.063 ms, backend io_uring
+  node 0: 60936 req/s, node cpu 39.8%, generator cpu 40.0%
+  node 1: 60939 req/s, node cpu 31.6%, generator cpu 34.7%
+  121874 req/s achieved (offered 121875), 609367 samples, errors 0, incomplete 0
+  latency ms: p50 0.209  p90 0.269  p99 0.378  p99.9 0.957  max 3.140
+  generator: cpu 40.0% of the machine, busiest loop 56.0%, node busy 39.8%, timer lag p99 0.069 ms, backend io_uring
+  node 0: 54844 req/s, node cpu 35.1%, generator cpu 36.2%
+  node 1: 54844 req/s, node cpu 28.7%, generator cpu 31.8%
+  109688 req/s achieved (offered 109688), 1645322 samples, errors 0, incomplete 0
+  latency ms: p50 0.202  p90 0.266  p99 0.658  p99.9 1.610  max 5.112
+  generator: cpu 36.2% of the machine, busiest loop 47.9%, node busy 35.1%, timer lag p99 0.054 ms, backend io_uring
+  node 0: 58901 req/s, node cpu 36.6%, generator cpu 36.9%
+  node 1: 59129 req/s, node cpu 30.1%, generator cpu 30.5%
+  118031 req/s achieved (offered 121875), 1828119 samples, errors 0, incomplete 0
+  latency ms: p50 0.236  p90 900.202  p99 1425.015  p99.9 1721.762  max 1812.988
+  generator: cpu 36.9% of the machine, busiest loop 49.3%, node busy 36.6%, timer lag p99 0.062 ms, backend io_uring
+  node 0: 12447 req/s, node cpu 36.8%, generator cpu 24.7%
+  node 1: 12542 req/s, node cpu 27.5%, generator cpu 17.8%
+  24989 req/s achieved (offered 0), 74967 samples, errors 0, incomplete 0
+  latency ms: p50 7.680  p90 7.959  p99 8.360  p99.9 15.737  max 26.821
+  generator: cpu 24.7% of the machine, busiest loop 1.3%, node busy 36.8%, timer lag p99 0.000 ms, backend threads
+  node 0: 12594 req/s, node cpu 37.6%, generator cpu 25.5%
+  node 1: 12717 req/s, node cpu 28.2%, generator cpu 17.9%
+  25311 req/s achieved (offered 26238), 131190 samples, errors 0, incomplete 0
+  latency ms: p50 231.604  p90 303.301  p99 325.059  p99.9 328.991  max 329.515
+  generator: cpu 25.5% of the machine, busiest loop 1.3%, node busy 37.6%, timer lag p99 16.548 ms, backend threads
+  node 0: 10992 req/s, node cpu 29.4%, generator cpu 12.2%
+  node 1: 10994 req/s, node cpu 31.8%, generator cpu 0.0%
+  21986 req/s achieved (offered 22000), 110000 samples, errors 0, incomplete 0
+  latency ms: p50 0.512  p90 0.636  p99 0.993  p99.9 4.219  max 15.942
+  generator: cpu 12.2% of the machine, busiest loop 1.5%, node busy 31.8%, timer lag p99 0.106 ms, backend threads
+  node 0: 12379 req/s, node cpu 36.6%, generator cpu 24.2%
+  node 1: 12483 req/s, node cpu 27.3%, generator cpu 17.5%
+  24861 req/s achieved (offered 26026), 130130 samples, errors 0, incomplete 0
+  latency ms: p50 203.162  p90 304.349  p99 350.749  p99.9 355.205  max 356.516
+  generator: cpu 24.2% of the machine, busiest loop 1.3%, node busy 36.6%, timer lag p99 17.760 ms, backend threads
+sweep: 26026 req/s fails: achieved 24861 < 98% of 26026
+  node 0: 11998 req/s, node cpu 41.9%, generator cpu 0.0%
+  node 1: 11998 req/s, node cpu 31.7%, generator cpu 2.4%
+  23996 req/s achieved (offered 24013), 120064 samples, errors 0, incomplete 0
+  latency ms: p50 0.546  p90 0.697  p99 1.330  p99.9 5.370  max 15.598
+  generator: cpu 2.4% of the machine, busiest loop 1.6%, node busy 41.9%, timer lag p99 0.128 ms, backend threads
+  node 0: 12501 req/s, node cpu 40.2%, generator cpu 0.9%
+  node 1: 12503 req/s, node cpu 32.7%, generator cpu 5.8%
+  25004 req/s achieved (offered 25020), 125100 samples, errors 0, incomplete 0
+  latency ms: p50 0.632  p90 0.906  p99 1.321  p99.9 3.549  max 14.819
+  generator: cpu 5.8% of the machine, busiest loop 1.7%, node busy 40.2%, timer lag p99 0.133 ms, backend threads
+  node 0: 11256 req/s, node cpu 35.5%, generator cpu 20.0%
+  node 1: 11257 req/s, node cpu 29.1%, generator cpu 8.5%
+  22513 req/s achieved (offered 22518), 337770 samples, errors 0, incomplete 0
+  latency ms: p50 0.511  p90 0.627  p99 0.893  p99.9 2.022  max 16.974
+  generator: cpu 20.0% of the machine, busiest loop 1.3%, node busy 35.5%, timer lag p99 0.097 ms, backend threads
+  node 0: 12507 req/s, node cpu 39.9%, generator cpu 25.9%
+  node 1: 12507 req/s, node cpu 32.7%, generator cpu 4.9%
+  25014 req/s achieved (offered 25020), 375300 samples, errors 0, incomplete 0
+  latency ms: p50 0.637  p90 1.078  p99 3.557  p99.9 3.979  max 1023.934
+  generator: cpu 25.9% of the machine, busiest loop 1.5%, node busy 39.9%, timer lag p99 0.111 ms, backend threads
+  node 0: 4800 req/s, node cpu 59.3%, generator cpu 55.8%
+  node 1: 4947 req/s, node cpu 52.7%, generator cpu 50.7%
+  9747 req/s achieved (offered 0), 146206 samples, errors 0, incomplete 0
+  latency ms: p50 14.483  p90 40.960  p99 55.247  p99.9 63.930  max 75.104
+  generator: cpu 55.8% of the machine, busiest loop 2.7%, node busy 59.3%, timer lag p99 0.000 ms, backend threads
+  node 0: 4509 req/s, node cpu 43.0%, generator cpu 40.1%
+  node 1: 4604 req/s, node cpu 38.4%, generator cpu 34.9%
+  9113 req/s achieved (offered 0), 136693 samples, errors 0, incomplete 0
+  latency ms: p50 6.812  p90 57.180  p99 84.214  p99.9 92.471  max 100.598
+  generator: cpu 40.1% of the machine, busiest loop 1.9%, node busy 43.0%, timer lag p99 0.000 ms, backend threads
+  node 0: 87217 req/s, node cpu 45.1%, generator cpu 37.6%
+  node 1: 79263 req/s, node cpu 35.0%, generator cpu 29.3%
+  166480 req/s achieved (offered 0), 499441 samples, errors 0, incomplete 0
+  latency ms: p50 0.205  p90 0.979  p99 1.262  p99.9 208.667  max 211.157
+  generator: cpu 37.6% of the machine, busiest loop 46.4%, node busy 45.1%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 83325 req/s, node cpu 49.5%, generator cpu 49.6%
+  node 1: 84064 req/s, node cpu 41.6%, generator cpu 44.2%
+  167388 req/s achieved (offered 174804), 874029 samples, errors 0, incomplete 0
+  latency ms: p50 0.258  p90 177.865  p99 363.332  p99.9 517.210  max 703.070
+  generator: cpu 49.6% of the machine, busiest loop 67.3%, node busy 49.5%, timer lag p99 0.083 ms, backend io_uring
+  node 0: 74999 req/s, node cpu 48.2%, generator cpu 48.0%
+  node 1: 75001 req/s, node cpu 39.7%, generator cpu 42.4%
+  150000 req/s achieved (offered 150000), 749991 samples, errors 0, incomplete 0
+  latency ms: p50 0.220  p90 0.282  p99 0.411  p99.9 1.043  max 3.531
+  generator: cpu 48.0% of the machine, busiest loop 64.9%, node busy 48.2%, timer lag p99 0.077 ms, backend io_uring
+  node 0: 84983 req/s, node cpu 50.9%, generator cpu 52.3%
+  node 1: 85476 req/s, node cpu 44.8%, generator cpu 46.7%
+  170458 req/s achieved (offered 173564), 867824 samples, errors 0, incomplete 0
+  latency ms: p50 0.254  p90 0.720  p99 241.435  p99.9 391.381  max 510.919
+  generator: cpu 52.3% of the machine, busiest loop 72.7%, node busy 50.9%, timer lag p99 0.086 ms, backend io_uring
+sweep: 173564 req/s fails: p99 241435 us > 1000 us
+  node 0: 80890 req/s, node cpu 50.1%, generator cpu 50.7%
+  node 1: 80890 req/s, node cpu 43.3%, generator cpu 45.6%
+  161780 req/s achieved (offered 161782), 808910 samples, errors 0, incomplete 0
+  latency ms: p50 0.230  p90 0.289  p99 0.415  p99.9 1.246  max 2.732
+  generator: cpu 50.7% of the machine, busiest loop 69.7%, node busy 50.1%, timer lag p99 0.073 ms, backend io_uring
+  node 0: 83835 req/s, node cpu 52.8%, generator cpu 53.1%
+  node 1: 83836 req/s, node cpu 44.1%, generator cpu 46.8%
+  167671 req/s achieved (offered 167673), 838368 samples, errors 0, incomplete 0
+  latency ms: p50 0.237  p90 0.317  p99 0.488  p99.9 1.014  max 2.605
+  generator: cpu 53.1% of the machine, busiest loop 73.9%, node busy 52.8%, timer lag p99 0.084 ms, backend io_uring
+  node 0: 75453 req/s, node cpu 48.7%, generator cpu 48.6%
+  node 1: 75453 req/s, node cpu 40.5%, generator cpu 43.0%
+  150906 req/s achieved (offered 150906), 2263592 samples, errors 0, incomplete 0
+  latency ms: p50 0.224  p90 0.281  p99 0.398  p99.9 3.092  max 14.074
+  generator: cpu 48.6% of the machine, busiest loop 65.6%, node busy 48.7%, timer lag p99 0.064 ms, backend io_uring
+  node 0: 83836 req/s, node cpu 51.8%, generator cpu 52.8%
+  node 1: 83836 req/s, node cpu 44.3%, generator cpu 46.8%
+  167673 req/s achieved (offered 167673), 2515082 samples, errors 0, incomplete 0
+  latency ms: p50 0.232  p90 0.295  p99 0.460  p99.9 1.385  max 2.714
+  generator: cpu 52.8% of the machine, busiest loop 72.9%, node busy 51.8%, timer lag p99 0.078 ms, backend io_uring
+  node 0: 4283 req/s, node cpu 52.5%, generator cpu 48.2%
+  node 1: 4411 req/s, node cpu 46.5%, generator cpu 44.4%
+  8694 req/s achieved (offered 0), 130412 samples, errors 0, incomplete 0
+  latency ms: p50 11.977  p90 53.903  p99 86.245  p99.9 95.486  max 105.251
+  generator: cpu 48.2% of the machine, busiest loop 2.3%, node busy 52.5%, timer lag p99 0.000 ms, backend threads
+  node 0: 3598 req/s, node cpu 34.7%, generator cpu 30.9%
+  node 1: 3595 req/s, node cpu 29.3%, generator cpu 26.3%
+  7193 req/s achieved (offered 0), 107894 samples, errors 0, incomplete 0
+  latency ms: p50 3.406  p90 79.036  p99 89.588  p99.9 95.748  max 103.481
+  generator: cpu 30.9% of the machine, busiest loop 1.5%, node busy 34.7%, timer lag p99 0.000 ms, backend threads
+  node 0: 3460 req/s, node cpu 42.1%, generator cpu 33.8%
+  node 1: 3470 req/s, node cpu 36.7%, generator cpu 28.0%
+  6930 req/s achieved (offered 0), 103945 samples, errors 0, incomplete 0
+  latency ms: p50 5.628  p90 84.017  p99 96.666  p99.9 104.464  max 117.899
+  generator: cpu 33.8% of the machine, busiest loop 1.9%, node busy 42.1%, timer lag p99 0.000 ms, backend threads
+  node 0: 4710 req/s, node cpu 46.3%, generator cpu 42.9%
+  node 1: 4878 req/s, node cpu 40.6%, generator cpu 37.4%
+  9588 req/s achieved (offered 0), 143820 samples, errors 0, incomplete 0
+  latency ms: p50 7.885  p90 51.773  p99 79.561  p99.9 89.981  max 103.023
+  generator: cpu 42.9% of the machine, busiest loop 2.0%, node busy 46.3%, timer lag p99 0.000 ms, backend threads
+  node 0: 4411 req/s, node cpu 54.3%, generator cpu 52.2%
+  node 1: 4548 req/s, node cpu 48.6%, generator cpu 46.1%
+  8960 req/s achieved (offered 0), 134393 samples, errors 0, incomplete 0
+  latency ms: p50 11.665  p90 51.511  p99 77.857  p99.9 93.651  max 104.333
+  generator: cpu 52.2% of the machine, busiest loop 2.4%, node busy 54.3%, timer lag p99 0.000 ms, backend threads
+  node 0: 4275 req/s, node cpu 40.9%, generator cpu 34.1%
+  node 1: 4453 req/s, node cpu 36.9%, generator cpu 34.1%
+  8728 req/s achieved (offered 0), 130915 samples, errors 0, incomplete 0
+  latency ms: p50 6.386  p90 67.830  p99 85.000  p99.9 92.013  max 99.549
+  generator: cpu 34.1% of the machine, busiest loop 1.8%, node busy 40.9%, timer lag p99 0.000 ms, backend threads
+  node 0: 88256 req/s, node cpu 48.5%, generator cpu 41.6%
+  node 1: 78450 req/s, node cpu 37.6%, generator cpu 31.2%
+  166707 req/s achieved (offered 0), 500120 samples, errors 0, incomplete 0
+  latency ms: p50 0.220  p90 0.643  p99 1.310  p99.9 1.979  max 212.206
+  generator: cpu 41.6% of the machine, busiest loop 57.4%, node busy 48.5%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 87439 req/s, node cpu 47.6%, generator cpu 49.7%
+  node 1: 87439 req/s, node cpu 43.0%, generator cpu 46.3%
+  174878 req/s achieved (offered 175042), 875210 samples, errors 0, incomplete 0
+  latency ms: p50 0.263  p90 11.231  p99 168.821  p99.9 203.162  max 217.055
+  generator: cpu 49.7% of the machine, busiest loop 66.6%, node busy 47.6%, timer lag p99 0.069 ms, backend io_uring
+  node 0: 74999 req/s, node cpu 45.7%, generator cpu 49.0%
+  node 1: 75000 req/s, node cpu 42.2%, generator cpu 45.5%
+  150000 req/s achieved (offered 150000), 750000 samples, errors 0, incomplete 0
+  latency ms: p50 0.236  p90 0.307  p99 0.401  p99.9 0.773  max 1.784
+  generator: cpu 49.0% of the machine, busiest loop 65.8%, node busy 45.7%, timer lag p99 0.059 ms, backend io_uring
+  node 0: 86812 req/s, node cpu 52.1%, generator cpu 52.7%
+  node 1: 86813 req/s, node cpu 45.0%, generator cpu 49.1%
+  173624 req/s achieved (offered 173790), 868949 samples, errors 0, incomplete 0
+  latency ms: p50 0.260  p90 0.525  p99 160.563  p99.9 202.375  max 210.239
+  generator: cpu 52.7% of the machine, busiest loop 71.9%, node busy 52.1%, timer lag p99 0.092 ms, backend io_uring
+sweep: 173790 req/s fails: p99 160563 us > 5000 us
+  node 0: 80947 req/s, node cpu 51.5%, generator cpu 52.3%
+  node 1: 80947 req/s, node cpu 43.8%, generator cpu 48.1%
+  161894 req/s achieved (offered 161895), 809474 samples, errors 0, incomplete 0
+  latency ms: p50 0.244  p90 0.397  p99 0.883  p99.9 1.616  max 3.199
+  generator: cpu 52.3% of the machine, busiest loop 72.9%, node busy 51.5%, timer lag p99 0.081 ms, backend io_uring
+  node 0: 83939 req/s, node cpu 52.5%, generator cpu 52.6%
+  node 1: 83940 req/s, node cpu 43.3%, generator cpu 47.6%
+  167878 req/s achieved (offered 167843), 839217 samples, errors 0, incomplete 0
+  latency ms: p50 0.272  p90 0.790  p99 141.820  p99.9 200.671  max 213.385
+  generator: cpu 52.6% of the machine, busiest loop 72.6%, node busy 52.5%, timer lag p99 0.086 ms, backend io_uring
+sweep: 167843 req/s fails: p99 141820 us > 5000 us
+  node 0: 72853 req/s, node cpu 46.8%, generator cpu 47.5%
+  node 1: 72853 req/s, node cpu 39.4%, generator cpu 44.1%
+  145706 req/s achieved (offered 145706), 2185592 samples, errors 0, incomplete 0
+  latency ms: p50 0.219  p90 0.285  p99 0.557  p99.9 6.095  max 18.203
+  generator: cpu 47.5% of the machine, busiest loop 63.9%, node busy 46.8%, timer lag p99 0.062 ms, backend io_uring
+  node 0: 80947 req/s, node cpu 51.1%, generator cpu 51.7%
+  node 1: 80948 req/s, node cpu 44.5%, generator cpu 48.1%
+  161895 req/s achieved (offered 161895), 2428424 samples, errors 0, incomplete 0
+  latency ms: p50 0.231  p90 0.302  p99 1.986  p99.9 4.424  max 6.545
+  generator: cpu 51.7% of the machine, busiest loop 70.7%, node busy 51.1%, timer lag p99 0.067 ms, backend io_uring
+  node 0: 25000 req/s, node cpu 19.9%, generator cpu 18.1%
+  node 1: 25000 req/s, node cpu 12.9%, generator cpu 15.1%
+  50000 req/s achieved (offered 50000), 750006 samples, errors 0, incomplete 0
+  latency ms: p50 0.227  p90 0.308  p99 0.463  p99.9 2.427  max 8.438
+  generator: cpu 18.1% of the machine, busiest loop 21.1%, node busy 19.9%, timer lag p99 0.041 ms, backend io_uring
+  node 0: 80110 req/s, node cpu 39.8%, generator cpu 33.0%
+  node 1: 77493 req/s, node cpu 33.1%, generator cpu 27.2%
+  157603 req/s achieved (offered 0), 2364049 samples, errors 0, incomplete 0
+  latency ms: p50 0.262  p90 1.298  p99 3.344  p99.9 210.502  max 270.533
+  generator: cpu 33.0% of the machine, busiest loop 44.6%, node busy 39.8%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 3665 req/s, node cpu 43.3%, generator cpu 39.6%
+  node 1: 3649 req/s, node cpu 36.2%, generator cpu 33.8%
+  7314 req/s achieved (offered 0), 109707 samples, errors 0, incomplete 0
+  latency ms: p50 2.200  p90 100.205  p99 109.183  p99.9 113.181  max 117.768
+  generator: cpu 39.6% of the machine, busiest loop 2.0%, node busy 43.3%, timer lag p99 0.000 ms, backend threads
+  node 0: 3982 req/s, node cpu 36.0%, generator cpu 32.4%
+  node 1: 4060 req/s, node cpu 31.1%, generator cpu 26.8%
+  8042 req/s achieved (offered 0), 120625 samples, errors 0, incomplete 0
+  latency ms: p50 1.809  p90 91.226  p99 99.418  p99.9 103.940  max 108.528
+  generator: cpu 32.4% of the machine, busiest loop 1.6%, node busy 36.0%, timer lag p99 0.000 ms, backend threads
+  node 0: 3724 req/s, node cpu 43.4%, generator cpu 41.1%
+  node 1: 3679 req/s, node cpu 37.4%, generator cpu 33.7%
+  7403 req/s achieved (offered 0), 111044 samples, errors 0, incomplete 0
+  latency ms: p50 2.288  p90 98.632  p99 108.790  p99.9 113.181  max 116.392
+  generator: cpu 41.1% of the machine, busiest loop 1.9%, node busy 43.4%, timer lag p99 0.000 ms, backend threads
+  node 0: 3999 req/s, node cpu 35.5%, generator cpu 31.6%
+  node 1: 4020 req/s, node cpu 30.5%, generator cpu 26.7%
+  8019 req/s achieved (offered 0), 120283 samples, errors 0, incomplete 0
+  latency ms: p50 1.713  p90 91.488  p99 99.877  p99.9 103.940  max 108.397
+  generator: cpu 31.6% of the machine, busiest loop 1.6%, node busy 35.5%, timer lag p99 0.000 ms, backend threads
+  node 0: 3719 req/s, node cpu 44.9%, generator cpu 38.2%
+  node 1: 3786 req/s, node cpu 37.5%, generator cpu 35.2%
+  7505 req/s achieved (offered 0), 112576 samples, errors 0, incomplete 0
+  latency ms: p50 2.220  p90 98.173  p99 107.610  p99.9 112.787  max 116.589
+  generator: cpu 38.2% of the machine, busiest loop 2.1%, node busy 44.9%, timer lag p99 0.000 ms, backend threads
+  node 0: 4124 req/s, node cpu 37.8%, generator cpu 33.3%
+  node 1: 4087 req/s, node cpu 30.9%, generator cpu 27.6%
+  8211 req/s achieved (offered 0), 123167 samples, errors 0, incomplete 0
+  latency ms: p50 1.755  p90 90.046  p99 98.632  p99.9 103.743  max 1107.296
+  generator: cpu 33.3% of the machine, busiest loop 1.7%, node busy 37.8%, timer lag p99 0.000 ms, backend threads
+  node 0: 83989 req/s, node cpu 41.9%, generator cpu 34.7%
+  node 1: 83351 req/s, node cpu 36.2%, generator cpu 28.8%
+  167340 req/s achieved (offered 0), 2510100 samples, errors 0, incomplete 0
+  latency ms: p50 0.218  p90 1.117  p99 2.636  p99.9 210.239  max 825.229
+  generator: cpu 34.7% of the machine, busiest loop 45.0%, node busy 41.9%, timer lag p99 0.000 ms, backend io_uring
+  node 0: 3845 req/s, node cpu 47.9%, generator cpu 34.9%
+  node 1: 3965 req/s, node cpu 40.9%, generator cpu 37.4%
+  7810 req/s achieved (offered 0), 117150 samples, errors 0, incomplete 0
+  latency ms: p50 3.363  p90 92.406  p99 109.183  p99.9 119.079  max 135.922
+  generator: cpu 37.4% of the machine, busiest loop 2.1%, node busy 47.9%, timer lag p99 0.000 ms, backend threads
+  node 0: 4213 req/s, node cpu 40.6%, generator cpu 36.1%
+  node 1: 4381 req/s, node cpu 35.3%, generator cpu 27.7%
+  8594 req/s achieved (offered 0), 128906 samples, errors 0, incomplete 0
+  latency ms: p50 2.875  p90 84.673  p99 99.942  p99.9 109.117  max 125.501
+  generator: cpu 36.1% of the machine, busiest loop 1.8%, node busy 40.6%, timer lag p99 0.000 ms, backend threads
+  node 0: 3793 req/s, node cpu 47.8%, generator cpu 43.7%
+  node 1: 3909 req/s, node cpu 39.8%, generator cpu 37.8%
+  7702 req/s achieved (offered 0), 115528 samples, errors 0, incomplete 0
+  latency ms: p50 3.260  p90 94.306  p99 110.494  p99.9 121.111  max 129.827
+  generator: cpu 43.7% of the machine, busiest loop 2.2%, node busy 47.8%, timer lag p99 0.000 ms, backend threads
+  node 0: 4188 req/s, node cpu 40.8%, generator cpu 36.9%
+  node 1: 4319 req/s, node cpu 34.0%, generator cpu 31.4%
+  8506 req/s achieved (offered 0), 127593 samples, errors 0, incomplete 0
+  latency ms: p50 2.705  p90 85.983  p99 101.057  p99.9 109.445  max 124.846
+  generator: cpu 36.9% of the machine, busiest loop 1.7%, node busy 40.8%, timer lag p99 0.000 ms, backend threads
+  node 0: 3841 req/s, node cpu 47.7%, generator cpu 43.6%
+  node 1: 4020 req/s, node cpu 41.3%, generator cpu 39.0%
+  7861 req/s achieved (offered 0), 117922 samples, errors 0, incomplete 0
+  latency ms: p50 3.457  p90 92.078  p99 108.986  p99.9 117.834  max 133.366
+  generator: cpu 43.6% of the machine, busiest loop 2.2%, node busy 47.7%, timer lag p99 0.000 ms, backend threads
+  node 0: 4209 req/s, node cpu 39.8%, generator cpu 36.7%
+  node 1: 4326 req/s, node cpu 34.9%, generator cpu 31.8%
+  8535 req/s achieved (offered 0), 128024 samples, errors 0, incomplete 0
+  latency ms: p50 2.908  p90 85.983  p99 101.450  p99.9 111.215  max 123.404
+  generator: cpu 36.7% of the machine, busiest loop 1.8%, node busy 39.8%, timer lag p99 0.000 ms, backend threads

@@ -1,0 +1,10 @@
+# batch A (droplet set 1, build 21cbbfc): fixed rates at 64 and 256 connections with network
+# counters, to place the S1 tail: epoll and io_uring as committed (three loops, unpinned), epoll
+# kept off the private NIC's receive-interrupt CPU (2) and off both of its interrupt CPUs (2, 3),
+# and the two competitors
+hyper hyper FR
+epoll simoom FR SIMOOM_EXTRA="--stats-s 5"
+uring simoom-uring FR SIMOOM_EXTRA="--stats-s 5"
+epoll-013 simoom FR SIMOOM_EXTRA="--stats-s 5" SIMOOM_TASKSET=0,1,3
+may-minihttp may-minihttp FR
+epoll-01 simoom FR SIMOOM_EXTRA="--stats-s 5" SIMOOM_TASKSET=0,1

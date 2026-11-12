@@ -1,0 +1,8 @@
+==> 11:42:01 round 3: hyper (hyper: S1) 
+==> 11:48:04 round 3: epoll (simoom: S1) SIMOOM_EXTRA="--stats-s 5"
+==> 11:54:01 round 3: uring (simoom-uring: S1) SIMOOM_EXTRA="--stats-s 5"
+==> 11:59:41 round 3: may-minihttp (may-minihttp: S1) 
+==> 12:05:39 round 3: epoll-old (simoom: S1) SIMOOM_EXTRA="--stats-s 5" SIMOOM_BIN=/root/simoom-server-old
+==> 12:11:29 round 3: uring-old (simoom-uring: S1) SIMOOM_EXTRA="--stats-s 5" SIMOOM_BIN=/root/simoom-server-old
+==> 12:17:23 ab done
+AB DONE 2026-11-12T12:17:23Z

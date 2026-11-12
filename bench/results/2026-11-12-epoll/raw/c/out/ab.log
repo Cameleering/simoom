@@ -1,0 +1,8 @@
+==> 10:28:18 round 1: epoll-reg (simoom: S3,S5,S7,S7H,S8,CPU) SIMOOM_EXTRA="--stats-s 5"
+==> 10:36:54 round 1: epoll-old-reg (simoom: S3,S5,S7,S7H,S8,CPU) SIMOOM_EXTRA="--stats-s 5" SIMOOM_BIN=/root/simoom-server-old
+==> 10:45:53 round 1: uring-reg (simoom-uring: S3,S5,S7,S7H,S8,CPU) SIMOOM_EXTRA="--stats-s 5"
+==> 10:54:28 round 1: uring-old-reg (simoom-uring: S3,S5,S7,S7H,S8,CPU) SIMOOM_EXTRA="--stats-s 5" SIMOOM_BIN=/root/simoom-server-old
+==> 11:03:04 round 1: epoll-t4 (simoom: S7H) SIMOOM_EXTRA="--stats-s 5 --threads 4"
+==> 11:05:13 round 1: uring-t4 (simoom-uring: S7H) SIMOOM_EXTRA="--stats-s 5 --threads 4"
+==> 11:07:21 ab done
+AB DONE 2026-11-12T11:07:21Z

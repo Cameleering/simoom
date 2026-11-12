@@ -1,0 +1,6 @@
+2026-11-12T10:36:54Z round=1 variant=epoll-reg
+2026-11-12T10:45:53Z round=1 variant=epoll-old-reg
+2026-11-12T10:54:28Z round=1 variant=uring-reg
+2026-11-12T11:03:04Z round=1 variant=uring-old-reg
+2026-11-12T11:05:13Z round=1 variant=epoll-t4
+2026-11-12T11:07:21Z round=1 variant=uring-t4
