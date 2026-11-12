@@ -287,13 +287,14 @@ fn main() {
         for (i, (l, p)) in s.runtime.loops.iter().zip(last.runtime.loops.iter()).enumerate() {
             let d = |a: u64, b: u64| a.saturating_sub(b);
             line.push_str(&format!(
-                " loop{i}=active:{},recv:{},send:{},waits:{},sleeps:{},events:{}",
+                " loop{i}=active:{},recv:{},send:{},waits:{},sleeps:{},events:{},spins:{}",
                 l.active,
                 d(l.driver.recv_calls, p.driver.recv_calls),
                 d(l.driver.send_calls, p.driver.send_calls),
                 d(l.driver.waits, p.driver.waits),
                 d(l.driver.sleeps, p.driver.sleeps),
-                d(l.driver.os_events, p.driver.os_events)
+                d(l.driver.os_events, p.driver.os_events),
+                d(l.driver.spin_polls, p.driver.spin_polls)
             ));
         }
         eprintln!("{line}");

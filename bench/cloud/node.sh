@@ -10,12 +10,22 @@
 #   node.sh pss-begin / pss-end NAME       PEAK line: highest summed PSS while sampling, cgroup peak
 #   node.sh idle-base                      remember the server's PSS before the idle test
 #   node.sh established                    established connections on port 8080
+#   node.sh net-begin TAG SECS / net-end TAG
+#                                          NET line: retransmits, drops, softirqs per CPU and
+#                                          where the server's threads ran (bench/cloud/ab.sh FR)
 #   node.sh idle NAME CONNS                IDLE line: PSS and cgroup memory with the connections open
 set -euo pipefail
 SRV=/root/simoom/bench/competitors/server.sh
 CG=/sys/fs/cgroup/system.slice/bench-server.service
 W=/root/node
 mkdir -p $W
+# one line of numbers each, for net-begin and net-end: softnet drops and squeezes summed over CPUs
+# (hex in the file), NET_RX softirqs per CPU, the private NIC's receive drops and misses, and
+# ksoftirqd's CPU ticks per CPU
+softnet() { local d=0 s=0 a b c; while read -r a b c _; do d=$((d + 16#$b)); s=$((s + 16#$c)); done < /proc/net/softnet_stat; echo "$d $s"; }
+netrx() { awk '/NET_RX:/ {for (i = 2; i <= NF; i++) printf "%s ", $i; print ""}' /proc/softirqs; }
+nicdrop() { local l; l=$(ip -s -s link show dev eth1 2>/dev/null | awk 'f == 1 {print $4, $5; exit} /RX:/ {f = 1}'); echo "${l:-0 0}"; }
+ksoft() { local c; for c in $(seq 0 $(( $(nproc) - 1 ))); do p=$(pgrep -x "ksoftirqd/$c" | head -1); [ -n "$p" ] && awk '{printf "%d ", $14 + $15}' /proc/$p/stat || printf '0 '; done; echo; }
 # tcpstat FIELD...: the named counters of the Tcp: line in /proc/net/snmp (retransmits, K4)
 tcpstat() { awk -v f="$*" '/^Tcp:/ { if (!h) { for (i = 2; i <= NF; i++) c[$i] = i; h = 1 } else { n = split(f, k, " "); o = ""; for (j = 1; j <= n; j++) o = o (j > 1 ? " " : "") $(c[k[j]]); print o } }' /proc/net/snmp; }
 
@@ -80,6 +90,30 @@ case "$1" in
     p0=$(cat $W/pss0); p=$($SRV pss); m=$($SRV mem | cut -d' ' -f1)
     e=$(ss -Htn state established '( sport = :8080 )' | wc -l)
     echo "IDLE server=$2 conns=$3 established=$e pss0_kb=$p0 pss_kb=$p mem_kb=$m per_conn_b=$(( (p - p0) * 1024 / (e > 0 ? e : 1) ))"
+    ;;
+  net-begin) # net-begin TAG SECS: counters for net-end, and per-CPU placement samples of the server's
+    # running threads (every 0.2 s for SECS) in the background
+    nstat -n >/dev/null 2>&1 || true
+    softnet > "$W/net-$2.softnet"
+    netrx > "$W/net-$2.rx"
+    nicdrop > "$W/net-$2.link"
+    ksoft > "$W/net-$2.ksoft"
+    pids=$(cat $CG/cgroup.procs 2>/dev/null | paste -sd, - || true); : > "$W/net-$2.place"
+    pkill -f "# place-$2\$" 2>/dev/null || true
+    nohup bash -c "for i in \$(seq \$(( $3 * 5 ))); do ps -L -o psr=,stat= -p '$pids' 2>/dev/null | awk '\$2 ~ /^R/ {print \$1}'; sleep 0.2; done # place-$2" > "$W/net-$2.place" 2>/dev/null < /dev/null &
+    ;;
+  net-end) # net-end TAG: NET line: TCP retransmits and losses, softnet drops and squeezes, NIC drops,
+    # NET_RX softirqs and ksoftirqd CPU ticks per CPU, and where the server's running threads were
+    # sampled (CPU:samples)
+    pkill -f "# place-$2\$" 2>/dev/null || true
+    n=$(nstat -z 2>/dev/null | awk '$1 ~ /^(TcpRetransSegs|TcpExtTCPLossProbes|TcpExtTCPTimeouts|TcpExtTCPRcvQDrop|TcpExtTCPBacklogDrop|TcpExtTCPLostRetransmit|TcpExtTCPDSACKRecv|TcpExtTCPSpuriousRTOs|TcpExtTCPOFOQueue|TcpInSegs|TcpOutSegs|TcpExtListenDrops|TcpExtTCPDelivered)$/ {sub(/^TcpExt/, ""); sub(/^Tcp/, ""); printf "%s=%s ", $1, $2}')
+    diffcols() { paste -d' ' "$1" <(cat) | awk '{n = NF / 2; o = ""; for (i = 1; i <= n; i++) o = o (i > 1 ? "," : "") ($(n + i) - $i); print o}'; }
+    sn=$(softnet | diffcols "$W/net-$2.softnet")
+    nd=$(nicdrop | diffcols "$W/net-$2.link")
+    rx=$(netrx | diffcols "$W/net-$2.rx")
+    ks=$(ksoft | diffcols "$W/net-$2.ksoft")
+    pl=$(sort -n "$W/net-$2.place" 2>/dev/null | uniq -c | awk '{printf "%s%s:%s", (NR > 1 ? "," : ""), $2, $1}')
+    echo "NET ${n}softnet_drop,squeeze=$sn nic_drop,missed=$nd netrx_cpu=$rx ksoftirqd_ticks=$ks running_cpu=$pl"
     ;;
   profile)
     # profile NAME SECS OUTDIR: perf call graphs of the server's processes, folded stacks for flame

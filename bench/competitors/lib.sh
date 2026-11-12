@@ -84,7 +84,15 @@ dispatch() {
     --print) printf '%q ' "${CMD[@]}"; echo ;;
     --binary) echo "$BIN" ;;
     --version) eval "$VERSION" 2>&1 | head -1 ;;
-    *) exec "${CMD[@]}" ;;
+    *)
+      # SIMOOM_TASKSET (bench/cloud/ab.sh variants, any server): run on these CPUs; "notrx" means
+      # every CPU that did less than half an even share of the NET_RX softirqs since boot
+      local cpus="${SIMOOM_TASKSET:-}"
+      if [ "$cpus" = notrx ]; then
+        cpus=$(awk '/NET_RX:/ {t = 0; for (i = 2; i <= NF; i++) t += $i; n = NF - 1; o = ""; for (i = 2; i <= NF; i++) if ($i * 2 * n < t) o = o (o == "" ? "" : ",") (i - 2); print o}' /proc/softirqs)
+      fi
+      if [ -n "$cpus" ]; then exec taskset -c "$cpus" "${CMD[@]}"; fi
+      exec "${CMD[@]}" ;;
   esac
 }
 

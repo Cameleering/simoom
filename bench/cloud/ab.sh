@@ -11,12 +11,17 @@
 #              S1R   SLO search at 256 connections only
 #              S9    1024 connections at S9_RATE req/s (195000), 30 s
 #              MP    256 connections at MP_RATE req/s for 15 s with per-CPU mpstat on the server
+#              FR    fixed rates: FR_PLAN, "CONNS:RATE,RATE ..." (64:100000,120000,140000
+#                    256:120000,140000,160000), FR_SECS (10) each, with NET lines from the
+#                    server and every load node (node.sh net-begin/net-end: retransmits,
+#                    softnet and NIC drops, softirqs per CPU, where the server's threads ran)
+#              S7H   S7's full and resumed handshakes only, S7H_REPS (3) times each
 #              S3 S5 S7 S8 CPU   as in campaign.sh (S7: full and resumed handshakes, S1 over TLS;
 #                    CPU: CPU time per request at 50k req/s, a RESULT line with metric=1)
 #            VAR=VALUE pairs go to the server's environment (server.sh passes SIMOOM_* on), for
 #            example SIMOOM_EXTRA="--no-balance --stats-s 5" (quote values with spaces).
 #   ROUNDS   rounds (default "1 2"); each round runs every line of SPEC in order
-# Output: /root/ab/out/results.txt (RESULT, SLO, STATS and MPSTAT lines tagged round= srv=
+# Output: /root/ab/out/results.txt (RESULT, SLO, STATS, MPSTAT and NET lines tagged round= srv=
 # variant= server=), progress.txt, run.log. A DONE line per (round, variant) makes a restart resume.
 set -uo pipefail
 ulimit -n 1048576 2>/dev/null || ulimit -n 65536
@@ -28,6 +33,9 @@ SPEC=${SPEC:-$A/spec}
 ROUNDS=${ROUNDS:-1 2}
 S9_RATE=${S9_RATE:-195000}
 MP_RATE=${MP_RATE:-130000}
+FR_PLAN=${FR_PLAN:-64:100000,120000,140000 256:120000,140000,160000}
+FR_SECS=${FR_SECS:-10}
+S7H_REPS=${S7H_REPS:-3}
 SB=/root/simoom/target/release/simoom-bench
 SRVSH=/root/simoom/bench/competitors/server.sh
 HINTS=/root/simoom/bench/cloud/hints.txt
@@ -37,7 +45,7 @@ SSH=(ssh -i $A/key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$A/
 on() { local h=$1; shift; "${SSH[@]}" "root@$h" "$@"; }
 log() { printf '==> %s %s\n' "$(date -u +%H:%M:%S)" "$*" | tee -a $OUT/ab.log >&2; }
 sb() { $SB "$@" 2>>$OUT/run.log; }
-rec() { sed -u "s/^\(RESULT\|SLO\|STATS\|MPSTAT\|FAILED\|VERSION\) /\1 $1 /" | grep -E '^(RESULT|SLO|STATS|MPSTAT|FAILED|VERSION) ' | tee -a $RES; }
+rec() { sed -u "s/^\(RESULT\|SLO\|STATS\|MPSTAT\|NET\|FAILED\|VERSION\) /\1 $1 /" | grep -E '^(RESULT|SLO|STATS|MPSTAT|NET|FAILED|VERSION) ' | tee -a $RES; }
 # campaign 3's lane settings: SWEEP_ONE at 64 and 1024 connections, SWEEP_LONG at 256
 SWEEP_LONG="--probe 3 --step-warmup 2 --step 5 --steps 5 --precision 0.04 --point-warmup 3 --point 20 --points 0.5,0.8,0.95,1,1"
 SWEEP_ONE="--probe 3 --step-warmup 2 --step 5 --steps 5 --precision 0.04 --point-warmup 3 --point 15 --points 0.9,1"
@@ -66,6 +74,21 @@ for r in $ROUNDS; do
           for c in $cl; do
             plan="$SWEEP_ONE"; [ $c = 256 ] && plan="$SWEEP_LONG"
             sb sweep --url "$url" --conns $c --agents "$AGENTS" $plan $(hint "$server" $c) --label "$tag scenario=S1 conns=$c" --out $OUT/hdr/r$r-$label-S1-c$c | rec ""
+          done ;;
+        FR)
+          for cr in $FR_PLAN; do
+            c=${cr%%:*}
+            for rate in $(echo "${cr#*:}" | tr ',' ' '); do
+              for h in $SRV $LOADS; do on "$h" "bash /root/simoom/bench/cloud/node.sh net-begin fr $((FR_SECS + 2))"; done
+              sb load --url "$url" --conns $c --rate $rate --agents "$AGENTS" --warmup 2 --duration $FR_SECS --label "$tag scenario=FR conns=$c offered=$rate" | rec ""
+              on "$SRV" "bash /root/simoom/bench/cloud/node.sh net-end fr" | sed "s/^NET /NET node=srv scenario=FR conns=$c offered=$rate /" | rec "$tag"
+              for h in $LOADS; do on "$h" "bash /root/simoom/bench/cloud/node.sh net-end fr" | sed "s/^NET /NET node=$h scenario=FR conns=$c offered=$rate /" | rec "$tag"; done
+            done
+          done ;;
+        S7H)
+          for i in $(seq $S7H_REPS); do
+            sb load --url "https://$SRV:8443/" "${CA[@]}" --new-conn --conns 192 --agents "$AGENTS" --warmup 3 --duration 15 --label "$tag scenario=S7 kind=full conns=192 phase=closed rep=$i" | rec ""
+            sb load --url "https://$SRV:8443/" "${CA[@]}" --new-conn --tls-resume --conns 192 --agents "$AGENTS" --warmup 3 --duration 15 --label "$tag scenario=S7 kind=resumed conns=192 phase=closed rep=$i" | rec ""
           done ;;
         S3)
           sb sweep --url "http://$SRV:8080/echo" --body-size 1024 --conns 256 --agents "$AGENTS" $SWEEP_ONE --hint 150000 --label "$tag scenario=S3 conns=256" | rec "" ;;
