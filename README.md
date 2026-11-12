@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/simoom-logo-1200.png" alt="simoom: HTTP Server Engine" width="600"></p>
+
 # simoom: an embeddable HTTP/1.1, HTTP/2 and HTTP/3 server engine in std-only Rust
 
 **simoom** is a small, fast, secure HTTP server engine that you embed in a Rust program. It
@@ -16,6 +18,8 @@ HTTP engine behind [Cameleer](https://github.com/Cameleering/cameleer).
 *A [Cameleering](https://cameleer.ing/cameleering/) project: make software carry the same load on
 less, and prove it against the original. No claim without a number.*
 
+[![crates.io](https://img.shields.io/crates/v/simoom.svg)](https://crates.io/crates/simoom)
+[![docs.rs](https://img.shields.io/docsrs/simoom)](https://docs.rs/simoom)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![dependencies: std only](https://img.shields.io/badge/dependencies-std%20only-success)
 ![unsafe: one crate](https://img.shields.io/badge/unsafe-simoom--sys%20only-informational)
@@ -164,12 +168,21 @@ open sockets, spawn threads or read clocks, so you can drive them from your own 
 
 ## Quick start
 
-simoom is not on crates.io yet. Add it from Git (Rust 1.89 or newer):
+simoom is on [crates.io](https://crates.io/crates/simoom) (Rust 1.89 or newer):
+
+```sh
+cargo add simoom
+```
+
+or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-simoom = { git = "https://github.com/Cameleering/simoom" }
+simoom = "0.1"
 ```
+
+The client is a separate crate: `cargo add simoom-client`. API documentation is on
+[docs.rs](https://docs.rs/simoom).
 
 A server that answers every request:
 
@@ -361,7 +374,7 @@ let resp = client
 For a device or a function that needs only HTTP/1.1, turn everything else off:
 
 ```toml
-simoom = { git = "https://github.com/Cameleering/simoom", default-features = false, features = ["http1"] }
+simoom = { version = "0.1", default-features = false, features = ["http1"] }
 ```
 
 ## Cargo features and binary size

@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["hpack", "http2", "header-compression", "rfc7541", "sans-io"]
+categories = ["web-programming", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-hpack"
 
 [lints]
 workspace = true

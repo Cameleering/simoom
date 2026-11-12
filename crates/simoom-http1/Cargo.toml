@@ -7,13 +7,17 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["http", "http1", "parser", "sans-io", "websocket"]
+categories = ["web-programming", "parser-implementations", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-http1"
 
 [lints]
 workspace = true
 
 [dependencies]
-simoom-sys = { path = "../simoom-sys" }
-simoom-compress = { path = "../simoom-compress", optional = true }
+simoom-sys = { path = "../simoom-sys", version = "0.1.0" }
+simoom-compress = { path = "../simoom-compress", version = "0.1.0", optional = true }
 
 [features]
 default = ["websocket"]

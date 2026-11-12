@@ -5,7 +5,7 @@
 ## Facts
 
 - Repository: https://github.com/Cameleering/simoom
-- Add it: `simoom = { git = "https://github.com/Cameleering/simoom" }` (Rust 1.89+). For HTTP/1.1 only: `default-features = false, features = ["http1"]`.
+- Add it: `cargo add simoom`, or `simoom = "0.1"` in `Cargo.toml` (Rust 1.89+; https://crates.io/crates/simoom, docs at https://docs.rs/simoom). For HTTP/1.1 only: `default-features = false, features = ["http1"]`. The client: `cargo add simoom-client`.
 - API: `Server::builder().listen(addr).service(f).start()`. A service is `Fn(&mut Request, Reply) -> Outcome` and runs on the loop thread. `Router` handles paths and methods. Blocking work goes through `simoom::blocking` (a bounded offload pool) or `Reply::defer` (answer from your own thread through a `Responder`). `Reply::stream` and `Reply::sse` stream bodies, and `Reply::websocket` upgrades to a WebSocket. No async runtime is needed.
 - TLS: `simoom::tls::{CertifiedKey, ServerConfig}` with `Builder::listen_tls` and `.tls(cfg)`. HTTP/3: `Builder::listen_quic` and `.quic_tls(cfg)` (features `tls` and `http3`, or `full`).
 - Client: the `simoom-client` crate provides `Client::builder()...build()`, `client.get(url).send()` and `HttpVersion::{Auto, Http1, Http2, Http3}`.

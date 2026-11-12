@@ -7,9 +7,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["qpack", "http3", "header-compression", "rfc9204", "sans-io"]
+categories = ["web-programming", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-qpack"
 
 [lints]
 workspace = true
 
 [dependencies]
-simoom-hpack = { path = "../simoom-hpack" }
+simoom-hpack = { path = "../simoom-hpack", version = "0.1.0" }

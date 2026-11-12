@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["epoll", "io-uring", "iocp", "kqueue", "sockets"]
+categories = ["os", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-sys"
 
 [lints]
 workspace = true

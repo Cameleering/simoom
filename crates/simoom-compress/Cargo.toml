@@ -7,13 +7,17 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["deflate", "gzip", "zlib", "compression", "no-std-deps"]
+categories = ["compression"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-compress"
 
 [lints]
 workspace = true
 
 [dependencies]
 # BMI2 kernels picked at run time for Brotli and zstd (the only crate with `unsafe`).
-simoom-sys = { path = "../simoom-sys", default-features = false, optional = true }
+simoom-sys = { path = "../simoom-sys", version = "0.1.0", default-features = false, optional = true }
 
 [features]
 default = []

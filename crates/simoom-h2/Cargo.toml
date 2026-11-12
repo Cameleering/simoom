@@ -7,12 +7,16 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["http2", "h2", "sans-io", "rfc9113", "server"]
+categories = ["web-programming", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-h2"
 
 [lints]
 workspace = true
 
 [dependencies]
-simoom-hpack = { path = "../simoom-hpack" }
+simoom-hpack = { path = "../simoom-hpack", version = "0.1.0" }
 
 [features]
 default = ["connect-protocol", "keepalive"]

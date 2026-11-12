@@ -7,12 +7,16 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["runtime", "event-loop", "io-uring", "epoll", "iocp"]
+categories = ["asynchronous", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-rt"
 
 [lints]
 workspace = true
 
 [dependencies]
-simoom-sys = { path = "../simoom-sys", default-features = false }
+simoom-sys = { path = "../simoom-sys", version = "0.1.0", default-features = false }
 
 [features]
 default = ["io-uring", "udp", "idle-trim"]

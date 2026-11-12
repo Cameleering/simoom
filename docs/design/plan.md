@@ -55,8 +55,8 @@ These decisions take precedence over anything later in this note that disagrees 
    way on the same machine. Anything above that needs a specific, measured advantage in real use
    cases, documented alongside the numbers.
 8. The repository is `github.com/Cameleering/simoom` (private), licensed Apache-2.0 like Cameleer.
-   Releases are git tags. Cameleer depends on simoom by tag until the owner decides to publish
-   it on crates.io.
+   Releases are git tags and crates.io versions: the owner decided on 2026-11-12 to publish
+   0.1.0 on crates.io, and Cameleer depends on the published crates.
 
 ## 1. Decision
 
@@ -631,7 +631,7 @@ Expected, with the evidence for each. All are on c-4 droplets with the method in
 Decided on 2026-11-07 (see §0):
 
 1. Build. Measurements run alongside the build, not as a gate.
-2. Apache-2.0; a private repository `Cameleering/simoom`; releases by git tag.
+2. Apache-2.0; the repository `Cameleering/simoom`; releases by git tag and on crates.io (from 0.1.0, 2026-11-12).
 3. Fuzzing: F2, std-only.
 4. TLS is owned by simoom (`simoom-tls`); `cameleer-tls` is unchanged.
 5. HTTP/3 is in the first release.

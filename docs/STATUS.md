@@ -4,6 +4,17 @@ _2026-11-07._ The repository was created and the workspace scaffolded. The desig
 [design/plan.md](design/plan.md) (section 0 is the owner's scope) and the research in
 [design/research.md](design/research.md).
 
+## Release 0.1.0 on crates.io
+
+_2026-11-12._ The owner decided to publish on crates.io. The twelve library crates (`simoom`,
+`simoom-client`, `simoom-sys`, `simoom-rt`, `simoom-http1`, `simoom-compress`, `simoom-hpack`,
+`simoom-qpack`, `simoom-h2`, `simoom-tls`, `simoom-quic`, `simoom-h3`) are published at 0.1.0 by
+`scripts/publish-crates.sh` (dependency order, skips versions already there, waits out the
+new-crate rate limit); `simoom-bench` stays `publish = false`. Internal dependencies carry
+`version = "0.1.0"` next to `path`; dev-dependencies stay path-only and are dropped from the
+published manifests. `cargo package --workspace --exclude simoom-bench` verifies every crate from
+its package (largest: simoom-compress 421 KB, simoom-tls 321 KB). Git tag `v0.1.0`.
+
 ## Work in progress
 
 Wave 1, crates built in parallel: `simoom-sys` + `simoom-rt`, `simoom-http1`, `simoom-hpack` +

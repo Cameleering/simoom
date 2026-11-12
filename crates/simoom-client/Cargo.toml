@@ -7,21 +7,25 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["http", "http-client", "http2", "http3", "websocket"]
+categories = ["web-programming::http-client", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-client"
 
 [lints]
 workspace = true
 
 [dependencies]
 # Response parser, body decoder, request head writer; the WebSocket codec with `client-ws`.
-simoom-http1 = { path = "../simoom-http1", default-features = false }
+simoom-http1 = { path = "../simoom-http1", version = "0.1.0", default-features = false }
 # The OS random source (WebSocket keys and masks).
-simoom-sys = { path = "../simoom-sys", default-features = false }
-simoom-h2 = { path = "../simoom-h2", optional = true }
-simoom-tls = { path = "../simoom-tls", optional = true, default-features = false, features = ["client"] }
-simoom-quic = { path = "../simoom-quic", optional = true }
-simoom-h3 = { path = "../simoom-h3", optional = true }
-simoom-rt = { path = "../simoom-rt", optional = true, default-features = false }
-simoom-compress = { path = "../simoom-compress", optional = true }
+simoom-sys = { path = "../simoom-sys", version = "0.1.0", default-features = false }
+simoom-h2 = { path = "../simoom-h2", version = "0.1.0", optional = true }
+simoom-tls = { path = "../simoom-tls", version = "0.1.0", optional = true, default-features = false, features = ["client"] }
+simoom-quic = { path = "../simoom-quic", version = "0.1.0", optional = true }
+simoom-h3 = { path = "../simoom-h3", version = "0.1.0", optional = true }
+simoom-rt = { path = "../simoom-rt", version = "0.1.0", optional = true, default-features = false }
+simoom-compress = { path = "../simoom-compress", version = "0.1.0", optional = true }
 
 [features]
 default = ["client-h1", "client-h2", "client-ws", "tls", "compress"]

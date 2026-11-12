@@ -7,13 +7,17 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["http3", "h3", "quic", "rfc9114", "sans-io"]
+categories = ["web-programming", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-h3"
 
 [lints]
 workspace = true
 
 [dependencies]
-simoom-qpack = { path = "../simoom-qpack" }
-simoom-quic = { path = "../simoom-quic", default-features = false }
+simoom-qpack = { path = "../simoom-qpack", version = "0.1.0" }
+simoom-quic = { path = "../simoom-quic", version = "0.1.0", default-features = false }
 
 [dev-dependencies]
 simoom-quic = { path = "../simoom-quic" }

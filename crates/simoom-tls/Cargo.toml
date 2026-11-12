@@ -7,12 +7,16 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["tls", "tls13", "x509", "quic", "sans-io"]
+categories = ["cryptography", "network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-tls"
 
 [lints]
 workspace = true
 
 [dependencies]
-simoom-sys = { path = "../simoom-sys" }
+simoom-sys = { path = "../simoom-sys", version = "0.1.0" }
 
 [features]
 default = ["client", "rsa", "p384", "ed25519", "chacha20"]

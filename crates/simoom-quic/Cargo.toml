@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+keywords = ["quic", "rfc9000", "transport", "sans-io", "udp"]
+categories = ["network-programming"]
+homepage = "https://github.com/Cameleering/simoom"
+documentation = "https://docs.rs/simoom-quic"
 
 [lints]
 workspace = true
@@ -14,7 +18,7 @@ workspace = true
 [dependencies]
 # Only the TLS server unless the `client` feature asks for the client: a server-only build
 # (simoom's `http3` without `tls-client`) never links the TLS client handshake.
-simoom-tls = { path = "../simoom-tls", default-features = false }
+simoom-tls = { path = "../simoom-tls", version = "0.1.0", default-features = false }
 
 [features]
 default = ["client"]
