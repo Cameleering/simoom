@@ -65,6 +65,10 @@ def fmt(v, unit):
 def ratio_text(a):
     if a is None:
         return ""
+    if a >= 99:
+        return "only simoom met the target"
+    if a == 0:
+        return "only this server met the target"
     if 0.97 <= a <= 1.03:
         return "level"
     if a > 1:
@@ -82,8 +86,9 @@ def metric_block(mid, m):
     for srv, r in rows.items():
         if srv == "simoom":
             idx = 100.0
-        elif r["simoom_advantage"]:
-            idx = 100.0 / r["simoom_advantage"]   # >100: better than simoom on the same droplet
+        elif r["simoom_advantage"] is not None:
+            a = r["simoom_advantage"]
+            idx = 0.0 if a >= 99 else (200.0 if a == 0 else 100.0 / a)  # >100: better than simoom on the same droplet
         else:
             continue
         items.append((srv, idx, r))

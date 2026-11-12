@@ -16,6 +16,7 @@ import sys
 from collections import defaultdict
 
 REF = "simoom"
+CAP = 99.0  # stands for "only simoom met the target" (JSON has no infinity)
 
 
 def parse(path):
@@ -99,6 +100,23 @@ def fixed_rate(field):
     return f
 
 
+def with_ref(others, ref):
+    # the competitors from `others`, simoom from `ref` (a like-for-like build of simoom)
+    def f(R):
+        d = dict(others(R))
+        d[REF] = ref(R).get(REF, {})
+        return d
+    return f
+
+
+RUNTIME_BASED = {"netty", "vertx", "kestrel", "uws"}  # their "binary" is a launcher for a JVM, .NET or Node
+
+
+def kb(fn):
+    # program size: self-contained executables only (a JVM, .NET or Node program's size is its runtime)
+    return lambda R: {k: {c: v / 1024 for c, v in d.items()} for k, d in fn(R).items() if k not in RUNTIME_BASED}
+
+
 def speak_metric(scen):
     def f(R):
         d = SPEAK_TS.get(scen, {})
@@ -128,8 +146,10 @@ METRICS = [
     ("s10", "attack", "Under 11,000 slow attackers: p99 of real requests", "µs", False, closed("S10", "p99_us", {"attack": "slowloris10k+slowread1k"})),
     ("idle-10k", "idle", "10,000 idle connections: memory per connection", "B", False, rec("IDLE", "per_conn_b", {"conns": "10000"})),
     ("idle-100k", "idle", "100,000 idle connections: memory per connection", "B", False, rec("IDLE", "per_conn_b", {"conns": "100000"})),
-    ("cold", "footprint", "Start-up: process start to first answer", "ms", False, rec("COLDSTART", "median_ms", absent=("variant",))),
-    ("size", "footprint", "Program size, stripped", "KB", False, lambda R: {k: {c: v / 1024 for c, v in d.items()} for k, d in rec("SIZE", "bytes", absent=("variant",))(R).items()}),
+    ("cold-plain", "footprint", "Start-up, process start to first answer: simoom's default build (HTTP/1.1, HTTP/2, WebSocket)", "ms", False, with_ref(rec("COLDSTART", "median_ms", absent=("variant",)), rec("COLDSTART", "median_ms", {"variant": "min_server"}))),
+    ("cold", "footprint", "Start-up, process start to first answer: simoom's full server (also TLS 1.3 and HTTP/3)", "ms", False, rec("COLDSTART", "median_ms", absent=("variant",))),
+    ("size-plain", "footprint", "Program size, stripped: simoom's default build (HTTP/1.1, HTTP/2, WebSocket)", "KB", False, kb(with_ref(rec("SIZE", "bytes", absent=("variant",)), rec("SIZE", "bytes", {"variant": "min_server"})))),
+    ("size", "footprint", "Program size, stripped: simoom's full server (also TLS 1.3 and HTTP/3)", "KB", False, kb(rec("SIZE", "bytes", absent=("variant",)))),
     ("base", "footprint", "Memory at rest (PSS)", "KB", False, rec("BASE", "pss_kb")),
     ("peak", "footprint", "Peak memory over the whole run (PSS)", "KB", False, rec("PEAK", "pss_kb")),
     ("peak-s1", "footprint", "Peak memory while serving the status endpoint (PSS)", "KB", False, speak_metric("S1")),
@@ -203,10 +223,15 @@ def compute(R):
                 r = ref.get(c)
                 if r is None or v is None:
                     continue
-                if hib:
-                    ratios.append(r / v if v > 0 else None)   # >1: simoom ahead
+                good, bad = (r, v) if hib else (v, r)        # ratio good/bad > 1: simoom ahead
+                if good == 0 and bad == 0:
+                    continue
+                if bad == 0:
+                    ratios.append(CAP)                       # only simoom met the target
+                elif good == 0:
+                    ratios.append(0.0)                       # only the other server met it
                 else:
-                    ratios.append(v / r if r > 0 else None)   # >1: simoom ahead (less is better)
+                    ratios.append(min(good / bad, CAP))
             ratios = [x for x in ratios if x is not None]
             rows[srv] = {
                 "value": med(cells.values()),
@@ -233,6 +258,10 @@ def fmt(v, unit):
 def adv(a):
     if a is None:
         return "-"
+    if a >= CAP:
+        return "only simoom met the target"
+    if a == 0:
+        return "**only this server met the target**"
     if 0.97 <= a <= 1.03:
         return "level (within 3%)"
     if a >= 1:
@@ -261,6 +290,7 @@ def markdown(res):
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")
     R = parse(sys.argv[1])
     import os
     raw = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), "raw")
