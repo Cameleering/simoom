@@ -22,7 +22,7 @@
 //! # }
 //! ```
 //!
-//! (**Moves to saltire-pki**; from Cameleer `cameleer-tls/src/keystore/mod.rs`.)
+//! (**Moves to ksar-pki**; from Cameleer `cameleer-tls/src/keystore/mod.rs`.)
 //!
 
 #[cfg(feature = "jks")]

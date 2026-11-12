@@ -9,7 +9,7 @@ suites: 2026-11-09, against head `bf24f89` plus bugs 16 to 22 below._
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately through **GitHub security advisories**:
-<https://github.com/pmsudhi/simoom/security/advisories/new>. Don't open a public issue,
+<https://github.com/Cameleering/simoom/security/advisories/new>. Don't open a public issue,
 pull request or discussion for a suspected vulnerability.
 
 - Include the version or commit, the feature set (`http1`, `http2`, `tls`, `http3`...), the

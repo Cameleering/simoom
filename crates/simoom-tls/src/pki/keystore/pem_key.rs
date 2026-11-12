@@ -1,7 +1,7 @@
 //! Private keys from PEM, including `ENCRYPTED PRIVATE KEY` (PKCS#8 `EncryptedPrivateKeyInfo`
 //! with PBES2 or a PKCS#12 PBE scheme).
 //!
-//! (**Moves to saltire-pki**; from Cameleer `cameleer-tls/src/keys.rs` `from_pem_with_password`.)
+//! (**Moves to ksar-pki**; from Cameleer `cameleer-tls/src/keys.rs` `from_pem_with_password`.)
 
 use crate::keys::PrivateKey;
 use crate::pem;

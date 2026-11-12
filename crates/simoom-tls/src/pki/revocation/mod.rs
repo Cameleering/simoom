@@ -21,7 +21,7 @@
 //! the signature is ignored), and revocation checking of a delegated OCSP responder's own
 //! certificate (RFC 6960 `id-pkix-ocsp-nocheck` behaviour is assumed).
 //!
-//! (**Moves to saltire-pki.** Ported from Cameleer's `cameleer-tls/src/ocsp.rs`, the CRL code
+//! (**Moves to ksar-pki.** Ported from Cameleer's `cameleer-tls/src/ocsp.rs`, the CRL code
 //! of its `x509.rs` and `tls/config.rs` `OcspMode`.)
 //!
 

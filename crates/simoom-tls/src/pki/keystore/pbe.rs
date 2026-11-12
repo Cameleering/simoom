@@ -9,7 +9,7 @@
 //! legacy PKCS#12 profile. Iteration counts read from a file are capped at
 //! [`MAX_ITERATIONS`] so a hostile file cannot make a load run for hours.
 //!
-//! (**Moves to saltire-pki**; from Cameleer `cameleer-tls/src/pbe.rs`.)
+//! (**Moves to ksar-pki**; from Cameleer `cameleer-tls/src/pbe.rs`.)
 
 use crate::crypto::legacy::{cbc_decrypt, cbc_encrypt, Aes, Rc2, TripleDes};
 use crate::asn1::{self, Der, TAG_INTEGER, TAG_OCTET_STRING, TAG_SEQUENCE};

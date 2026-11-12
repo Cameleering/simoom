@@ -2,7 +2,7 @@
 //! certificate and its issuer, and a responder-side builder (tests, and servers that make
 //! their own staples).
 //!
-//! (**Moves to saltire-pki**; from Cameleer `cameleer-tls/src/ocsp.rs`.)
+//! (**Moves to ksar-pki**; from Cameleer `cameleer-tls/src/ocsp.rs`.)
 
 use super::{derr, ext_der, gtime, parse_extensions, parse_reason, CLOCK_SKEW_SECS};
 use crate::asn1::{self, Der, DerResult, TAG_INTEGER, TAG_SEQUENCE};

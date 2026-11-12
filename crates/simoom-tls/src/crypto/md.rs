@@ -2,7 +2,7 @@
 //! PKCS#12 KDF (RFC 7292 appendix B.2). The TLS handshake uses [`HashAlg`] (SHA-2 only); this
 //! type serves the formats that still name SHA-1: key stores, CRLs, OCSP and old certificates.
 //!
-//! (**Moves to saltire**; HMAC/PBKDF2/PKCS#12 KDF from Cameleer `cameleer-tls/src/crypto/{hash,kdf}.rs`.)
+//! (**Moves to ksar**; HMAC/PBKDF2/PKCS#12 KDF from Cameleer `cameleer-tls/src/crypto/{hash,kdf}.rs`.)
 
 use super::sha1::Sha1;
 use super::sha2::HashAlg;

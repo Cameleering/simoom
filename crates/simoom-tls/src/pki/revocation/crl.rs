@@ -1,7 +1,7 @@
 //! Certificate revocation lists (RFC 5280 section 5): parsing with bounded sizes, signature
 //! and scope checks, lookup, and building (for tests and for CAs that issue their own).
 //!
-//! (**Moves to saltire-pki**; from Cameleer `cameleer-tls/src/x509.rs` `Crl`.)
+//! (**Moves to ksar-pki**; from Cameleer `cameleer-tls/src/x509.rs` `Crl`.)
 
 use super::{derr, ext_der, parse_extensions, parse_name, parse_reason};
 use crate::asn1::{self, Der, DerResult, TAG_INTEGER, TAG_SEQUENCE};

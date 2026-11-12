@@ -41,7 +41,7 @@ sha1 = []
 # Key material from files: PEM bundles (also encrypted PKCS#8 keys), the KeyStore type and
 # SslContextParameters (Camel's SSLContextParameters). `pkcs12` and `jks` add those formats.
 # Legacy primitives only old key-store formats use: MD5, DES/3DES, RC2, and the bitsliced AES
-# with CBC for PBES2 (crypto::legacy, moves to saltire). Off in server builds; the key store
+# with CBC for PBES2 (crypto::legacy, moves to ksar). Off in server builds; the key store
 # features turn it on.
 legacy = ["sha1"]
 keystore = ["legacy"]

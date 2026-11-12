@@ -3,7 +3,7 @@
 //! TLS handshake. SHA-1 processes only public or password-derived data here, and it has no
 //! secret-dependent branches or table lookups anyway.
 //!
-//! (**Moves to saltire**; from Cameleer `cameleer-tls/src/crypto/hash.rs` `Sha1`.)
+//! (**Moves to ksar**; from Cameleer `cameleer-tls/src/crypto/hash.rs` `Sha1`.)
 
 /// A running SHA-1 hash.
 #[derive(Clone)]

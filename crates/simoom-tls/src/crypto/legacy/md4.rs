@@ -1,4 +1,4 @@
-//! MD4 (RFC 1320), feature `legacy`; **moves to saltire**. Only for NTLM (the NT hash and
+//! MD4 (RFC 1320), feature `legacy`; **moves to ksar**. Only for NTLM (the NT hash and
 //! NTLMv2 client authentication), which still require it. Broken as a hash: never use it for
 //! anything else. Cameleer has no MD4, so this is new code, written like the MD5 next to it
 //! and checked against all seven RFC 1320 test vectors. It has no secret-dependent branches or

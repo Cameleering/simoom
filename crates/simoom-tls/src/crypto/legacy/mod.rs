@@ -1,4 +1,4 @@
-//! Legacy primitives (feature `legacy`; **moves to saltire**). Ported from Cameleer's
+//! Legacy primitives (feature `legacy`; **moves to ksar**). Ported from Cameleer's
 //! `cameleer-tls/src/crypto/{aes,des,rc2,md5}.rs` with their test vectors.
 //!
 //! Block ciphers and a digest that only key-store formats still use: AES with its inverse

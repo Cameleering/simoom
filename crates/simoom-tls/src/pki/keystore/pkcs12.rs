@@ -12,7 +12,7 @@
 //! Writing uses [`Pkcs12Profile::Modern`] by default: PBES2 / PBKDF2-HMAC-SHA256 / AES-256-CBC
 //! for keys and certificates and an HMAC-SHA256 MAC, as OpenSSL 3 and Java 17+ write it.
 //!
-//! (**Moves to saltire-pki**; from Cameleer `cameleer-tls/src/keystore/pkcs12.rs`.)
+//! (**Moves to ksar-pki**; from Cameleer `cameleer-tls/src/keystore/pkcs12.rs`.)
 
 use super::pbe;
 use super::{KeyStore, KeyStoreEntry, MAX_ENTRIES};

@@ -54,7 +54,7 @@ These decisions take precedence over anything later in this note that disagrees 
    5% of Cameleer's current HTTP server (`cameleer-http`, plain and with TLS), measured the same
    way on the same machine. Anything above that needs a specific, measured advantage in real use
    cases, documented alongside the numbers.
-8. The repository is `github.com/pmsudhi/simoom` (private), licensed Apache-2.0 like Cameleer.
+8. The repository is `github.com/Cameleering/simoom` (private), licensed Apache-2.0 like Cameleer.
    Releases are git tags. Cameleer depends on simoom by tag until the owner decides to publish
    it on crates.io.
 
@@ -65,7 +65,7 @@ a two-week measurement spike (Milestone 0) that has to show the gain on the real
 the main work starts.
 
 The server is named **simoom** (a hot, fast desert wind). On 2026-11-07 the name and the
-sub-crate names in §4 were free on crates.io, and `pmsudhi/simoom` was free on GitHub. No
+sub-crate names in §4 were free on crates.io, and `pmsudhi/simoom` was free on GitHub (the repository moved to `Cameleering/simoom` on 2026-11-12). No
 trademark search has been done.
 
 ### The options
@@ -370,7 +370,7 @@ let server = Server::builder()
 ## 4. Repository layout
 
 ```
-simoom/                             github.com/pmsudhi/simoom
+simoom/                             github.com/Cameleering/simoom
   Cargo.toml                        workspace; std only; edition and MSRV pinned
   crates/
     simoom-sys/                     the only crate with `unsafe`; SAFETY comment on every block
@@ -631,7 +631,7 @@ Expected, with the evidence for each. All are on c-4 droplets with the method in
 Decided on 2026-11-07 (see §0):
 
 1. Build. Measurements run alongside the build, not as a gate.
-2. Apache-2.0; a private repository `pmsudhi/simoom`; releases by git tag.
+2. Apache-2.0; a private repository `Cameleering/simoom`; releases by git tag.
 3. Fuzzing: F2, std-only.
 4. TLS is owned by simoom (`simoom-tls`); `cameleer-tls` is unchanged.
 5. HTTP/3 is in the first release.

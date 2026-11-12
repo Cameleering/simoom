@@ -1,7 +1,7 @@
 # CLAUDE.md: project memory for simoom
 
 simoom is a small, fast, secure, embeddable HTTP/1.1, HTTP/2 and HTTP/3 server engine in Rust.
-It is the server engine for [Cameleer](https://github.com/pmsudhi/cameleer), a std-only Rust
+It is the server engine for [Cameleer](https://github.com/Cameleering/cameleer), a std-only Rust
 reimplementation of Apache Camel, and it is usable on its own inside other services. It targets
 edge devices and FaaS as well as servers. It is **not** a full web-server replacement: there is
 no static-file server, reverse proxy or config-file web server.

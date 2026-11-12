@@ -11,25 +11,25 @@ Features: `tls12`, `sha1`, `legacy` (MD5, DES/3DES, RC2, CBC AES; implied by `ke
 
 ## Where the code came from, and where it goes
 
-The owner plans a shared crypto family, **saltire** (`saltire` for primitives, `saltire-pki`
+The owner plans a shared crypto family, **ksar** (`ksar` for primitives, `ksar-pki`
 for PKI). The modules below are self-contained (no dependency on the TLS state machine) so they
 can move mechanically; their module docs say the same.
 
 | simoom-tls module | ported from (Cameleer `crates/cameleer-tls/src/`) | destination |
 |---|---|---|
-| `crypto/sha1.rs` | `crypto/hash.rs` (`Sha1`) | moves to saltire |
-| `crypto/md.rs` (HMAC, PBKDF2, PKCS#12 KDF over SHA-1/SHA-2) | `crypto/hash.rs`, `crypto/kdf.rs` | moves to saltire |
-| `crypto/legacy/` (bitsliced AES both directions + CBC, DES/3DES, RC2, MD5, HMAC-MD5) | `crypto/aes.rs` (inverse cipher, CBC), `crypto/des.rs`, `crypto/rc2.rs`, `crypto/md5.rs` | moves to saltire |
-| `crypto/legacy/md4.rs` (MD4, RFC 1320; HMAC-MD4) for NTLM client auth | new: Cameleer has no MD4 | moves to saltire |
-| `pki/keystore/mod.rs` (`KeyStore`, formats, PEM bundles) | `keystore/mod.rs` | moves to saltire-pki |
-| `pki/keystore/pem_key.rs` (encrypted PKCS#8 PEM) | `keys.rs` `from_pem_with_password` | moves to saltire-pki |
-| `pki/keystore/pbe.rs` (PBES2, PKCS#12 PBE) | `pbe.rs` | moves to saltire-pki |
-| `pki/keystore/pkcs12.rs` | `keystore/pkcs12.rs` | moves to saltire-pki |
-| `pki/keystore/jks.rs` (JKS, JCEKS, the JKS keyed digest) | `keystore/jks.rs` | moves to saltire-pki |
-| `pki/revocation/crl.rs` | `x509.rs` (`Crl`), `certgen.rs` (`issue_crl`) | moves to saltire-pki |
-| `pki/revocation/ocsp.rs` | `ocsp.rs` | moves to saltire-pki |
-| `pki/revocation/mod.rs` (policy, `check_path`, CRL cache, `StapleSource`) | `x509.rs` `verify_chain_with_crls`, `tls/config.rs` `OcspMode`, `tls/client.rs` `check_ocsp` | moves to saltire-pki |
-| `keys.rs` `SignatureAlgorithm::{RsaPkcs1Sha1, EcdsaSha1}`, `crypto/rsa.rs` `verify_pkcs1_sha1` | `keys.rs`, `crypto/rsa.rs` | with keys/rsa to saltire |
+| `crypto/sha1.rs` | `crypto/hash.rs` (`Sha1`) | moves to ksar |
+| `crypto/md.rs` (HMAC, PBKDF2, PKCS#12 KDF over SHA-1/SHA-2) | `crypto/hash.rs`, `crypto/kdf.rs` | moves to ksar |
+| `crypto/legacy/` (bitsliced AES both directions + CBC, DES/3DES, RC2, MD5, HMAC-MD5) | `crypto/aes.rs` (inverse cipher, CBC), `crypto/des.rs`, `crypto/rc2.rs`, `crypto/md5.rs` | moves to ksar |
+| `crypto/legacy/md4.rs` (MD4, RFC 1320; HMAC-MD4) for NTLM client auth | new: Cameleer has no MD4 | moves to ksar |
+| `pki/keystore/mod.rs` (`KeyStore`, formats, PEM bundles) | `keystore/mod.rs` | moves to ksar-pki |
+| `pki/keystore/pem_key.rs` (encrypted PKCS#8 PEM) | `keys.rs` `from_pem_with_password` | moves to ksar-pki |
+| `pki/keystore/pbe.rs` (PBES2, PKCS#12 PBE) | `pbe.rs` | moves to ksar-pki |
+| `pki/keystore/pkcs12.rs` | `keystore/pkcs12.rs` | moves to ksar-pki |
+| `pki/keystore/jks.rs` (JKS, JCEKS, the JKS keyed digest) | `keystore/jks.rs` | moves to ksar-pki |
+| `pki/revocation/crl.rs` | `x509.rs` (`Crl`), `certgen.rs` (`issue_crl`) | moves to ksar-pki |
+| `pki/revocation/ocsp.rs` | `ocsp.rs` | moves to ksar-pki |
+| `pki/revocation/mod.rs` (policy, `check_path`, CRL cache, `StapleSource`) | `x509.rs` `verify_chain_with_crls`, `tls/config.rs` `OcspMode`, `tls/client.rs` `check_ocsp` | moves to ksar-pki |
+| `keys.rs` `SignatureAlgorithm::{RsaPkcs1Sha1, EcdsaSha1}`, `crypto/rsa.rs` `verify_pkcs1_sha1` | `keys.rs`, `crypto/rsa.rs` | with keys/rsa to ksar |
 | `tls/tls12.rs`, `tls/server12.rs`, `tls/client12.rs` | `tls/server.rs` `server12`, `tls/client.rs` `client12`, `tls/keyschedule.rs` (PRF, EMS, key block), `tls/record.rs` (1.2 records), `tls/session.rs` | stays (TLS engine) |
 | `params.rs` (`SslContextParameters`) | `params.rs` | stays |
 | `blocking.rs` | `net.rs`, `tls/stream.rs` | stays |

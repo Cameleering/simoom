@@ -9,7 +9,7 @@
 //! Both formats are weak by today's standards (no or MD5-based key stretching); prefer
 //! PKCS#12 for new stores. They are here so existing Java stores keep working.
 //!
-//! (**Moves to saltire-pki**; from Cameleer `cameleer-tls/src/keystore/jks.rs`.)
+//! (**Moves to ksar-pki**; from Cameleer `cameleer-tls/src/keystore/jks.rs`.)
 
 use crate::crypto::legacy::{cbc_decrypt, cbc_encrypt, Md5, TripleDes};
 use super::{KeyStore, KeyStoreEntry, JCEKS_MAGIC, JKS_MAGIC, MAX_ENTRIES};
