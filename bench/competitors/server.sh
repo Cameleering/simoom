@@ -40,8 +40,11 @@ case "${1:-list}" in
     n=${2:?name}
     "$0" stop >/dev/null 2>&1 || true
     if port_open; then echo "port 8080 is still in use: $(ss -Htlnp '( sport = :8080 )' | head -2)" >&2; exit 1; fi
+    # SIMOOM_* variables reach the server (SIMOOM_EXTRA arguments, SIMOOM_BUSY_POLL_US, ...: the
+    # variants of bench/cloud/ab.sh)
+    envs=(); for v in $(compgen -e | grep '^SIMOOM_' || true); do envs+=(-E "$v=${!v}"); done
     systemd-run -q --unit=$UNIT --collect -p LimitNOFILE=1048576 -p TasksMax=infinity -p MemoryAccounting=yes \
-      -p CPUAccounting=yes -E HOME=/root -E PATH="$PATH" bash "$COMP/$n/run.sh"
+      -p CPUAccounting=yes -E HOME=/root -E PATH="$PATH" "${envs[@]}" bash "$COMP/$n/run.sh"
     wait_ready ;;
   stop)
     systemctl stop $UNIT 2>/dev/null || true
