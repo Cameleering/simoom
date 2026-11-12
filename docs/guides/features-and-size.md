@@ -57,8 +57,9 @@ with the `dist` profile:
 | HTTP/1.1, HTTP/2, TLS, io_uring | 583,680 B | 614,400 B |
 | everything: HTTP/1.1, HTTP/2, HTTP/3, TLS, WebSocket, io_uring | 935,064 B | 1,048,576 B |
 
-As a whole executable, the HTTP/1.1-only server is 536 KB stripped; about 181 KB of that is the
-standard library's backtrace code. The measurement script is `scripts/size.sh` in the repository,
+As whole programs in benchmark campaign 4 (2026-11-12), simoom's default build (HTTP/1.1, HTTP/2,
+WebSocket) was 735 KB stripped and the full server 1,550 KB, against 2,069 KB for hyper and 515 KB
+for may-minihttp ([benchmarks](https://cameleer.ing/simoom/benchmarks/#m-size-plain)). The measurement script is `scripts/size.sh` in the repository,
 and the dates of each figure are in the [README](https://github.com/Cameleering/simoom#pay-only-for-what-you-use).
 
 ## Building small
@@ -91,8 +92,9 @@ The ARM SIMD and crypto paths compile but have not been benchmarked yet.
 
 ### What is the smallest Rust HTTP server for AWS Lambda or other serverless platforms?
 
-An HTTP/1.1-only simoom build adds about 215 KB, gives the first answer 0.73 ms after the process
-starts, and idles at about 1 MB ([benchmarks](https://cameleer.ing/simoom/benchmarks/)). Use
+An HTTP/1.1-only simoom build adds about 215 KB. In benchmark campaign 4 (2026-11-12), the default
+build gave its first answer 0.94 ms after the process started, the fastest of 21 servers, and used
+901 KB of memory at rest ([benchmarks](https://cameleer.ing/simoom/benchmarks/)). Use
 `default-features = false, features = ["http1"]`.
 
 ### Does `full` include compression and WebSocket over HTTP/2?

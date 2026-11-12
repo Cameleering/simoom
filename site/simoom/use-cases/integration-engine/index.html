@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HTTP engine for integration platforms in Rust | simoom</title>
-<meta name="description" content="Webhooks, REST and MCP endpoints with slow calls kept off the loop: simoom is Cameleer&#x27;s HTTP engine, at 1.7–1.8x its old server&#x27;s throughput.">
+<meta name="description" content="Webhooks, REST and MCP endpoints with slow calls kept off the loop: simoom is Cameleer&#x27;s HTTP engine, and in campaign 4 it used 33% less CPU per request than Cameleer&#x27;s old server.">
 <link rel="canonical" href="https://cameleer.ing/simoom/use-cases/integration-engine/">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="article">
@@ -131,7 +131,7 @@
    "name": "Is simoom faster than a thread-per-connection server?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "Against Cameleer's old thread-per-connection server on the same machine it served 1.7 to 1.8 times the requests with a lower p99, and held 1,000 idle connections in 2.7 MB instead of 7.7 MB. Its idle memory with TLS was 3.3% higher."
+    "text": "Against Cameleer's old thread-per-connection server on the same cloud droplet in benchmark campaign 4 (2026-11-12), simoom answered 22% more status requests per second at 64 clients and was the only one of the two to keep 99% of answers within 1 ms at 256 clients; it used 33% less CPU per request and 5.9x less memory per idle connection. The old server handled 9% more new connections per second and used less memory at rest (1,146 KB against 1,844 KB for simoom's full server). On a workstation (WSL2), against the same server, simoom served 1.7 to 1.8 times the requests and held 1,000 idle connections in 2.7 MB instead of 7.7 MB."
    }
   }
  ]
@@ -162,10 +162,10 @@
     <h1>The HTTP engine inside an integration platform</h1>
     <p class="lede">An integration engine takes webhooks all day, serves REST and MCP endpoints, streams responses, and some of its calls block on a database or a slow partner system. simoom was built for exactly this host: Cameleer, which runs Apache Camel-style routes in Rust. Fast work stays on the loop; slow work goes to a bounded pool or to the host's own threads.</p>
     <div class="stats">
-      <div class="stat"><b>1.7–1.8x</b><span>the requests per second of Cameleer's old thread-per-connection server</span></div>
-      <div class="stat"><b>0.32–0.44 ms</b><span>p99 latency, against 0.87–0.91 ms before</span></div>
-      <div class="stat"><b>4,925 req/s</b><span>with a 100 ms blocking handler and 500 clients, 0 errors</span></div>
-      <div class="stat"><b>2.7 MB</b><span>for 1,000 idle connections, against 7.7 MB before</span></div>
+      <div class="stat"><b>22% more</b><span>status requests per second than Cameleer's old server at 64 clients, same droplet; campaign 4</span></div>
+      <div class="stat"><b>33% less</b><span>CPU per request at 50,000 req/s: 23.4 µs against 35.2 µs; campaign 4</span></div>
+      <div class="stat"><b>5.9x less</b><span>memory per idle connection with 10,000 open: 575 B against 3,363 B; campaign 4</span></div>
+      <div class="stat"><b>4,925 req/s</b><span>with a 100 ms blocking handler and 500 clients, 0 errors; on a workstation, level with the server it replaced</span></div>
     </div>
   </div>
 </section>
@@ -213,8 +213,8 @@ let router = Router::new().get("/report", blocking(|req: OwnedRequest| {
       <div class="pane">
         <h3>Measured</h3>
         <ul>
-          <li>A handler that blocks for 100 ms, 500 clients: 4,925 req/s with 0 errors, the same as Cameleer's old server (4,925), which gave each connection a thread.</li>
-          <li>Server CPU per request: about 13 µs, against about 23 µs before.</li>
+          <li>On a workstation, a handler that blocks for 100 ms with 500 clients: 4,925 req/s with 0 errors, the same as the server it replaced (4,925), which gave each connection a thread.</li>
+          <li>Server CPU per request at a fixed 50,000 req/s: 23.4 µs against 35.2 µs for Cameleer's old server on the same droplet (campaign 4, 2026-11-12).</li>
         </ul>
       </div>
     </div>
@@ -225,7 +225,7 @@ let router = Router::new().get("/report", blocking(|req: OwnedRequest| {
 <section class="c-sec" id="crossing">
   <div class="wrap">
     <h2>The crossing: against the server it replaced</h2>
-    <p class="intro">Same machine (WSL2), server on 4 CPUs, 64 connections, closed loop, both servers returning the same 13-byte answer, 2026-11-09.</p>
+    <p class="intro">On a workstation (WSL2), server on 4 CPUs, 64 connections, closed loop, both servers returning the same 13-byte answer, 2026-11-09.</p>
     <div class="c-table-wrap"><table class="c-table">
       <thead><tr><th>measure</th><th class="num">simoom</th><th class="num">cameleer-http</th></tr></thead>
       <tbody>
@@ -236,7 +236,7 @@ let router = Router::new().get("/report", blocking(|req: OwnedRequest| {
         <tr><td>idle memory with TLS</td><td class="num">1,360 KB</td><td class="num"><span class="win">1,317 KB</span></td></tr>
       </tbody>
     </table></div>
-    <p class="note">The last row is a loss: 3.3% more idle memory with TLS. More in <a href="../../benchmarks/#original">the benchmarks</a> and the <a href="../../../cameleering/ledger/#simoom">Cameleering ledger</a>. See Cameleer itself at <a href="../../../">cameleer.ing</a>.</p>
+    <p class="note">The last row is a loss: 3.3% more idle memory with TLS. In benchmark campaign 4 (2026-11-12, cloud droplets), against the same server on the same droplet, simoom answered 22% more status requests at 64 clients and started 1.9x faster (0.90 ms against 1.74 ms); the old server handled 9% more new connections per second and used less memory at rest (1,146 KB against 1,844 KB). More in <a href="../../benchmarks/#original">the benchmarks</a> and the <a href="../../../cameleering/ledger/#simoom">Cameleering ledger</a>. See Cameleer itself at <a href="../../../">cameleer.ing</a>.</p>
   </div>
 </section>
 
@@ -247,7 +247,7 @@ let router = Router::new().get("/report", blocking(|req: OwnedRequest| {
     <details><summary>How do I answer an HTTP request from another thread in Rust?</summary><p>Call reply.defer() in the service to get a Responder, move it to any thread, and call send with the response when it is ready. Return Outcome::Done from the service.</p></details>
     <details><summary>What happens when the server is overloaded with slow requests?</summary><p>The offload pool is bounded and uses CoDel admission. When it is over capacity, the client gets a fast 503 with Retry-After instead of waiting in an unbounded queue.</p></details>
     <details><summary>Can simoom serve MCP and streaming endpoints?</summary><p>Yes. It serves routes with streamed bodies (Reply::stream), server-sent events (Reply::sse) and WebSocket, which are what REST and MCP endpoints need. The MCP protocol itself is implemented by the host, such as Cameleer.</p></details>
-    <details><summary>Is simoom faster than a thread-per-connection server?</summary><p>Against Cameleer's old thread-per-connection server on the same machine it served 1.7 to 1.8 times the requests with a lower p99, and held 1,000 idle connections in 2.7 MB instead of 7.7 MB. Its idle memory with TLS was 3.3% higher.</p></details>
+    <details><summary>Is simoom faster than a thread-per-connection server?</summary><p>Against Cameleer's old thread-per-connection server on the same cloud droplet in benchmark campaign 4 (2026-11-12), simoom answered 22% more status requests per second at 64 clients and was the only one of the two to keep 99% of answers within 1 ms at 256 clients; it used 33% less CPU per request and 5.9x less memory per idle connection. The old server handled 9% more new connections per second and used less memory at rest (1,146 KB against 1,844 KB for simoom's full server). On a workstation (WSL2), against the same server, simoom served 1.7 to 1.8 times the requests and held 1,000 idle connections in 2.7 MB instead of 7.7 MB.</p></details>
   </div>
 </section>
 

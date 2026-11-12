@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HTTP/3 server in Rust without quinn or OpenSSL | simoom</title>
-<meta name="description" content="Serve HTTP/3 over QUIC from Rust with no dependencies: same port as TLS, alt-svc, 106,947 req/s against h2o&#x27;s 94,507. Its own QUIC and TLS 1.3.">
+<meta name="description" content="Serve HTTP/3 over QUIC from Rust with no dependencies: same port as TLS, alt-svc, its own QUIC and TLS 1.3. Campaign 4: 1.65x the requests of quinn + h3; H2O 43% ahead.">
 <link rel="canonical" href="https://cameleer.ing/simoom/use-cases/http3-server/">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="article">
@@ -115,7 +115,7 @@
    "name": "How fast is simoom's HTTP/3?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "On the same 4-vCPU droplet it served 106,947 HTTP/3 requests per second with p99 under 1 ms, against h2o's 94,507. Large downloads tied at the network limit of 1.90 Gbit/s."
+    "text": "H2O is faster. In benchmark campaign 4 (2026-11-12), with 64 clients and 99% of answers within 1 ms, H2O answered 75,055 HTTP/3 requests per second against simoom's 52,259 on the same droplet (43% more), and used 43% less peak memory doing it. On its droplet simoom answered 83,613 against 42,518 for quinn with h3 (1.65x), and far more than Caddy."
    }
   },
   {
@@ -162,7 +162,7 @@
     <h1>HTTP/3 from Rust, without adding a stack</h1>
     <p class="lede">Mobile clients on lossy networks benefit from HTTP/3 over QUIC. In Rust that usually means quinn, h3, rustls and an async runtime, or nginx in front. simoom implements QUIC v1, HTTP/3, QPACK and TLS 1.3 itself: HTTP/3 is a cargo feature on the same server, listening on the same port number as TLS.</p>
     <div class="stats">
-      <div class="stat"><b>106,947</b><span>HTTP/3 requests per second with p99 under 1 ms; h2o: 94,507</span></div>
+      <div class="stat"><b>1.65x</b><span>the HTTP/3 requests per second of quinn + h3 on the same droplet; H2O answered 43% more than simoom (campaign 4)</span></div>
       <div class="stat"><b>54 of 58</b><span>supported QUIC Interop Runner pairs against ngtcp2, quiche and quic-go</span></div>
       <div class="stat"><b>1 line</b><span>more on the builder: listen_quic on the TLS port</span></div>
       <div class="stat"><b>0</b><span>external crates: QUIC, QPACK and TLS 1.3 are in the repository</span></div>
@@ -196,18 +196,22 @@ let server = Server::builder()
 
 <section class="c-sec" id="numbers">
   <div class="wrap">
-    <h2>Measured against h2o</h2>
-    <p class="intro">Same DigitalOcean c-4 droplet (4 dedicated vCPUs), load from two separate machines at a fixed rate, 2026-11-11.</p>
+    <h2>Measured against H2O, quinn + h3 and Caddy</h2>
+    <p class="intro">Benchmark campaign 4, 2026-11-12: each server on the same DigitalOcean c-4 droplet (4 dedicated vCPUs) as simoom, in the same rounds, with load from two separate machines at a fixed rate. simoom's figure is from the same droplet as the server it is compared with, so it differs from row to row.</p>
     <div class="c-table-wrap"><table class="c-table">
-      <thead><tr><th>scenario</th><th class="num">simoom</th><th class="num">h2o</th></tr></thead>
+      <thead><tr><th>measure</th><th class="num">simoom</th><th class="num">other server</th></tr></thead>
       <tbody>
-        <tr><td>HTTP/3 GET, 13-byte answer, req/s with p99 under 1 ms</td><td class="num"><span class="win">106,947</span></td><td class="num">94,507</td></tr>
-        <tr><td>HTTP/3 64 KB download</td><td class="num">1.90 Gbit/s</td><td class="num">1.90 Gbit/s (a tie, at the network limit)</td></tr>
-        <tr><td>HTTP/3 1 MB download</td><td class="num">1.90 Gbit/s</td><td class="num">1.90 Gbit/s (a tie, at the network limit)</td></tr>
-        <tr><td>TLS 1.3 handshakes per second, full / resumed (TCP)</td><td class="num"><span class="win">10,083 / 11,213</span></td><td class="num">7,711 / 7,758</td></tr>
+        <tr><td>HTTP/3, 64 clients, req/s with 99% within 1 ms: against H2O</td><td class="num">52,259</td><td class="num"><span class="win">H2O 75,055</span></td></tr>
+        <tr><td>the same, against quinn + h3</td><td class="num"><span class="win">83,613</span></td><td class="num">quinn + h3 42,518</td></tr>
+        <tr><td>the same, against Caddy</td><td class="num"><span class="win">52,259</span></td><td class="num">Caddy 3,370</td></tr>
+        <tr><td>Peak memory while serving HTTP/3 (PSS): against H2O</td><td class="num">42,425 KB</td><td class="num"><span class="win">H2O 24,300 KB</span></td></tr>
+        <tr><td>the same, against quinn + h3</td><td class="num"><span class="win">43,623 KB</span></td><td class="num">quinn + h3 57,583 KB</td></tr>
+        <tr><td>TLS 1.3 handshakes per second, full / resumed (TCP), against H2O</td><td class="num"><span class="win">9,431 / 10,303</span></td><td class="num">H2O 6,615 / 6,458</td></tr>
+        <tr><td>Start-up to first answer, full server, against quinn + h3</td><td class="num"><span class="win">1.46 ms</span></td><td class="num">quinn + h3 1.96 ms</td></tr>
+        <tr><td>Program size, stripped, full server, against quinn + h3</td><td class="num"><span class="win">1,550 KB</span></td><td class="num">quinn + h3 5,766 KB</td></tr>
       </tbody>
     </table></div>
-    <p class="note">Method and raw results: <a href="../../benchmarks/#http3">benchmarks</a>.</p>
+    <p class="note">Median of rounds (three for throughput and memory, one for start-up and size). Method and raw results: <a href="../../benchmarks/#u-h3">benchmarks</a>.</p>
   </div>
 </section>
 
@@ -234,7 +238,7 @@ let server = Server::builder()
         </ul>
       </div>
     </div>
-    <p class="note">The four failed interop pairs are 0-RTT and ECN. HTTP/3 servers start every event loop at once (a socket added later to a <code>SO_REUSEPORT</code> group would take over some established QUIC connections), so start-up with HTTP/3 was 1.91 ms against 0.87 ms with TLS alone.</p>
+    <p class="note">The four failed interop pairs are 0-RTT and ECN. HTTP/3 servers start every event loop at once (a socket added later to a <code>SO_REUSEPORT</code> group would take over some established QUIC connections), so in campaign 4 the full server, with TLS and HTTP/3, gave its first answer 1.49 ms after start, against 0.94 ms for the default build without them.</p>
   </div>
 </section>
 
@@ -243,7 +247,7 @@ let server = Server::builder()
     <h2>Common questions</h2>
     <details><summary>Is there a Rust HTTP/3 server without quinn or tokio?</summary><p>Yes. simoom implements QUIC v1, HTTP/3, QPACK and TLS 1.3 itself with only the Rust standard library, and has no async runtime.</p></details>
     <details><summary>Can HTTP/3 share a port with HTTPS?</summary><p>Yes. listen_tls and listen_quic can use the same port number: TCP carries HTTP/2 and HTTP/1.1, UDP carries HTTP/3, and the server announces HTTP/3 with alt-svc.</p></details>
-    <details><summary>How fast is simoom's HTTP/3?</summary><p>On the same 4-vCPU droplet it served 106,947 HTTP/3 requests per second with p99 under 1 ms, against h2o's 94,507. Large downloads tied at the network limit of 1.90 Gbit/s.</p></details>
+    <details><summary>How fast is simoom's HTTP/3?</summary><p>H2O is faster. In benchmark campaign 4 (2026-11-12), with 64 clients and 99% of answers within 1 ms, H2O answered 75,055 HTTP/3 requests per second against simoom's 52,259 on the same droplet (43% more), and used 43% less peak memory doing it. On its droplet simoom answered 83,613 against 42,518 for quinn with h3 (1.65x), and far more than Caddy.</p></details>
     <details><summary>Does simoom support QUIC 0-RTT?</summary><p>No. 0-RTT is refused by design, because early data can be replayed. ECN and migration to a preferred address are not implemented either.</p></details>
     <details><summary>Does it interoperate with other QUIC implementations?</summary><p>In the QUIC Interop Runner, server role, it passes 54 of 58 supported pairs against the ngtcp2, quiche and quic-go clients. The four failures are 0-RTT and ECN.</p></details>
   </div>

@@ -138,8 +138,8 @@
       </a>
       <a class="card" href="serverless-cold-start/">
         <h3>Serverless functions</h3>
-        <p>Scale to zero without paying for the HTTP layer on every cold start. Idle at about 1 MB.</p>
-        <span class="res">0.73 ms <small>to the first answer</small></span>
+        <p>Scale to zero without paying for the HTTP layer on every cold start. The default build sat at 901 KB at rest in campaign 4.</p>
+        <span class="res">0.94 ms <small>to the first answer, first of 21 servers</small></span>
         <span class="who">cold start · scale to zero · containers</span>
       </a>
       <a class="card" href="embedded-local-server/">
@@ -151,7 +151,7 @@
       <a class="card" href="integration-engine/">
         <h3>Integration engines</h3>
         <p>Webhooks and APIs all day, with slow calls sent off the loop and answered from the host's own threads. This is how Cameleer uses it.</p>
-        <span class="res">1.7–1.8x <small>Cameleer's old server</small></span>
+        <span class="res">33% less <small>CPU per request than Cameleer's old server</small></span>
         <span class="who">defer · blocking · offload pool · Cameleer</span>
       </a>
       <a class="card" href="zero-dependency-supply-chain/">
@@ -162,7 +162,7 @@
       </a>
       <a class="card" href="http3-server/">
         <h3>HTTP/3 services</h3>
-        <p>QUIC on the same port number as TLS, without quinn, rustls or nginx in front. Faster than h2o on the same machine.</p>
+        <p>QUIC on the same port number as TLS, without quinn, rustls or nginx in front. In campaign 4 H2O answered 43% more HTTP/3 requests than simoom, and simoom 1.65x as many as quinn with h3.</p>
         <span class="res">54 of 58 <small>interop pairs</small></span>
         <span class="who">http3 · quic · tls · alt-svc</span>
       </a>

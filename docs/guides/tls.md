@@ -170,5 +170,7 @@ Listen on both ports and answer plain requests with a redirect:
 
 ### Does TLS make start-up slower?
 
-A little. In the committed measurements, the first answer came 0.87 ms after start with TLS
-against 0.73 ms without ([benchmarks](https://cameleer.ing/simoom/benchmarks/)).
+A little. In benchmark campaign 4 (2026-11-12), the full server, with TLS 1.3 and HTTP/3, gave its
+first answer 1.49 ms after start, against 0.94 ms for the default build without them; hyper,
+without TLS, took 1.48 ms on the same droplet. Part of the difference is HTTP/3, which starts every
+event loop at once ([benchmarks](https://cameleer.ing/simoom/benchmarks/)).

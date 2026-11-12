@@ -164,8 +164,8 @@
     <div class="stats">
       <div class="stat"><b>0</b><span>async runtimes to set up: services are plain functions</span></div>
       <div class="stat"><b>3</b><span>operating systems: Windows (IOCP), Linux (epoll, io_uring), macOS (kqueue)</span></div>
-      <div class="stat"><b>0.73 ms</b><span>from process start to the first answer</span></div>
-      <div class="stat"><b>5.1 MB</b><span>for 1,000 idle connections on Windows, against 15.2 MB thread-per-connection</span></div>
+      <div class="stat"><b>0.94 ms</b><span>from process start to the first answer, default build on Linux; first of 21 servers in campaign 4</span></div>
+      <div class="stat"><b>5.1 MB</b><span>for 1,000 idle connections on a Windows workstation, against 15.2 MB for the thread-per-connection server it replaced</span></div>
     </div>
   </div>
 </section>
@@ -235,7 +235,7 @@ let router = Router::new()
         <tr><td>macOS</td><td>kqueue</td><td>compile-checked only</td></tr>
       </tbody>
     </table></div>
-    <p class="note">On Windows 11, cold start was 8.04 ms against 9.19 ms for Cameleer's old server, and 1,000 idle connections used 5.1 MB of private memory against 15.2 MB. Windows start-up is measured until the server prints that it is ready, because a connect attempt to a port nobody listens on yet takes about 200 ms to fail there. Source: <code>docs/STATUS.md</code>, 2026-11-09.</p>
+    <p class="note">On a Windows 11 workstation, against the server it replaced (Cameleer's old thread-per-connection server), cold start was 8.04 ms against 9.19 ms, and 1,000 idle connections used 5.1 MB of private memory against 15.2 MB. Windows start-up is measured until the server prints that it is ready, because a connect attempt to a port nobody listens on yet takes about 200 ms to fail there. Source: <code>docs/STATUS.md</code>, 2026-11-09. The Linux start-up figure is from <a href="../../benchmarks/#m-cold-plain">campaign 4</a>, 2026-11-12, on a cloud droplet.</p>
   </div>
 </section>
 

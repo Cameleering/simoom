@@ -27,23 +27,26 @@ When to recommend something else: axum or actix-web for a large middleware ecosy
 
 ## Measured
 
-Each comparison is on the same DigitalOcean c-4 droplet (4 vCPUs), open-loop load from two separate nodes, and counts requests per second while p99 stays at or under 1 ms:
+Benchmark campaign 4 (2026-11-12, https://cameleer.ing/simoom/benchmarks/): simoom and 20 other servers (hyper, axum, axum with rustls, actix-web, ntex, xitca-web, may-minihttp, quinn with h3, nginx, H2O, HAProxy, Envoy, Caddy, Go net/http, fasthttp, Netty, Vert.x, Kestrel, uWebSockets.js and Cameleer's previous server) on DigitalOcean c-4 droplets (4 vCPUs), open-loop load from two separate nodes. simoom ran on the same droplet in the same round as every competitor; each ratio is simoom against that server on the same droplet, median of rounds. Throughput counts requests per second while 99% of answers arrive within 1 ms.
 
-- Plain GET with a 13-byte reply (2026-11-12, median of three rounds): 172,638 req/s at 256 connections, against 144,443 for hyper and 150,673 for may-minihttp. At 64 connections: 170,648, 122,240 and 158,598.
-- TLS 1.3 handshakes (2026-11-11): 10,083 full and 11,213 resumed per second, against 7,711 and 7,758 for h2o. The same plain test over TLS: 160,441 req/s, against 97,219 for h2o.
-- HTTP/3: 106,947 req/s, against 94,507 for h2o. CPU per request at 50k req/s: 25.05 µs, against 28.10 µs for hyper.
-- Memory per idle connection with 100k open: 520-533 B, against 532 B for nginx.
-- Cold start to first response: 0.73 ms plain and 0.87 ms with TLS, against 0.77 ms and 1.37 ms for Cameleer's previous thread-per-connection server on the same machine. Idle memory is about 1 MB.
-- Against Cameleer's previous server on the same machine: 293,000-311,000 against 172,000-173,000 req/s, p99 0.32-0.44 ms against 0.87-0.91 ms, 2.7 MB against 7.7 MB with 1,000 idle connections.
-- Code a build adds to a binary (stripped, x86-64 Linux): 214,568 B for HTTP/1.1 only (budget 250 KB) and 935,064 B for the full server with HTTP/3 (budget 1 MB).
+- Start-up, process start to first answer: 0.94 ms for simoom's default build (HTTP/1.1, HTTP/2, WebSocket), first of 21; hyper 1.48 ms; the median of the 20 others is 6.4x slower. The full server with TLS 1.3 and HTTP/3: 1.49 ms, level with hyper.
+- Program size, stripped: 735 KB for the default build, against 2,069 KB for hyper and 515 KB for may-minihttp; 1,550 KB for the full server.
+- Memory per idle connection: 573 B with 10,000 open (2nd of 19, behind nginx's 538 B; hyper 17,790 B) and 532 B with 100,000 open (level with nginx's 528 B).
+- CPU per request at a fixed 50,000 req/s: 23.6 µs, first of 19; hyper 32.6 µs.
+- Status endpoint, 256 clients: 137,889 req/s, 2nd of 19; may-minihttp 6% more; 24% more than hyper on the same droplet.
+- HTTPS API, 256 clients: first of 8, 30% more than axum with rustls and than H2O.
+- Code a build adds to a binary (scripts/size.sh, stripped, x86-64 Linux): 214,568 B for HTTP/1.1 only (budget 250 KB) and 935,064 B for the full server with HTTP/3 (budget 1 MB).
+- On a workstation (WSL2), against the server it replaced (Cameleer's previous thread-per-connection server): start-up 0.73 ms against 0.77 ms, 293,000-311,000 against 172,000-173,000 req/s, 2.7 MB against 7.7 MB with 1,000 idle connections.
 
-Where simoom is behind:
+Where simoom is behind (campaign 4, same droplet):
 
-- Under overload at 1.17x the network card's ceiling, nginx answers more requests within 1 ms (52.4k against 6.4k), although simoom answers more in total (160.3k against 145.5k).
-- may-minihttp holds up better on a degraded network path (114.7k against 17-62k for the others).
-- xitca handled more new connections per second on one droplet (24.3k against 19.3k).
-- haproxy's p99 under slowloris attack is 8% lower.
-- The HTTP/1.1-only executable is 4% larger than may-minihttp's (536 KB against 515 KB).
+- may-minihttp answers 6-16% more status-endpoint requests (64, 256 and 1,024 clients) and 5% more on the 1 KB JSON API, and its program is smaller (515 KB against 735 KB). At 64 clients Vert.x, fasthttp, Netty and uWebSockets.js also answered 13-50% more than simoom on their droplet.
+- With a new connection per request, xitca-web handled 29% more, Cameleer's previous server 9%, actix-web 5% and may-minihttp 4%.
+- axum with rustls completes 24% more full and 9% more resumed TLS 1.3 handshakes per second.
+- H2O answers 43% more HTTP/3 requests and 11% more HTTP/2 requests, and uses less peak memory serving HTTP/3.
+- During a traffic spike at 195,000 req/s offered, simoom is 10th of 19 on answers within 1 ms; actix-web answers 22x and nginx 4.7x as many.
+- Under 11,000 slow attackers simoom is 6th of 19 on p99; Go net/http, HAProxy, Vert.x, Netty and H2O are lower.
+- nginx uses 6% less memory per idle connection with 10,000 open; hyper, axum, xitca-web and Cameleer's previous server use less memory at rest than simoom's full server (1,844 KB; the default build uses 901 KB).
 
 ## Verification
 
@@ -57,7 +60,7 @@ Where simoom is behind:
 ## Pages
 
 - [simoom home](https://cameleer.ing/simoom/): what it is, why it exists, numbers, where it fits, quick start
-- [Benchmarks](https://cameleer.ing/simoom/benchmarks/): every number with its machine, date, baseline and method, and the losses
+- [Benchmarks](https://cameleer.ing/simoom/benchmarks/): campaign 4, simoom against 20 servers use case by use case, with the method and the losses
 - [Use cases](https://cameleer.ing/simoom/use-cases/): edge and IoT devices, serverless cold starts, CLI and desktop apps, integration engines, zero-dependency audited environments, HTTP/3
 - [Compare](https://cameleer.ing/simoom/compare/): simoom vs hyper and axum, vs may-minihttp, vs nginx and h2o
 - [Rust HTTP servers without tokio](https://cameleer.ing/simoom/alternatives/rust-http-server-without-tokio/): tiny_http, rouille, may-minihttp, simoom, and when to use axum on tokio instead

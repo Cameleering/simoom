@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>h2o and nginx vs simoom: TLS and HTTP/3 benchmark</title>
-<meta name="description" content="simoom vs h2o and nginx on the same droplet: TLS 1.3 handshakes +31%/+45%, TLS throughput +65%, HTTP/3 +13% against h2o, and where nginx is ahead.">
+<meta name="description" content="simoom vs H2O and nginx on the same droplet (campaign 4, 2026-11-12): 30% more HTTPS requests/s than H2O and 39% more full TLS handshakes; H2O leads HTTP/3 and HTTP/2, nginx leads idle memory and spikes.">
 <link rel="canonical" href="https://cameleer.ing/simoom/compare/simoom-vs-nginx-h2o/">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="simoom">
 <meta property="og:title" content="h2o and nginx vs simoom: TLS and HTTP/3 benchmark">
-<meta property="og:description" content="A Rust library against two standalone C servers: TLS handshakes, HTTP/3, large responses, idle memory and overload, with the losses, and how to run them together.">
+<meta property="og:description" content="A Rust library against two standalone C servers, measured on the same droplets in campaign 4: TLS handshakes, HTTPS, HTTP/2, HTTP/3, idle memory and traffic spikes, with the losses, and how to run them together.">
 <meta property="og:url" content="https://cameleer.ing/simoom/compare/simoom-vs-nginx-h2o/">
 <meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
@@ -26,7 +26,7 @@
 <script type="application/ld+json">
 {"@context": "https://schema.org", "@type": "TechArticle",
  "headline": "h2o and nginx vs simoom: TLS and HTTP/3 benchmark",
- "description": "simoom, h2o and nginx measured on DigitalOcean c-4 droplets: TLS 1.3 handshakes, throughput over TLS, HTTP/3, HTTP/2, large responses, idle memory and overload, with the losses, and how a library and a standalone server work together.",
+ "description": "simoom, H2O and nginx measured on the same DigitalOcean c-4 droplets in benchmark campaign 4 (2026-11-12): TLS 1.3 handshakes, HTTPS throughput, HTTP/3, HTTP/2, idle memory, traffic spikes and slow attackers, with the losses, and how a library and a standalone server work together.",
  "url": "https://cameleer.ing/simoom/compare/simoom-vs-nginx-h2o/",
  "inLanguage": "en", "image": "https://cameleer.ing/simoom/og.jpg",
  "author": {"@type": "Person", "name": "Sudheesh PM"},
@@ -41,11 +41,11 @@
 </script>
 <script type="application/ld+json">
 {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
- {"@type": "Question", "name": "How does simoom's TLS performance compare with h2o?", "acceptedAnswer": {"@type": "Answer", "text": "On the same 4-vCPU droplet, simoom completed 10,083 full and 11,213 resumed TLS 1.3 handshakes per second against h2o's 7,711 and 7,758 (+31% and +45%), and served 160,441 requests per second over TLS with p99 under 1 ms against h2o's 97,219 (+65%)."}},
- {"@type": "Question", "name": "Is h2o or nginx faster for HTTP/3?", "acceptedAnswer": {"@type": "Answer", "text": "We did not measure nginx on HTTP/3: the Ubuntu 24.04 nginx package used in the benchmark had no HTTP/3 support. Against h2o on the same droplet, simoom served 106,947 HTTP/3 requests per second with p99 under 1 ms against h2o's 94,507 (+13%), and both reached the network limit on 1 MB downloads."}},
+ {"@type": "Question", "name": "How does simoom's TLS performance compare with h2o?", "acceptedAnswer": {"@type": "Answer", "text": "In benchmark campaign 4 (2026-11-12), with both servers on the same 4-vCPU droplet in the same rounds, simoom completed 9,431 full and 10,303 resumed TLS 1.3 handshakes per second against H2O's 6,615 and 6,458 (39% and 56% more), and answered 103,311 HTTPS requests per second with 99% within 1 ms against H2O's 79,386 (30% more). Its peak memory while serving HTTPS was 7,518 KB against H2O's 9,701 KB."}},
+ {"@type": "Question", "name": "Is h2o or nginx faster for HTTP/3?", "acceptedAnswer": {"@type": "Answer", "text": "H2O. nginx was not measured on HTTP/3: the Ubuntu 24.04 nginx package used in the benchmark has no HTTP/3 support. In benchmark campaign 4 (2026-11-12), on the same droplet in the same rounds, H2O answered 75,055 HTTP/3 requests per second with 99% within 1 ms against simoom's 52,259 (43% more), and used 43% less peak memory doing it. simoom answered 1.65 times as many HTTP/3 requests as quinn with h3 on its droplet."}},
  {"@type": "Question", "name": "Can simoom replace nginx?", "acceptedAnswer": {"@type": "Answer", "text": "Not as a web server. simoom is a library you build into a program: it has no configuration file, no static-file server and no reverse proxy. It replaces the HTTP layer inside your program, and nginx or h2o can still sit in front of it."}},
  {"@type": "Question", "name": "Can I run simoom behind nginx or haproxy?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. In a request-smuggling test behind nginx 1.24 and haproxy 2.8, simoom saw 165 attack streams with 0 desyncs, and it accepted none of the requests that both front servers refused. In HTTP Garden, as an origin next to nginx, Apache httpd, h2o, hyper, gunicorn and Go, it had 0 desyncs."}},
- {"@type": "Question", "name": "Where is nginx better than simoom?", "acceptedAnswer": {"@type": "Answer", "text": "Under heavy overload: at 1.17 times what the network card can carry, nginx answered 52.4k requests within 1 ms against simoom's 6.4k, although simoom answered more in total (160.3k against 145.5k). nginx's in-time figure changed 20-fold between droplets. nginx also used slightly less memory per idle connection with 10,000 open (522 against 594 bytes), and it is a complete web server with years of operations behind it."}}]}
+ {"@type": "Question", "name": "Where is nginx better than simoom?", "acceptedAnswer": {"@type": "Answer", "text": "During traffic spikes: at 195,000 requests per second offered, nginx answered 29,135 requests per second within 1 ms against simoom's 6,264 on the same droplet (4.7 times as many), while both answered about 160,000 per second in total. nginx also used 6% less memory per idle connection with 10,000 open (538 against 575 bytes; level at 100,000), and it is a complete web server with years of operations behind it. H2O, for its part, leads HTTP/2 by 11% and HTTP/3 by 43%. Figures: campaign 4, 2026-11-12."}}]}
 </script>
 </head>
 <body>
@@ -70,65 +70,77 @@
     <p class="crumbs"><a href="../../">simoom</a> / <a href="../">Compare</a> / h2o and nginx vs simoom</p>
     <p class="kicker">A library against two C servers</p>
     <h1>h2o and nginx vs simoom</h1>
-    <p class="lede">nginx and h2o are standalone web servers written in C, with configuration files, static files and proxying. simoom is a library inside your Rust program. They do different jobs, but they all terminate TLS, speak HTTP/2 and serve requests, so we measured them side by side. Here is where simoom is ahead, where nginx is, and how they work together.</p>
-    <div class="stats">
-      <div class="stat"><b>+31% / +45%</b><span>full / resumed TLS 1.3 handshakes per second against h2o</span><small>10,083 / 11,213 vs 7,711 / 7,758</small></div>
-      <div class="stat"><b>+65%</b><span>requests per second over TLS against h2o</span><small>160,441 vs 97,219</small></div>
-      <div class="stat"><b>+13%</b><span>HTTP/3 requests per second against h2o</span><small>106,947 vs 94,507</small></div>
-      <div class="stat"><b>52.4k vs 6.4k</b><span>nginx ahead: answers within 1 ms under overload</span><small>a loss, published</small></div>
-    </div>
+    <p class="lede">nginx and h2o are standalone web servers written in C, with configuration files, static files and proxying. simoom is a library inside your Rust program. They do different jobs, but they all terminate TLS, speak HTTP/2 and serve requests, so benchmark campaign 4 (2026-11-12) measured them side by side, each on the same droplet as simoom. Here is where simoom is ahead, where H2O and nginx are, and how they work together.</p>
+<!-- c4-cmp-stats:begin -->
+<div class="stats">
+<div class="stat"><b>16 of 23</b><span>campaign 4 measures where simoom is ahead of nginx</span><small>level on 4, behind on 3</small></div>
+<div class="stat"><b>simoom 2.5x more</b><span>HTTPS API, 256 clients: requests/s with 99% within 1 ms, against nginx</span><small>simoom 103,311 req/s, nginx 40,777 req/s; H2O: simoom 30% more</small></div>
+<div class="stat"><b>43% more than simoom</b><span>HTTP/3, 64 clients: requests/s with 99% within 1 ms, against H2O</span><small>simoom 52,259 req/s, H2O 74,961 req/s</small></div>
+<div class="stat"><b>6% less than simoom</b><span>10,000 idle connections: memory per connection, against nginx</span><small>simoom 575 B, nginx 538 B; H2O: simoom 2.9x less</small></div>
+</div>
+<!-- c4-cmp-stats:end -->
   </div>
 </section>
 
 <section class="c-sec" id="glance">
   <div class="wrap">
     <h2>h2o, nginx and simoom at a glance</h2>
-    <p class="intro">Wins and losses in one table. h2o at commit f35c735 and nginx 1.24.0, on DigitalOcean c-4 droplets; each figure compares servers that ran on the same droplet unless the row says otherwise.</p>
+    <p class="intro">Wins and losses in one table. H2O at commit f35c735 and nginx from Ubuntu 24.04's packages, each on the same DigitalOcean c-4 droplet as simoom in the same rounds.</p>
     <div class="c-table-wrap"><table class="c-table">
       <thead><tr><th></th><th>h2o / nginx</th><th>simoom</th></tr></thead>
       <tbody>
         <tr><td>What it is</td><td>standalone web servers in C: config file, static files, reverse proxy</td><td>a library you build into a Rust program</td></tr>
         <tr><td>Static files, reverse proxy, config file</td><td class="win">yes</td><td>no, by design</td></tr>
-        <tr><td>TLS 1.3 handshakes per second, full / resumed</td><td>h2o 7,711 / 7,758</td><td class="win">10,083 / 11,213</td></tr>
-        <tr><td>Plain GET over TLS, 256 connections (req/s, p99 ≤ 1 ms)</td><td>h2o 97,219</td><td class="win">160,441</td></tr>
-        <tr><td>HTTP/3 (req/s, p99 ≤ 1 ms)</td><td>h2o 94,507; nginx not measured (package without HTTP/3)</td><td class="win">106,947</td></tr>
-        <tr><td>HTTP/2 without TLS, 100 streams (p99 ≤ 5 ms)</td><td>h2o 152.6k</td><td>152.5k (a tie, at the network limit)</td></tr>
-        <tr><td>1 MB responses, plain and TLS</td><td>nginx 1.95 Gbit/s</td><td>1.95 Gbit/s (a tie, at the network limit)</td></tr>
-        <tr><td>HTTP/3, 1 MB downloads</td><td>h2o at the network limit</td><td>the same (a tie)</td></tr>
-        <tr><td>Memory per idle connection, 10,000 / 100,000 open</td><td class="win">nginx 522 / 532 B</td><td>594 / 533 B (520 B with the default build at 100,000)</td></tr>
-        <tr><td>Overload at 1.17x the network limit: answered within 1 ms</td><td class="win">nginx 52.4k (droplet srvC)</td><td>6.4k (droplet srvB)</td></tr>
-        <tr><td>Overload: answered in total</td><td>nginx 145.5k</td><td class="win">160.3k</td></tr>
-        <tr><td>Cold start to first response</td><td>h2o 14.92 ms · nginx 25.19 ms</td><td class="win">about 1 ms</td></tr>
+        <tr><td>HTTPS API, 256 clients (req/s, 99% within 1 ms)</td><td>H2O 79,386; nginx 40,777</td><td class="win">103,311 (30% more than H2O, 2.5x nginx)</td></tr>
+        <tr><td>TLS 1.3 handshakes per second, full / resumed</td><td>H2O 6,615 / 6,458; nginx 3,828 / 4,314</td><td class="win">9,431 / 10,303</td></tr>
+        <tr><td>HTTP/3, 64 clients (req/s, 99% within 1 ms)</td><td class="win">H2O 75,055; nginx not measured (package without HTTP/3)</td><td>52,259 (H2O 43% more)</td></tr>
+        <tr><td>HTTP/2, 64 connections x 100 streams (req/s, 99% within 5 ms)</td><td class="win">H2O 168,962; nginx 87,443</td><td>152,445 (H2O 11% more)</td></tr>
+        <tr><td>Status endpoint, 256 clients (req/s, 99% within 1 ms)</td><td>nginx 57,179; H2O 40,551</td><td class="win">145,082</td></tr>
+        <tr><td>64 KB downloads, 64 clients (req/s, 99% within 5 ms)</td><td>nginx 3,780; H2O 3,773</td><td>3,786 (level)</td></tr>
+        <tr><td>Memory per idle connection, 10,000 / 100,000 open</td><td class="win">nginx 538 / 528 B; H2O 1,681 / 1,680 B</td><td>575 / 532 B (nginx 6% less at 10,000, level at 100,000)</td></tr>
+        <tr><td>Traffic spike at 195,000 req/s offered: answers within 1 ms</td><td class="win">nginx 29,135/s; H2O 231/s</td><td>6,264/s (nginx 4.7x more)</td></tr>
+        <tr><td>Traffic spike: all answers</td><td>nginx 160,028/s; H2O 65,179/s</td><td>159,868/s (level with nginx)</td></tr>
+        <tr><td>p99 of real requests under 11,000 slow attackers</td><td class="win">H2O 462 µs; nginx 1,146 µs</td><td>568 µs (H2O 19% lower)</td></tr>
+        <tr><td>Peak memory while serving HTTP/3 (PSS)</td><td class="win">H2O 24,300 KB</td><td>42,425 KB (H2O 43% less)</td></tr>
+        <tr><td>Memory at rest (PSS)</td><td>H2O 5,020 KB; nginx 72,469 KB</td><td class="win">1,844 KB</td></tr>
+        <tr><td>Start-up to first answer</td><td>H2O 14.34 ms; nginx 19.57 ms</td><td class="win">0.90 ms default build; 1.20 ms full server</td></tr>
+        <tr><td>Program size, stripped</td><td>nginx 1,283 KB; H2O 1,499 KB</td><td>735 KB default build; 1,550 KB full server with TLS and HTTP/3</td></tr>
       </tbody>
     </table></div>
-    <p class="note">Campaign 3, 2026-11-11. TLS, HTTP/3 and HTTP/2 rows: droplet srvB, where simoom (io_uring) and h2o ran. The overload and cold-start rows compare servers that ran on different droplets: nginx's in-time figure changed 20-fold between droplets and is recorded as a limit of that test (BUGS.md K13); read cold start as an order of magnitude. Details in the <a href="../../benchmarks/">benchmarks</a>.</p>
+    <p class="note">Campaign 4, 2026-11-12: nginx and H2O each ran on the same droplet as simoom in the same rounds; every figure is the median of rounds, and simoom's figure comes from those same runs, so it differs a little from row to row. Details in the <a href="../../benchmarks/">benchmarks</a>.</p>
   </div>
 </section>
 
 <section class="c-sec" id="results">
   <div class="wrap">
-    <h2>TLS 1.3 and HTTP/3 against h2o</h2>
-    <p class="intro">Both servers on the same droplet (srvB), 2026-11-11. Throughput is requests per second while 99% of answers arrive within 1 ms.</p>
-    <p class="legend"><span><i style="background:var(--signal)"></i>simoom (io_uring)</span><span><i style="background:var(--java)"></i>h2o f35c735</span></p>
-    <div class="bars">
-      <div class="bar-group"><h4>Full TLS 1.3 handshakes per second</h4>
-        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">10,083 /s</span></div>
-        <div class="bar"><span>h2o</span><span class="track"><i class="fill" style="width:76.5%"></i></span><span class="val">7,711 /s</span></div>
-      </div>
-      <div class="bar-group"><h4>Resumed TLS 1.3 handshakes per second</h4>
-        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">11,213 /s</span></div>
-        <div class="bar"><span>h2o</span><span class="track"><i class="fill" style="width:69.2%"></i></span><span class="val">7,758 /s</span></div>
-      </div>
-      <div class="bar-group"><h4>Plain GET over TLS, 256 connections</h4>
-        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">160,441 req/s</span></div>
-        <div class="bar"><span>h2o</span><span class="track"><i class="fill" style="width:60.6%"></i></span><span class="val">97,219 req/s</span></div>
-      </div>
-      <div class="bar-group"><h4>HTTP/3 over QUIC</h4>
-        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">106,947 req/s</span></div>
-        <div class="bar"><span>h2o</span><span class="track"><i class="fill" style="width:88.4%"></i></span><span class="val">94,507 req/s</span></div>
-      </div>
-    </div>
-    <p class="note">simoom's TLS 1.3 and QUIC are its own code, with constant-time primitives and AES-NI paths; they have been tested with testssl.sh, OpenSSL, curl, gnutls and the QUIC Interop Runner, but not independently audited yet. Results: <a href="../../benchmarks/#tls">TLS</a>, <a href="../../benchmarks/#http3">HTTP/3</a>.</p>
+    <h2>Every measure, head to head</h2>
+<!-- c4-cmp:begin -->
+<div class="c-table-wrap"><table class="c-table board"><thead><tr><th>measure (campaign 4)</th><th>nginx</th><th>H2O</th></tr></thead><tbody><tr><td><a href="../../benchmarks/#m-s1-64">Status endpoint, 64 clients: requests/s with 99% within 1 ms</a></td><td><span class="win">simoom 26% more</span><small>108,684 req/s vs simoom 137,443 req/s</small></td><td><span class="win">simoom 95% more</span><small>70,543 req/s vs simoom 137,443 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s1-256">Status endpoint, 256 clients: requests/s with 99% within 1 ms</a></td><td><span class="win">simoom 2.5x more</span><small>57,179 req/s vs simoom 145,082 req/s</small></td><td><span class="win">simoom 3.6x more</span><small>40,551 req/s vs simoom 145,082 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s1-1024">Status endpoint, 1,024 clients: requests/s with 99% within 1 ms</a></td><td><span class="win">simoom 19% more</span><small>111,554 req/s vs simoom 133,243 req/s</small></td><td><span class="win">simoom 2.0x more</span><small>67,646 req/s vs simoom 133,243 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-p99-50k">Latency at a fixed 50,000 requests/s (256 clients): p99</a></td><td><span class="win">simoom 2.4x lower</span><small>839 µs vs simoom 356 µs</small></td><td><span class="win">simoom 4.1x lower</span><small>1,451 µs vs simoom 355 µs</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-cpu-50k">CPU per request at a fixed 50,000 requests/s</a></td><td><span class="win">simoom 26% lower</span><small>32.9 µs vs simoom 24.3 µs</small></td><td><span class="win">simoom 48% lower</span><small>47.0 µs vs simoom 24.3 µs</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s7-tls">HTTPS API, 256 clients: requests/s with 99% within 1 ms</a></td><td><span class="win">simoom 2.5x more</span><small>40,777 req/s vs simoom 103,311 req/s</small></td><td><span class="win">simoom 30% more</span><small>79,386 req/s vs simoom 103,311 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s7-full">New TLS 1.3 clients: full handshakes per second</a></td><td><span class="win">simoom 2.4x more</span><small>3,695/s vs simoom 8,973/s</small></td><td><span class="win">simoom 39% more</span><small>6,464/s vs simoom 8,973/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s7-resumed">Returning TLS 1.3 clients: resumed handshakes per second</a></td><td><span class="win">simoom 2.4x more</span><small>4,216/s vs simoom 9,924/s</small></td><td><span class="win">simoom 56% more</span><small>6,351/s vs simoom 9,924/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s5">A new connection per request, 192 clients: requests/s with 99% within 5 ms</a></td><td><span class="">level</span><small>22,618 req/s vs simoom 22,116 req/s</small></td><td><span class="win">simoom 17% more</span><small>18,847 req/s vs simoom 22,116 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s8">Service-to-service HTTP/2, 64 connections x 100 streams: requests/s with 99% within 5 ms</a></td><td><span class="win">simoom 74% more</span><small>87,443 req/s vs simoom 152,445 req/s</small></td><td><span class="loss">11% more than simoom</span><small>168,962 req/s vs simoom 152,445 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-h3">HTTP/3, 64 clients: requests/s with 99% within 1 ms</a></td><td>–</td><td><span class="loss">43% more than simoom</span><small>74,961 req/s vs simoom 52,259 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s4-64k">64 KB downloads, 64 clients: requests/s with 99% within 5 ms</a></td><td><span class="">level</span><small>3,780 req/s vs simoom 3,786 req/s</small></td><td><span class="">level</span><small>3,773 req/s vs simoom 3,786 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-idle-10k">10,000 idle connections: memory per connection</a></td><td><span class="loss">6% less than simoom</span><small>538 B vs simoom 575 B</small></td><td><span class="win">simoom 2.9x less</span><small>1,681 B vs simoom 575 B</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-idle-100k">100,000 idle connections: memory per connection</a></td><td><span class="">level</span><small>528 B vs simoom 532 B</small></td><td><span class="win">simoom 3.2x less</span><small>1,680 B vs simoom 532 B</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s9">Traffic spike at 195,000 requests/s offered: answers within 1 ms per second</a></td><td><span class="loss">4.7x more than simoom</span><small>29,135 req/s vs simoom 6,264 req/s</small></td><td><span class="win">simoom 27x more</span><small>231 req/s vs simoom 6,264 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s9-total">Traffic spike: all answers per second</a></td><td><span class="">level</span><small>160,028 req/s vs simoom 159,868 req/s</small></td><td><span class="win">simoom 2.5x more</span><small>65,179 req/s vs simoom 159,868 req/s</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-s10">Under 11,000 slow attackers: p99 of real requests</a></td><td><span class="win">simoom 2.0x lower</span><small>1,146 µs vs simoom 568 µs</small></td><td><span class="loss">19% lower than simoom</span><small>462 µs vs simoom 568 µs</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-cold-plain">Start-up, process start to first answer: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket)</a></td><td><span class="win">simoom 22x faster</span><small>19.57 ms vs simoom 0.90 ms</small></td><td><span class="win">simoom 16x faster</span><small>14.34 ms vs simoom 0.90 ms</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-cold">Start-up, process start to first answer: simoom&#x27;s full server (also TLS 1.3 and HTTP/3)</a></td><td><span class="win">simoom 16x faster</span><small>19.57 ms vs simoom 1.20 ms</small></td><td><span class="win">simoom 12x faster</span><small>14.34 ms vs simoom 1.20 ms</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-size-plain">Program size, stripped: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket)</a></td><td><span class="win">simoom 43% smaller</span><small>1,283 KB vs simoom 735 KB</small></td><td><span class="win">simoom 2.0x smaller</span><small>1,499 KB vs simoom 735 KB</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-size">Program size, stripped: simoom&#x27;s full server (also TLS 1.3 and HTTP/3)</a></td><td><span class="loss">17% smaller than simoom</span><small>1,283 KB vs simoom 1,550 KB</small></td><td><span class="loss">3% smaller than simoom</span><small>1,499 KB vs simoom 1,550 KB</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-base">Memory at rest (PSS)</a></td><td><span class="win">simoom 39x less</span><small>70.7 MB vs simoom 1,844 KB</small></td><td><span class="win">simoom 2.7x less</span><small>5,028 KB vs simoom 1,844 KB</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-peak-s1">Peak memory while serving the status endpoint (PSS)</a></td><td><span class="win">simoom 24x less</span><small>71.3 MB vs simoom 3,008 KB</small></td><td><span class="win">simoom 2.1x less</span><small>6,203 KB vs simoom 3,008 KB</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-peak-s7">Peak memory while serving HTTPS (PSS)</a></td><td><span class="win">simoom 11x less</span><small>86.2 MB vs simoom 8,089 KB</small></td><td><span class="win">simoom 17% less</span><small>9,701 KB vs simoom 8,089 KB</small></td></tr>
+<tr><td><a href="../../benchmarks/#m-peak-h3">Peak memory while serving HTTP/3 (PSS)</a></td><td>–</td><td><span class="loss">44% less than simoom</span><small>23.7 MB vs simoom 42.1 MB</small></td></tr></tbody></table></div><p class="note">Each cell: simoom against that server on the same droplet in the same round, median of rounds, then the server's value against simoom's in the same runs. Every measure and every other server: <a href="../../benchmarks/#field">the benchmarks</a>.</p>
+<!-- c4-cmp:end -->
   </div>
 </section>
 
@@ -165,7 +177,8 @@
         <h3>Pick nginx or h2o when</h3>
         <ul>
           <li>You need a web server, not a library: static files, a reverse proxy, load balancing, a config file your operations team already knows.</li>
-          <li>Your traffic regularly exceeds what the machine can carry and in-time answers under overload matter most: nginx led that test.</li>
+          <li>Your traffic regularly exceeds what the machine can carry and in-time answers under overload matter most: in campaign 4's traffic spike nginx answered 4.7x as many requests within 1 ms as simoom.</li>
+          <li>HTTP/3 or HTTP/2 throughput is what you need most: H2O answered 43% more HTTP/3 and 11% more HTTP/2 requests than simoom on the same droplet.</li>
           <li>Your program isn't written in Rust.</li>
           <li>You want decades of production use and a large operations community.</li>
         </ul>
@@ -174,9 +187,9 @@
         <h3>Pick simoom when</h3>
         <ul>
           <li>HTTP belongs inside your Rust program, not in a separate process.</li>
-          <li>TLS handshake rate and TLS throughput matter: +31% / +45% and +65% against h2o on the same droplet.</li>
+          <li>TLS handshake rate and HTTPS throughput matter: 39% / 56% more full / resumed handshakes and 30% more HTTPS requests per second than H2O on the same droplet, and 2.5x nginx's HTTPS throughput.</li>
           <li>You want HTTP/3 from a library, with no C toolchain and no third-party crates.</li>
-          <li>Start-up time counts: about a millisecond to the first answer.</li>
+          <li>Start-up time counts: 0.90 ms to the first answer for the default build, against 14.34 ms for H2O and 19.57 ms for nginx.</li>
         </ul>
       </div>
     </div>
@@ -191,7 +204,7 @@
         <h3>Setup</h3>
         <ul>
           <li>DigitalOcean <code>c-4</code> droplets (4 dedicated vCPUs, Xeon Platinum 8280, Bangalore), Ubuntu 24.04.</li>
-          <li>h2o built from master at commit f35c735 (the project has not tagged a release since 2019 and its docs say to build from source); nginx 1.24.0 from Ubuntu's packages.</li>
+          <li>h2o built from master at commit f35c735 (the project has not tagged a release since 2019 and its docs say to build from source); nginx from Ubuntu 24.04's packages, built without HTTP/3.</li>
           <li>Open-loop load from two separate machines.</li>
         </ul>
       </div>
@@ -200,7 +213,7 @@
         <ul>
           <li>Throughput: the highest steady rate whose p99 stays at or under 1 ms (5 ms for 64 KB bodies and HTTP/2 with 100 streams).</li>
           <li>Handshakes: closed loop, 192 connections.</li>
-          <li>Campaign 3 ran three lanes on different droplets; the analysis names the droplet for every figure, and only same-droplet figures are compared directly.</li>
+          <li>Campaign 4, 2026-11-12: simoom ran on the same droplet in the same round as nginx and H2O; every figure is the median of rounds.</li>
         </ul>
       </div>
     </div>
@@ -211,11 +224,11 @@
 <section class="c-sec faq" id="faq">
   <div class="wrap">
     <h2>Common questions</h2>
-    <details><summary>How does simoom's TLS performance compare with h2o?</summary><p>On the same 4-vCPU droplet, simoom completed 10,083 full and 11,213 resumed TLS 1.3 handshakes per second against h2o's 7,711 and 7,758 (+31% and +45%), and served 160,441 requests per second over TLS with p99 under 1 ms against h2o's 97,219 (+65%).</p></details>
-    <details><summary>Is h2o or nginx faster for HTTP/3?</summary><p>We did not measure nginx on HTTP/3: the Ubuntu 24.04 nginx package used in the benchmark had no HTTP/3 support. Against h2o on the same droplet, simoom served 106,947 HTTP/3 requests per second with p99 under 1 ms against h2o's 94,507 (+13%), and both reached the network limit on 1 MB downloads.</p></details>
+    <details><summary>How does simoom's TLS performance compare with h2o?</summary><p>In benchmark campaign 4 (2026-11-12), with both servers on the same 4-vCPU droplet in the same rounds, simoom completed 9,431 full and 10,303 resumed TLS 1.3 handshakes per second against H2O's 6,615 and 6,458 (39% and 56% more), and answered 103,311 HTTPS requests per second with 99% within 1 ms against H2O's 79,386 (30% more). Its peak memory while serving HTTPS was 7,518 KB against H2O's 9,701 KB.</p></details>
+    <details><summary>Is h2o or nginx faster for HTTP/3?</summary><p>H2O. nginx was not measured on HTTP/3: the Ubuntu 24.04 nginx package used in the benchmark has no HTTP/3 support. In benchmark campaign 4 (2026-11-12), on the same droplet in the same rounds, H2O answered 75,055 HTTP/3 requests per second with 99% within 1 ms against simoom's 52,259 (43% more), and used 43% less peak memory doing it. simoom answered 1.65 times as many HTTP/3 requests as quinn with h3 on its droplet.</p></details>
     <details><summary>Can simoom replace nginx?</summary><p>Not as a web server. simoom is a library you build into a program: it has no configuration file, no static-file server and no reverse proxy. It replaces the HTTP layer inside your program, and nginx or h2o can still sit in front of it.</p></details>
     <details><summary>Can I run simoom behind nginx or haproxy?</summary><p>Yes. In a request-smuggling test behind nginx 1.24 and haproxy 2.8, simoom saw 165 attack streams with 0 desyncs, and it accepted none of the requests that both front servers refused. In HTTP Garden, as an origin next to nginx, Apache httpd, h2o, hyper, gunicorn and Go, it had 0 desyncs.</p></details>
-    <details><summary>Where is nginx better than simoom?</summary><p>Under heavy overload: at 1.17 times what the network card can carry, nginx answered 52.4k requests within 1 ms against simoom's 6.4k, although simoom answered more in total (160.3k against 145.5k). nginx's in-time figure changed 20-fold between droplets. nginx also used slightly less memory per idle connection with 10,000 open (522 against 594 bytes), and it is a complete web server with years of operations behind it.</p></details>
+    <details><summary>Where is nginx better than simoom?</summary><p>During traffic spikes: at 195,000 requests per second offered, nginx answered 29,135 requests per second within 1 ms against simoom's 6,264 on the same droplet (4.7 times as many), while both answered about 160,000 per second in total. nginx also used 6% less memory per idle connection with 10,000 open (538 against 575 bytes; level at 100,000), and it is a complete web server with years of operations behind it. H2O, for its part, leads HTTP/2 by 11% and HTTP/3 by 43%. Figures: campaign 4, 2026-11-12.</p></details>
   </div>
 </section>
 

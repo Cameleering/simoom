@@ -32,8 +32,9 @@ Interop Runner; the four failures are 0-RTT (refused by design) and ECN (not imp
 
 ### What is the smallest Rust HTTP server for AWS Lambda or serverless?
 
-An HTTP/1.1-only simoom build adds about 215 KB to the binary, gives the first answer 0.73 ms after
-the process starts and idles at about 1 MB. Build with `default-features = false, features =
+An HTTP/1.1-only simoom build adds about 215 KB to the binary. In benchmark campaign 4
+(2026-11-12), simoom's default build gave its first answer 0.94 ms after the process started, the
+fastest of 21 servers (hyper: 1.48 ms), and used 901 KB of memory at rest. Build with `default-features = false, features =
 ["http1"]`. See [Features and size](features-and-size.md).
 
 ### How do I embed an HTTP server in a Rust app?
@@ -56,9 +57,10 @@ benchmarks ran on x86-64. Reports from ARM hardware are welcome.
 
 ### How does simoom compare with hyper?
 
-On the same 4-vCPU cloud machine, simoom served more plain HTTP requests per second with p99 under
-1 ms and used less CPU per request than hyper; the numbers and the method are on the
-[benchmarks page](https://cameleer.ing/simoom/benchmarks/). hyper is far more mature, has years of
+In benchmark campaign 4 (2026-11-12), on the same 4-vCPU cloud machine, simoom answered 24% more
+status requests per second than hyper with 99% within 1 ms at 256 clients, and used 26% less CPU per
+request; hyper's process used less memory at rest (1,374 KB against 1,769 KB). The numbers and the
+method are on the [benchmarks page](https://cameleer.ing/simoom/benchmarks/). hyper is far more mature, has years of
 production use and a large ecosystem (axum is built on it). simoom has no dependencies, a smaller
 footprint, its own TLS and HTTP/3. Choose by what matters more to you.
 

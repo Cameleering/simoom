@@ -24,7 +24,7 @@ The pages live under the main site's host and load its shared assets (/assets/si
 
 Page conventions: the first line under the H1 is a blockquote that answers the page's question
 (it becomes the meta description); "## Common questions" with "### question" headings becomes
-FAQPage structured data. STATUS.md, BUGS.md, website-plan.md, design/ and parity/ are working
+FAQPage structured data. STATUS.md, BUGS.md, website-plan.md, benchmark-review.md, design/ and parity/ are working
 documents and stay in the repository.
 """
 
@@ -41,7 +41,7 @@ import time
 # Files that exist only for the Read the Docs build (docs/conf.py), skipped here.
 SPHINX_ONLY = {"index.md", "conf.py", "requirements.txt"}
 # Working documents for the project (plans and strategy) that stay in the repository only.
-INTERNAL = {"website-plan.md", "STATUS.md", "BUGS.md"}
+INTERNAL = {"website-plan.md", "STATUS.md", "BUGS.md", "benchmark-review.md"}
 # Directories of working documents (design notes for planned work, release-note drafts that become
 # GitHub Release bodies), also repository only.
 INTERNAL_DIRS = {"design", "parity", "release-notes"}

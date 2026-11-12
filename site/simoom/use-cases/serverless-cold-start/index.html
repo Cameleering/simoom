@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rust web server for AWS Lambda cold starts | simoom</title>
-<meta name="description" content="A Rust HTTP server that answers 0.73 ms after the process starts and idles at about 1 MB, for scale-to-zero functions and containers. No tokio.">
+<meta name="description" content="A Rust HTTP server whose default build answered 0.94 ms after the process started, first of 21 servers in campaign 4, with 901 KB at rest. For scale-to-zero functions and containers. No tokio.">
 <link rel="canonical" href="https://cameleer.ing/simoom/use-cases/serverless-cold-start/">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="simoom">
 <meta property="og:title" content="An HTTP server for serverless functions and cold starts">
-<meta property="og:description" content="0.73 ms from process start to the first answer, 0.87 ms with TLS, about 1 MB idle: the HTTP layer stops being the cold start.">
+<meta property="og:description" content="0.94 ms from process start to the first answer (hyper: 1.48 ms), 1.49 ms with TLS 1.3 and HTTP/3, 901 KB at rest: the HTTP layer stops being the cold start. Campaign 4, 2026-11-12.">
 <meta property="og:url" content="https://cameleer.ing/simoom/use-cases/serverless-cold-start/">
 <meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
@@ -99,7 +99,7 @@
    "name": "What is the smallest Rust web server for AWS Lambda or other serverless platforms?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "An HTTP/1.1-only simoom build adds about 215 KB to a binary, gives the first answer 0.73 ms after the process starts and idles at about 1 MB. Turn off the default features and keep http1."
+    "text": "An HTTP/1.1-only simoom build adds about 215 KB to a binary. In benchmark campaign 4 (2026-11-12), simoom's default build (HTTP/1.1, HTTP/2, WebSocket) gave its first answer 0.94 ms after the process started, the fastest of 21 servers (hyper: 1.48 ms), and used 901 KB of memory at rest. For the smallest build, turn off the default features and keep http1."
    }
   },
   {
@@ -115,7 +115,7 @@
    "name": "How fast is the cold start with TLS?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "0.87 ms from process start to the first answer with a P-256 certificate, against 1.37 ms for Cameleer's old server on the same machine. With HTTP/3 enabled as well it was 1.91 ms."
+    "text": "In benchmark campaign 4 (2026-11-12), simoom's full server, with TLS 1.3 and HTTP/3 built in, gave its first answer 1.49 ms after the process started: level with hyper (1.48 ms) on the same droplet, and ahead of axum with rustls (1.91 ms). With HTTP/3 on, simoom starts every event loop at once; the default build starts one loop and adds the others when it gets busy."
    }
   },
   {
@@ -131,7 +131,7 @@
    "name": "How much memory does an idle simoom server use?",
    "acceptedAnswer": {
     "@type": "Answer",
-    "text": "About 1 MB of PSS after one request: 1,018 KB plain and 1,360 KB with TLS, measured on WSL2."
+    "text": "In benchmark campaign 4 (2026-11-12), the default build's process used 901 KB of PSS at rest, and the full server with TLS 1.3 and HTTP/3 used 1,844 KB. On the same droplets hyper used 1,374 KB and axum 1,518 KB, less than simoom's full server, and nginx 72,469 KB."
    }
   }
  ]
@@ -160,11 +160,11 @@
     <p class="crumbs"><a href="../../">simoom</a> / <a href="../">Use cases</a> / Serverless</p>
     <p class="kicker">Serverless and scale to zero</p>
     <h1>An HTTP layer that isn't your cold start</h1>
-    <p class="lede">A function that scales to zero pays for its start-up on every cold request, and pays for its memory every second it runs. simoom gives the first answer 0.73 ms after the process starts and idles at about 1 MB, so the time and the memory go to your code.</p>
+    <p class="lede">A function that scales to zero pays for its start-up on every cold request, and pays for its memory every second it runs. In benchmark campaign 4 (2026-11-12), simoom's default build gave its first answer 0.94 ms after the process started, the fastest of 21 servers, and sat at 901 KB of memory at rest, so the time and the memory go to your code.</p>
     <div class="stats">
-      <div class="stat"><b>0.73 ms</b><span>from process start to the first answer, plain HTTP</span></div>
-      <div class="stat"><b>0.87 ms</b><span>the same with TLS 1.3 (P-256)</span></div>
-      <div class="stat"><b>~1 MB</b><span>idle memory (PSS) after the first request</span></div>
+      <div class="stat"><b>0.94 ms</b><span>from process start to the first answer, default build; first of 21 servers, hyper 1.48 ms</span></div>
+      <div class="stat"><b>1.49 ms</b><span>the same for the full server with TLS 1.3 and HTTP/3; level with hyper</span></div>
+      <div class="stat"><b>901 KB</b><span>memory at rest (PSS), default build; full server 1,844 KB</span></div>
       <div class="stat"><b>215 KB</b><span>added to the binary for HTTP/1.1 only</span></div>
     </div>
   </div>
@@ -173,15 +173,23 @@
 <section class="c-sec" id="numbers">
   <div class="wrap">
     <h2>Start-up, measured</h2>
-    <p class="intro">Cold start is the time from spawning the process to the first successful answer on its port. Each comparison ran on one machine, with both servers returning the same 13-byte answer.</p>
+    <p class="intro">Cold start is the time from spawning the process to the first successful answer on its port. In campaign 4 every server ran on the same DigitalOcean c-4 droplet as simoom, in the same round.</p>
     <div class="c-table-wrap"><table class="c-table">
-      <thead><tr><th>server</th><th class="num">cold start, plain</th><th class="num">cold start, TLS</th><th class="num">idle memory (PSS)</th></tr></thead>
+      <thead><tr><th>server</th><th class="num">start-up to first answer</th><th class="num">memory at rest (PSS)</th><th class="num">program size, stripped</th></tr></thead>
       <tbody>
-        <tr><td>simoom</td><td class="num"><span class="win">0.73 ms</span></td><td class="num"><span class="win">0.87 ms</span></td><td class="num">1,018 KB plain · 1,360 KB TLS</td></tr>
-        <tr><td>Cameleer's old server (cameleer-http)</td><td class="num">0.77 ms</td><td class="num">1.37 ms</td><td class="num">1,017 KB plain · 1,317 KB TLS</td></tr>
+        <tr><td>simoom, default build (HTTP/1.1, HTTP/2, WebSocket)</td><td class="num"><span class="win">0.94 ms</span></td><td class="num"><span class="win">901 KB</span></td><td class="num">735 KB</td></tr>
+        <tr><td>simoom, full server (also TLS 1.3 and HTTP/3)</td><td class="num">1.49 ms</td><td class="num">1,844 KB</td><td class="num">1,550 KB</td></tr>
+        <tr><td>hyper</td><td class="num">1.48 ms</td><td class="num">1,374 KB</td><td class="num">2,069 KB</td></tr>
+        <tr><td>axum</td><td class="num">1.56 ms</td><td class="num">1,518 KB</td><td class="num">2,246 KB</td></tr>
+        <tr><td>actix-web</td><td class="num">1.81 ms</td><td class="num">1,885 KB</td><td class="num">2,450 KB</td></tr>
+        <tr><td>Go net/http</td><td class="num">3.74 ms</td><td class="num">8,088 KB</td><td class="num">6,180 KB</td></tr>
+        <tr><td>may-minihttp</td><td class="num">8.03 ms</td><td class="num">9,061 KB</td><td class="num"><span class="win">515 KB</span></td></tr>
+        <tr><td>nginx</td><td class="num">19.57 ms</td><td class="num">72,469 KB</td><td class="num">1,283 KB</td></tr>
+        <tr><td>Kestrel (.NET)</td><td class="num">366.56 ms</td><td class="num">70,559 KB</td><td class="num">not a single executable</td></tr>
+        <tr><td>Netty (Java)</td><td class="num">467.01 ms</td><td class="num">74,067 KB</td><td class="num">not a single executable</td></tr>
       </tbody>
     </table></div>
-    <p class="note">WSL2, 10 alternating rounds, 2026-11-11 (TLS memory after the K11 fix, 2026-11-12). With TLS and HTTP/3 together, simoom's start was 1.91 ms (P-256), because HTTP/3 servers start every loop at once. The platform's own sandbox start comes on top for every runtime. Details: <a href="../../benchmarks/#original">benchmarks</a>.</p>
+    <p class="note">Campaign 4, 2026-11-12, a selection of the 21 servers; the median of the 20 others started 6.4x slower than simoom's default build. Program size is shown only for self-contained executables. With HTTP/3 on, simoom starts every event loop at once instead of one, part of why the full server starts later than the default build. The platform's own sandbox start comes on top for every runtime. All servers: <a href="../../benchmarks/#m-cold-plain">start-up</a>, <a href="../../benchmarks/#m-base">memory at rest</a>. On a workstation, against the server it replaced, see <a href="../../benchmarks/#original">Cameleer's old server</a>.</p>
   </div>
 </section>
 
@@ -235,11 +243,11 @@ server.join();</pre>
 <section class="c-sec faq" id="faq">
   <div class="wrap">
     <h2>Common questions</h2>
-    <details><summary>What is the smallest Rust web server for AWS Lambda or other serverless platforms?</summary><p>An HTTP/1.1-only simoom build adds about 215 KB to a binary, gives the first answer 0.73 ms after the process starts and idles at about 1 MB. Turn off the default features and keep http1.</p></details>
+    <details><summary>What is the smallest Rust web server for AWS Lambda or other serverless platforms?</summary><p>An HTTP/1.1-only simoom build adds about 215 KB to a binary. In benchmark campaign 4 (2026-11-12), simoom's default build (HTTP/1.1, HTTP/2, WebSocket) gave its first answer 0.94 ms after the process started, the fastest of 21 servers (hyper: 1.48 ms), and used 901 KB of memory at rest. For the smallest build, turn off the default features and keep http1.</p></details>
     <details><summary>Does simoom speak the AWS Lambda Runtime API?</summary><p>No. simoom serves HTTP on a socket, which suits container platforms such as Cloud Run directly. On Lambda it runs behind an adapter or in a container image. Cameleer, which uses simoom as its HTTP engine, is its own Lambda runtime.</p></details>
-    <details><summary>How fast is the cold start with TLS?</summary><p>0.87 ms from process start to the first answer with a P-256 certificate, against 1.37 ms for Cameleer's old server on the same machine. With HTTP/3 enabled as well it was 1.91 ms.</p></details>
+    <details><summary>How fast is the cold start with TLS?</summary><p>In benchmark campaign 4 (2026-11-12), simoom's full server, with TLS 1.3 and HTTP/3 built in, gave its first answer 1.49 ms after the process started: level with hyper (1.48 ms) on the same droplet, and ahead of axum with rustls (1.91 ms). With HTTP/3 on, simoom starts every event loop at once; the default build starts one loop and adds the others when it gets busy.</p></details>
     <details><summary>Do I need tokio for a serverless HTTP handler in Rust?</summary><p>No. simoom has no async runtime. A service is a plain function; slow work goes to a bounded offload pool or to your own threads.</p></details>
-    <details><summary>How much memory does an idle simoom server use?</summary><p>About 1 MB of PSS after one request: 1,018 KB plain and 1,360 KB with TLS, measured on WSL2.</p></details>
+    <details><summary>How much memory does an idle simoom server use?</summary><p>In benchmark campaign 4 (2026-11-12), the default build's process used 901 KB of PSS at rest, and the full server with TLS 1.3 and HTTP/3 used 1,844 KB. On the same droplets hyper used 1,374 KB and axum 1,518 KB, less than simoom's full server, and nginx 72,469 KB.</p></details>
   </div>
 </section>
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rust HTTP server comparison: simoom vs the rest | simoom</title>
-<meta name="description" content="simoom compared with hyper, axum, may-minihttp, h2o, nginx and the no-tokio options: same-machine numbers, the losses, and when to pick the other one.">
+<meta name="description" content="simoom compared with hyper, axum, may-minihttp, h2o, nginx and the no-tokio options: same-machine numbers from campaign 4, the losses, and when to pick the other one.">
 <link rel="canonical" href="https://cameleer.ing/simoom/compare/">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="website">
@@ -64,13 +64,15 @@
     <p class="crumbs"><a href="../">simoom</a> / Compare</p>
     <p class="kicker">Same machine. Losses included.</p>
     <h1>simoom compared with the HTTP servers you already know</h1>
-    <p class="lede">Every comparison here was measured with both servers on the same 4-vCPU cloud machine, with the load coming at a fixed rate from two other machines. Each page puts the wins and the losses in the same table, and says plainly when the other server is the better choice.</p>
-    <div class="stats">
-      <div class="stat"><b>172,638</b><span>plain requests per second with p99 under 1 ms, 256 connections</span><small>hyper 144,443 · may-minihttp 150,673</small></div>
-      <div class="stat"><b>+65%</b><span>requests per second over TLS 1.3 against h2o</span><small>160,441 vs 97,219</small></div>
-      <div class="stat"><b>+13%</b><span>HTTP/3 requests per second against h2o</span><small>106,947 vs 94,507</small></div>
-      <div class="stat"><b>6 losses</b><span>published next to the wins</span><small>overload, degraded network, and more</small></div>
-    </div>
+    <p class="lede">Every comparison here comes from benchmark campaign 4 (2026-11-12): simoom and the other server on the same 4-vCPU cloud machine in the same round, with the load coming at a fixed rate from two other machines. Each page puts the wins and the losses in the same table, and says plainly when the other server is the better choice.</p>
+<!-- c4-stats:begin -->
+<div class="stats">
+<div class="stat"><b>1.5x</b><span>Status endpoint, 256 clients: simoom against the median of 18 servers, range 0.94–12x; ahead of 16; behind may-minihttp</span></div>
+<div class="stat"><b>1.5x</b><span>CPU per request at 50,000 req/s: simoom against the median of 18 servers, range 1.17–3.5x; ahead of 18</span></div>
+<div class="stat"><b>20x</b><span>Memory per idle connection, 10,000 open: simoom against the median of 18 servers, range 0.94–49x; ahead of 17; behind nginx</span></div>
+<div class="stat"><b>6.4x</b><span>Start-up to first answer: simoom against the median of 20 servers, range 1.57–762x; ahead of 20</span></div>
+</div>
+<!-- c4-stats:end -->
   </div>
 </section>
 
@@ -79,9 +81,9 @@
     <h2>Comparisons</h2>
     <p class="intro">Pick the one you are weighing simoom against.</p>
     <div class="hub-list">
-      <a class="card" href="simoom-vs-hyper-axum/"><h3>hyper and axum vs simoom</h3><p>The default Rust HTTP library and the framework built on it, against an engine with no async runtime and no dependencies. Plain HTTP, CPU per request, cold start, and when tokio is the right call.</p><span class="res">+20% <small>plain HTTP at 256 connections vs hyper</small></span></a>
-      <a class="card" href="simoom-vs-may-minihttp/"><h3>may-minihttp vs simoom</h3><p>Two servers built for raw throughput. Where simoom leads since the 2026-11-12 round, where may-minihttp holds up better, and what changed between campaigns.</p><span class="res">+15% <small>plain HTTP at 256 connections</small></span></a>
-      <a class="card" href="simoom-vs-nginx-h2o/"><h3>h2o and nginx vs simoom</h3><p>Standalone C servers against a library: TLS handshakes, HTTP/3, large responses, idle memory and overload, plus how to run them together.</p><span class="res">+31% / +45% <small>full / resumed TLS handshakes vs h2o</small></span></a>
+      <a class="card" href="simoom-vs-hyper-axum/"><h3>hyper and axum vs simoom</h3><p>The default Rust HTTP library and the framework built on it, against an engine with no async runtime and no dependencies. Status endpoint, CPU per request, TLS, start-up, and when tokio is the right call.</p><span class="res">+24% <small>status requests/s at 256 clients vs hyper</small></span></a>
+      <a class="card" href="simoom-vs-may-minihttp/"><h3>may-minihttp vs simoom</h3><p>Two servers built for raw throughput. may-minihttp leads plain throughput and program size; simoom leads CPU per request, start-up, memory and the protocols it covers.</p><span class="res">&minus;6% <small>status requests/s at 256 clients: may-minihttp leads</small></span></a>
+      <a class="card" href="simoom-vs-nginx-h2o/"><h3>h2o and nginx vs simoom</h3><p>Standalone C servers against a library: TLS, HTTP/2, HTTP/3, idle memory and overload, where H2O and nginx lead, plus how to run them together.</p><span class="res">+39% / +56% <small>full / resumed TLS handshakes vs H2O</small></span></a>
       <a class="card" href="../alternatives/rust-http-server-without-tokio/"><h3>Rust HTTP servers without tokio</h3><p>std::net by hand, tiny_http, rouille, may-minihttp and simoom: the options when you don't want an async runtime, and when tokio is simply the better choice.</p><span class="res">5 <small>options, compared honestly</small></span></a>
     </div>
   </div>
@@ -97,17 +99,17 @@
         <ul>
           <li>DigitalOcean <code>c-4</code> droplets: 4 dedicated vCPUs, Xeon Platinum 8280.</li>
           <li>Load from two separate machines, open loop: requests keep arriving at a fixed rate, as real traffic does.</li>
-          <li>The headline figure is the highest steady rate at which 99% of answers arrive within 1 ms.</li>
-          <li>Only servers on the same droplet are compared: droplets of the same type differed by up to 7x for every server.</li>
+          <li>The main throughput figure is the highest steady rate at which 99% of answers arrive within 1 ms; every ratio is the median of rounds.</li>
+          <li>Only servers on the same droplet are compared: droplets of the same type differ, so simoom runs on every droplet in every round, next to each competitor.</li>
         </ul>
       </div>
       <div class="pane">
         <h3>Published</h3>
         <ul>
-          <li>Pinned competitor versions: hyper 1.12.0, may-minihttp 0.1.11, xitca-web 0.7.1, h2o at commit f35c735, nginx 1.24.0.</li>
+          <li>Pinned competitor versions, among them hyper 1.12.0, axum 0.8.9, actix-web 4.18.2, may-minihttp 0.1.11, xitca-web 0.7.1, H2O at commit f35c735, Caddy 2.11.9, Envoy 1.40.2; nginx and HAProxy from Ubuntu 24.04's packages.</li>
           <li>Raw HDR logs, scripts and analyses in the repository under <code>bench/results/</code>.</li>
           <li>Every loss sits in the same table as the wins.</li>
-          <li>Servers not measured (axum, actix-web, tiny_http, rouille, Caddy) get no numbers here.</li>
+          <li>Servers not measured (tiny_http, rouille) get no numbers here.</li>
         </ul>
       </div>
     </div>

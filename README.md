@@ -47,8 +47,9 @@ fn main() {
 }
 ```
 
-That server starts in under a millisecond, idles at about 1 MB of memory, and adds about
-215 KB to your binary if HTTP/1.1 is all you need.
+In benchmark campaign 4 (2026-11-12), simoom's default build answered its first request 0.94 ms
+after the process started, the fastest of 21 servers, and used 901 KB of memory at rest. An
+HTTP/1.1-only build adds about 215 KB to your binary.
 
 ## Contents
 
@@ -87,9 +88,9 @@ Cameleer needed something better, with rules that ruled out the usual answers:
 
 So simoom was written from the ground up: the HTTP parsers, HTTP/2, QUIC and HTTP/3, the TLS
 1.3 stack and its cryptography, the compression codecs and the event loops for four operating
-systems. On the same machine as Cameleer's old server, simoom serves 1.7 to 1.8 times as many
-requests, with a p99 latency of 0.32 to 0.44 ms instead of 0.87 to 0.91 ms, and holds 1,000 idle
-connections in 2.7 MB instead of 7.7 MB.
+systems. On a workstation, against Cameleer's old server, simoom serves 1.7 to 1.8 times as
+many requests, with a p99 latency of 0.32 to 0.44 ms instead of 0.87 to 0.91 ms, and holds 1,000
+idle connections in 2.7 MB instead of 7.7 MB.
 
 **The name.** A simoom is a hot, fast wind that crosses the desert. It belongs to the same
 caravan as Cameleer and Cameleering.
@@ -101,36 +102,42 @@ and the scenarios where simoom loses are published next to the ones where it win
 
 ## What you get, in numbers
 
-Every comparison below was measured on the same machine as the server it is compared with. The
-method is under [The benchmarks](#the-benchmarks-and-how-they-were-run).
+Every comparison below is from benchmark campaign 4 (2026-11-12): simoom and 20 other servers on
+DigitalOcean `c-4` droplets, with simoom on the same droplet in the same round as each of them, and
+each figure the median of rounds. The method is under
+[The benchmarks](#the-benchmarks-and-how-they-were-run).
 
 | | simoom | compared with |
 |---|---|---|
-| Requests per second with p99 under 1 ms, plain HTTP, 256 connections | **172,638** | hyper 144,443 · may-minihttp 150,673 |
-| The same over TLS 1.3 | **160,441** | h2o 97,219 |
-| HTTP/3 requests per second with p99 under 1 ms | **106,947** | h2o 94,507 |
-| New TLS 1.3 connections per second, full / resumed | **10,083 / 11,213** | h2o 7,711 / 7,758 |
-| CPU time per request at 50,000 requests per second | **25.05 µs** | hyper 28.10 µs |
-| Start-up to the first answer, plain / TLS | **0.73 ms / 0.87 ms** | Cameleer's old server 0.77 / 1.37 ms |
-| Memory per idle connection, 100,000 open | **520–533 bytes** | nginx 532 bytes |
+| Start-up to the first answer, default build (HTTP/1.1, HTTP/2, WebSocket) | **0.94 ms**, 1st of 21 | hyper 1.48 ms; the median of the 20 others 6.4x slower |
+| Start-up, full server with TLS 1.3 and HTTP/3 | 1.49 ms | hyper 1.48 ms (level) |
+| Memory per idle connection, 10,000 open | **573 bytes**, 2nd of 19 | nginx 538 bytes (6% less); hyper 17,790 bytes |
+| CPU time per request at 50,000 requests per second | **23.6 µs**, 1st of 19 | hyper 32.6 µs |
+| Status endpoint, 256 clients, requests per second with 99% within 1 ms | 137,889, 2nd of 19 | may-minihttp 6% more; hyper 110,931 |
+| HTTPS API, 256 clients, requests per second with 99% within 1 ms | **134,004**, 1st of 8 | axum + rustls 88,990; simoom also 30% ahead of H2O |
+| HTTP/3, 64 clients, requests per second with 99% within 1 ms | 2nd of 4 | H2O 43% more; simoom 1.65x quinn + h3 |
+| Program size, stripped, default build | 735 KB | hyper 2,069 KB; may-minihttp 515 KB |
 | Code added to your binary, HTTP/1.1 only | **215 KB** | budget 250 KB |
 | Code added to your binary, everything including HTTP/3 | **935 KB** | budget 1 MB |
 
-Not every row is a win. simoom falls behind under heavy overload, on a degraded network path and
-in a few other cases, all listed under [Where simoom is behind](#where-simoom-is-behind).
+Not every row is a win. may-minihttp leads plain throughput, axum + rustls leads full TLS
+handshakes, H2O leads HTTP/2 and HTTP/3, and several servers do better during traffic spikes and
+under slow attackers; all of it is listed under [Where simoom is behind](#where-simoom-is-behind).
+The last two rows come from `scripts/size.sh`, not from the campaign.
 
 ## Where simoom fits
 
 **On a device at the edge.** A gateway on a factory floor has an ARM chip, 256 MB of RAM and a
 firmware image that has to stay small. It needs to accept readings over HTTP and offer a small
-status page. With only the `http1` feature, simoom adds about 215 KB to the binary and holds
-idle connections in about half a kilobyte each. Even with TLS, the build needs no C compiler, no
+status page. With only the `http1` feature, simoom adds about 215 KB to the binary, and in
+campaign 4 it held idle connections in 532 to 573 bytes each. Even with TLS, the build needs no C compiler, no
 cmake and no OpenSSL headers for the target. (The ARM code paths compile but have not been
 benchmarked yet.)
 
 **In a serverless function.** A function that scales to zero pays for its start-up on every cold
-request. simoom gives the first answer 0.73 ms after the process starts, about 0.87 ms with TLS,
-and idles at about 1 MB, so the time and memory go to your code instead of the HTTP layer.
+request. In campaign 4, simoom's default build gave its first answer 0.94 ms after the process
+started (hyper: 1.48 ms), the full server with TLS 1.3 and HTTP/3 1.49 ms, and the default build
+used 901 KB at rest, so the time and memory go to your code instead of the HTTP layer.
 
 **Inside a CLI or desktop app.** A command-line tool needs a local callback for an OAuth login. A
 desktop app wants to show a live dashboard in the browser and push updates over WebSocket or
@@ -400,8 +407,8 @@ x86-64 Linux with the `dist` profile ([`scripts/size.sh`](scripts/size.sh)):
 | everything: HTTP/1.1, HTTP/2, HTTP/3, TLS, WebSocket, io_uring | 935,064 B | 1,048,576 B |
 
 The HTTP/1.1 and full rows are from 2026-11-11 and the TLS row from 2026-11-12
-([BUGS.md](docs/BUGS.md) U9). As a whole executable, the HTTP/1.1-only server is 536 KB stripped,
-against may-minihttp's 515 KB; about 181 KB of either is the standard library's backtrace code.
+([BUGS.md](docs/BUGS.md) U9). As whole programs in benchmark campaign 4, simoom's default build
+was 735 KB stripped, against may-minihttp's 515 KB and hyper's 2,069 KB.
 
 ### What is inside
 
@@ -424,61 +431,50 @@ cryptography is planned to move into **ksar**, a shared crypto family for Camele
 
 ## The benchmarks, and how they were run
 
-- **Machines:** DigitalOcean `c-4` droplets: 4 dedicated vCPUs, Xeon Platinum 8280, Bangalore.
-- **Load:** from two separate load machines, open loop, so a slow server can't slow the load down
-  and hide its own latency.
-- **Headline figure:** the highest steady rate at which 99% of requests are answered within 1 ms.
-- **The basic test (S1):** a GET with a 13-byte answer, one request in flight per connection.
-- **Same machine only:** droplets of the same type differed by up to 7x for every server, so
-  only servers measured on the same droplet are compared.
-- **Everything is published:** the raw HDR logs, the scripts and the analyses are committed.
+Campaign 4, 2026-11-12. Charts for every measure and every server:
+[cameleer.ing/simoom/benchmarks](https://cameleer.ing/simoom/benchmarks/); the tables:
+[report.md](bench/results/2026-11-12-campaign4/report.md); why the campaign was run this way:
+[docs/benchmark-review.md](docs/benchmark-review.md).
 
-### Plain HTTP, 2026-11-12
+- **Machines:** DigitalOcean `c-4` droplets: 4 dedicated vCPUs, Xeon Platinum 8280, Bangalore,
+  Ubuntu 24.04, a network card with one receive queue. Three lanes, each with its own server
+  droplet and two load droplets; the server droplets rotate between rounds.
+- **Same droplet only:** simoom ran in every lane and every round, so every server is compared
+  with simoom on the same droplet, with the same load machines, in the same round. The published
+  ratio is the median of the per-round ratios.
+- **Load:** open loop, so a slow server can't slow the load down and hide its own latency.
+- **Throughput figure:** the highest steady rate at which 99% of answers arrive within 1 ms (5 ms
+  for new connections, downloads and HTTP/2), with no errors.
+- **Rounds:** round 1 ran every scenario for every server; rounds 2 and 3 repeated the status
+  endpoint at 256 clients, the JSON API, new connections, TLS and CPU.
+- **Everything is published:** the raw records, the scripts and the competitor programs are
+  committed under [`bench/`](bench).
 
-S1, requests per second with p99 under 1 ms, median of three rounds on one droplet. The single
-rounds are in [the analysis](bench/results/2026-11-12-epoll/analysis.md).
+### Use case by use case
 
-| server | 64 connections | 256 connections | 1,024 connections |
-|---|---:|---:|---:|
-| **simoom (epoll)** | **170,648** | **172,638** | 138,644 |
-| simoom (io_uring) | 152,714 | 172,331 | **148,429** |
-| may-minihttp | 158,598 | 150,673 | 120,610 |
-| hyper | 122,240 | 144,443 | 115,102 |
+| use case and measure | simoom's place | against the best other | against the median server |
+|---|---|---|---|
+| Status endpoint, 256 clients: requests/s with 99% within 1 ms | 2nd of 19 | may-minihttp: 6% more than simoom | simoom 50% more |
+| JSON API, 1 KB in and out, 256 clients | 2nd of 12 | may-minihttp: 5% more than simoom | simoom 27% more |
+| HTTPS API, 256 clients | 1st of 8 | axum + rustls: simoom 30% more | simoom 2.1x more |
+| A new connection per request, 192 clients (99% within 5 ms) | 5th of 19 | xitca-web: 29% more than simoom | simoom 10% more |
+| HTTP/2, 64 connections x 100 streams (99% within 5 ms) | 2nd of 12 | H2O: 11% more than simoom | simoom 74% more |
+| HTTP/3, 64 clients | 2nd of 4 | H2O: 43% more than simoom | simoom 65% more |
+| 64 KB downloads, 64 clients (99% within 5 ms) | joint 1st of 8 | actix-web: level | level |
+| 10,000 idle connections: memory per connection | 2nd of 19 | nginx: 6% less than simoom | simoom 20x less |
+| Traffic spike at 195,000 requests/s offered: answers within 1 ms | 10th of 19 | actix-web: 22x more than simoom | 26% more than simoom |
+| Under 11,000 slow attackers: p99 of real requests | 6th of 19 | Go net/http: 44% lower than simoom | simoom 32% lower |
+| Start-up to first answer, default build | 1st of 21 | hyper: simoom 57% faster | simoom 6.4x faster |
+| CPU per request at a fixed 50,000 requests/s | 1st of 19 | may-minihttp: simoom 15% lower | simoom 1.5x lower |
 
-These figures replace the plain-HTTP rows of the earlier campaign below, in which simoom trailed
-may-minihttp at 64 and 256 connections and hyper at 1,024. The cause was a loop sharing a CPU with
-the network card's interrupts; the fix (BUGS.md K12) and the before-and-after runs are in the
-analysis.
-
-TLS 1.3 handshakes per second in the same round, 192 connections, four runs: 8.7k full and 9.8k
-resumed with epoll, 8.9k–9.4k and 9.9k–10.6k with io_uring. CPU per request at 50k req/s:
-25.47 µs with epoll, 25.26 µs with io_uring.
-
-### Against nginx, h2o, hyper, haproxy and others, 2026-11-11
-
-Each row compares servers that ran on the same droplet;
-[the analysis](bench/results/2026-11-11-campaign3/analysis.md) names the droplet for each figure.
-
-| scenario | simoom | best other on the same droplet |
-|---|---:|---:|
-| TLS 1.3 full / resumed handshakes per second | **10,083 / 11,213** | h2o 7,711 / 7,758 (simoom +31% / +45%) |
-| S1 over TLS, 256 connections | **160,441** | h2o 97,219 (simoom +65%) |
-| HTTP/3 S1 | **106,947** | h2o 94,507 (simoom +13%) |
-| CPU per request at 50k req/s | **25.05 µs** | hyper 28.10 µs (simoom 11% less) |
-| 1 KB JSON echo | 153,526 | hyper 152,822 (a tie) |
-| HTTP/2 h2c, 100 streams, p99 under 5 ms | 152.5k | h2o 152.6k (a tie, at the network limit) |
-| 1 MB responses, plain and TLS | 1.95 Gbit/s | nginx 1.95 Gbit/s (a tie, at the network limit) |
-| peak memory during S1 at 256 connections | **2.5 MB** | xitca 4.1 MB |
-| memory per idle connection, 10k / 100k open | 594 / 533 B (default build 520 B at 100k) | nginx 522 / 532 B |
-| a handler that blocks for 100 ms, 500 clients | 4,925 req/s, 0 errors | Cameleer's old server 4,925 |
-
-Full tables: [summary.md](bench/results/2026-11-11-campaign3/summary.md) and
-[compare.md](bench/results/2026-11-11-campaign3/compare.md).
+Earlier campaigns (1 to 3) measured fewer servers, not always on the same droplet as simoom; their
+records stay in [`bench/results/`](bench/results) but their figures are no longer quoted.
 
 ### Against the server it replaced
 
 Cameleer's old thread-per-connection server (`cameleer-http`) and simoom, both returning the same
-13-byte answer on the same machine (WSL2). Start-up and idle memory, 10 alternating rounds,
+13-byte answer on a workstation (WSL2). These figures compare simoom only with the server it
+replaced, on that machine; for every other server see campaign 4 above. Start-up and idle memory, 10 alternating rounds,
 2026-11-11:
 
 | build | start-up to first answer | idle memory (PSS) |
@@ -499,22 +495,31 @@ Under load (server on 4 CPUs, 64 connections, closed loop, 2026-11-09):
 
 ## Where simoom is behind
 
-Losses are part of the result:
+Losses are part of the result. All figures are from campaign 4 (2026-11-12), each server against
+simoom on the same droplet:
 
-- **Heavy overload.** At 195k req/s offered, 1.17 times what the droplet's network card can
-  carry, simoom answers the most requests in total (160.3k against nginx's 145.5k), but nginx
-  answers far more of them within 1 ms (52.4k against simoom's 6.4k). nginx's figure changed by
-  20x between droplets; this is recorded as a limit of the benchmark at that rate
-  ([BUGS.md](docs/BUGS.md) K13).
-- **A degraded network path.** On a droplet with a slow network path, may-minihttp kept 114.7k
-  req/s while simoom and the others fell to 17–62k. simoom's fix for interrupt placement (K12)
-  has not been rerun on such a droplet.
-- **A new connection for every request.** On one droplet simoom handled 19.3k connections per
-  second against xitca's 24.3k (−21%). On another, simoom led with 22.1k against hyper's 19.3k.
-- **Slow attackers.** With 10,000 slowloris and 1,000 slow-read attackers, simoom's p99 for real
-  requests was 8% above haproxy's (784 µs against 724 µs).
-- **Idle memory with TLS:** 3.3% above Cameleer's old server (1,360 KB against 1,317 KB).
-- **Executable size:** the HTTP/1.1-only executable is 4% larger than may-minihttp's.
+- **Plain throughput.** may-minihttp answered 15%, 6% and 16% more status-endpoint requests at 64,
+  256 and 1,024 clients, and 5% more on the 1 KB JSON API. At 64 clients Vert.x (50%), fasthttp
+  (25%), Netty (20%) and uWebSockets.js (13%) also answered more than simoom on their droplet.
+- **A new connection for every request.** xitca-web handled 29% more, Cameleer's old server 9%,
+  actix-web 5% and may-minihttp 4%.
+- **Full TLS handshakes.** axum with rustls completed 24% more full handshakes per second (11,633
+  against 9,530) and 9% more resumed ones.
+- **HTTP/2 and HTTP/3.** H2O answered 11% more HTTP/2 and 43% more HTTP/3 requests, and used 43%
+  less peak memory serving HTTP/3.
+- **Traffic spikes.** At 195,000 requests per second offered, simoom was 10th of 19 on answers
+  within 1 ms: actix-web answered 22x as many, nginx 4.7x and xitca-web 3.2x. In total answers
+  simoom was level with most servers.
+- **Slow attackers.** Under 11,000 slow attackers simoom was 6th of 19 on p99 of real requests:
+  Go net/http (44% lower), HAProxy (34%), Vert.x (27%), Netty (20%) and H2O (19%) did better.
+- **Memory.** nginx used 6% less per idle connection with 10,000 open (level at 100,000). hyper,
+  axum, xitca-web and Cameleer's old server used less memory at rest than simoom's full server
+  (1,844 KB; the default build used 901 KB).
+- **Program size.** may-minihttp's program is 515 KB against 735 KB for simoom's default build.
+  The full server, at 1,550 KB, is larger than may-minihttp, xitca-web, nginx, Cameleer's old
+  server and H2O.
+- **Against the server it replaced, on a workstation:** idle memory with TLS was 3.3% above
+  Cameleer's old server (1,360 KB against 1,317 KB).
 
 The raw results are in [`bench/results/`](bench/results). To rerun the benchmarks, use
 [`bench/cloud/`](bench/cloud) and [`scripts/size.sh`](scripts/size.sh). If you measure something
@@ -575,13 +580,15 @@ system (Linux, Windows or macOS). It does not run on bare-metal microcontrollers
 
 Yes. simoom implements QUIC v1, HTTP/3, QPACK and TLS 1.3 itself, and HTTP/3 is a cargo feature
 of the same server that serves HTTP/1.1 and HTTP/2. It passes 54 of 58 supported
-pairs in the QUIC Interop Runner against the ngtcp2, quiche and quic-go clients, and on the same
-droplet it served 106,947 HTTP/3 requests per second with p99 under 1 ms, against h2o's 94,507.
+pairs in the QUIC Interop Runner against the ngtcp2, quiche and quic-go clients. In benchmark
+campaign 4 (2026-11-12) it answered 1.65 times as many HTTP/3 requests as quinn with h3 on the same
+droplet; H2O answered 43% more than simoom.
 
 ### What is the smallest Rust HTTP server for AWS Lambda or other serverless platforms?
 
-An HTTP/1.1-only simoom build adds about 215 KB to a binary, gives the first answer 0.73 ms after
-the process starts and idles at about 1 MB. Turn off the default features and keep `http1`.
+An HTTP/1.1-only simoom build adds about 215 KB to a binary. In benchmark campaign 4 (2026-11-12),
+the default build gave its first answer 0.94 ms after the process started, the fastest of 21
+servers, and used 901 KB at rest. Turn off the default features and keep `http1`.
 
 ### How do I embed an HTTP or WebSocket server in a Rust app?
 
@@ -591,8 +598,9 @@ Add `simoom`, build a `Server` with `Server::builder()`, give it a service or a 
 
 ### How does simoom compare with hyper and axum?
 
-On the same 4-vCPU droplet, simoom served 172,638 plain requests per second with p99 under 1 ms at
-256 connections, against hyper's 144,443, and used 11% less CPU per request at a fixed 50k req/s.
+In benchmark campaign 4 (2026-11-12), on the same 4-vCPU droplet, simoom answered 137,889 status
+requests per second with 99% within 1 ms at 256 clients, against hyper's 110,931 (24% more), and
+used 26% less CPU per request at a fixed 50,000 req/s; hyper used less memory at rest.
 hyper (which axum is built on) is far more mature and has a large ecosystem; simoom has no
 dependencies and a much smaller footprint. Choose by what matters more to you.
 

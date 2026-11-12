@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rust HTTP Server Benchmark: simoom vs hyper, h2o, nginx</title>
-<meta name="description" content="simoom's measured results: p99-bounded throughput against hyper, may-minihttp, h2o and nginx on the same machine, TLS, HTTP/3, start-up, size, and the losses.">
+<title>Rust HTTP Server Benchmark: simoom vs 20 Servers, Use Case by Use Case</title>
+<meta name="description" content="simoom against hyper, axum, actix-web, nginx, h2o, HAProxy, Envoy, Go, Netty, Kestrel and 10 more, each on the same machine: throughput within 1 ms, CPU, memory, start-up, size, and every loss.">
 <link rel="canonical" href="https://cameleer.ing/simoom/benchmarks/">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="simoom">
-<meta property="og:title" content="simoom benchmarks: every number, its method and its losses">
-<meta property="og:description" content="Same-droplet results against hyper, may-minihttp, xitca, h2o, nginx and haproxy, the crossing from Cameleer's old server, binary sizes, and where simoom is behind.">
+<meta property="og:title" content="simoom against 20 servers, use case by use case">
+<meta property="og:description" content="Campaign 4: every server measured on the same droplet as simoom, in the same round, per real use case, with the ratio and the losses.">
 <meta property="og:url" content="https://cameleer.ing/simoom/benchmarks/">
 <meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
@@ -26,10 +26,10 @@
 <link rel="stylesheet" href="../assets/simoom.css">
 <script type="application/ld+json">
 {"@context": "https://schema.org", "@type": "TechArticle",
- "headline": "simoom benchmarks: every number, its method and its losses",
- "description": "Measured results for simoom, the std-only Rust HTTP server engine: p99-bounded throughput against hyper, may-minihttp, xitca, h2o, nginx and haproxy on the same DigitalOcean droplet, TLS 1.3 handshakes, HTTP/3, CPU per request, memory, start-up against Cameleer's previous server, binary size, conformance, and the scenarios where simoom is behind.",
+ "headline": "simoom against 20 servers, use case by use case",
+ "description": "Campaign 4 for simoom, the std-only Rust HTTP server engine: simoom and 20 other servers (Rust, C, Go, Java, .NET, Node) on the same DigitalOcean droplets, per use case: status endpoints, JSON APIs, HTTPS, new connections, HTTP/2, HTTP/3, downloads, idle connections, spikes, slow attackers, start-up, size and memory, with the ratio against each and every loss.",
  "url": "https://cameleer.ing/simoom/benchmarks/",
- "inLanguage": "en", "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-12",
+ "inLanguage": "en", "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-13",
  "author": {"@type": "Person", "name": "Sudheesh PM"},
  "publisher": {"@type": "Organization", "name": "Cameleering", "url": "https://cameleer.ing/cameleering/"},
  "about": [{"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, {"@type": "Thing", "name": "Web server benchmark"}]}
@@ -41,10 +41,10 @@
 </script>
 <script type="application/ld+json">
 {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
- {"@type": "Question", "name": "What is the fastest Rust HTTP server?", "acceptedAnswer": {"@type": "Answer", "text": "It depends on the scenario and the machine. In simoom's runs on one 4-vCPU DigitalOcean droplet, simoom led plain HTTP at 64 and 256 connections and over TLS, io_uring simoom led at 1,024 connections, and may-minihttp held up better on a degraded network path. Numbers from different machines should not be compared: droplets of the same type differed by up to 7x."}},
+ {"@type": "Question", "name": "What is the fastest Rust HTTP server?", "acceptedAnswer": {"@type": "Answer", "text": "It depends on the use case. In campaign 4, with 10 Rust servers among the 21 on the same droplets, may-minihttp led plain requests per second by 5–16% and simoom was second; simoom led HTTPS throughput, CPU per request and start-up; actix-web kept the most answers within 1 ms during a traffic spike. Numbers from different machines should not be compared: droplets of the same type differed by up to 7x."}},
  {"@type": "Question", "name": "Why p99 under 1 ms instead of maximum requests per second?", "acceptedAnswer": {"@type": "Answer", "text": "A server that answers more requests but makes some of them wait seconds is not faster for the people waiting. The headline figure is the highest steady rate at which 99% of answers arrive within 1 ms, with the load sent at a fixed rate so a slow server cannot slow the load down and hide its latency."}},
- {"@type": "Question", "name": "Why are only servers on the same droplet compared?", "acceptedAnswer": {"@type": "Answer", "text": "Droplets of the same type differed by up to 7x for every server, and one had a degraded network path for all of them. A comparison across droplets would measure the machines, not the servers."}},
- {"@type": "Question", "name": "Can I rerun the benchmarks?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The scripts are in bench/cloud in the repository, the competitor programs in bench/competitors, and the raw HDR logs, tables and analyses in bench/results. scripts/size.sh reproduces the size table."}},
+ {"@type": "Question", "name": "Why are only servers on the same droplet compared?", "acceptedAnswer": {"@type": "Answer", "text": "Droplets of the same type differed by up to 7x for every server in earlier campaigns. A comparison across droplets would measure the machines, not the servers. In campaign 4 simoom ran in every lane and every round, so every server has a simoom run on its own droplet to be compared with."}},
+ {"@type": "Question", "name": "Can I rerun the benchmarks?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The scripts are in bench/cloud in the repository, the competitor programs in bench/competitors, and the raw records, HDR logs and analyses in bench/results. bench/cloud/c4-report.py turns the records into the tables on this page, and scripts/size.sh reproduces the size table."}},
  {"@type": "Question", "name": "Has anyone else measured simoom?", "acceptedAnswer": {"@type": "Answer", "text": "Not yet. Every figure here was measured by the project. If you measure it differently and get a different number, open an issue with your method."}}]}
 </script>
 </head>
@@ -68,107 +68,668 @@
 <section class="c-hero">
   <div class="wrap">
     <p class="crumbs"><a href="../">simoom</a> / Benchmarks</p>
-    <p class="kicker">Benchmarks · measured 2026-11-09 to 2026-11-12</p>
-    <h1>Every number, its method, and its losses</h1>
-    <p class="lede">simoom is a Cameleering project, so its claims follow one rule: no claim without a number. Each figure below names its machine, its date and its baseline. Servers are compared only when they ran on the same machine, and the scenarios simoom loses are in the same tables as the ones it wins.</p>
-    <div class="stats">
-      <div class="stat"><b>172,638</b><span>plain requests/s with p99 under 1 ms, 256 connections; hyper 144,443 on the same droplet</span></div>
-      <div class="stat"><b>+65%</b><span>over TLS 1.3 against h2o: 160,441 against 97,219 requests/s</span></div>
-      <div class="stat"><b>0.73 ms</b><span>process start to first answer; Cameleer's old server 0.77 ms</span></div>
-      <div class="stat"><b>215 KB</b><span>added to a binary for HTTP/1.1; 935 KB for everything with HTTP/3</span></div>
-    </div>
+    <p class="kicker">Benchmarks · campaign 4 · measured 2026-11-12</p>
+    <h1>simoom against 20 servers, use case by use case</h1>
+    <p class="lede">The servers a team would otherwise pick, from hyper, axum and actix-web to nginx, Go, Netty and Kestrel, each measured on the same droplet as simoom, with the same load machines, in the same round. Every chart and ratio on this page is generated from the raw records. The losses are in the same charts as the wins.</p>
+<!-- c4-stats:begin -->
+<div class="stats">
+<div class="stat"><b>1.5x</b><span>Status endpoint, 256 clients: simoom against the median of 18 servers, range 0.94–12x; ahead of 16; behind may-minihttp</span></div>
+<div class="stat"><b>1.5x</b><span>CPU per request at 50,000 req/s: simoom against the median of 18 servers, range 1.17–3.5x; ahead of 18</span></div>
+<div class="stat"><b>20x</b><span>Memory per idle connection, 10,000 open: simoom against the median of 18 servers, range 0.94–49x; ahead of 17; behind nginx</span></div>
+<div class="stat"><b>6.4x</b><span>Start-up to first answer: simoom against the median of 20 servers, range 1.57–762x; ahead of 20</span></div>
+</div>
+<!-- c4-stats:end -->
   </div>
 </section>
+
+<!-- c4:begin -->
+<section class="c-sec" id="field">
+<div class="wrap">
+<h2>simoom against the field, use case by use case</h2>
+<p class="intro">Campaign 4: simoom and 20 other servers, each measured on the same DigitalOcean droplet as simoom, with the same load machines, in the same round; three rounds on three droplets. Every bar is relative to simoom on that droplet, so no comparison mixes machines. Losses are in the same charts as wins.</p>
+<div class="cards"><a class="card" href="#u-status"><h3>Health checks and status endpoints</h3><p>A small GET answered from memory: load-balancer probes, status pages, the busiest route of most APIs.</p><span class="res">Behind may-minihttp: 6% more than simoom <small>Status endpoint, 256 clients: requests/s with 99% within 1 ms; ahead of 16 of 18, level with 1; behind may-minihttp</small></span></a>
+<a class="card" href="#u-api"><h3>JSON APIs</h3><p>A 1 KB JSON body in, a 1 KB JSON body out, the shape of most service calls.</p><span class="res">Behind may-minihttp: 5% more than simoom <small>JSON API, 1 KB in and out, 256 clients: requests/s with 99% within 1 ms; ahead of 10 of 11; behind may-minihttp</small></span></a>
+<a class="card" href="#u-https"><h3>HTTPS APIs and new TLS clients</h3><p>The same API over TLS 1.3, and how many new and returning clients the handshake can take per second.</p><span class="res">First of 8: simoom 30% more than the next best, axum + rustls <small>HTTPS API, 256 clients: requests/s with 99% within 1 ms; ahead of 7 of 7</small></span></a>
+<a class="card" href="#u-newconn"><h3>Clients that connect for every request</h3><p>Serverless callers, scripts and devices that open a connection, send one request and close it.</p><span class="res">Behind xitca-web: 29% more than simoom <small>A new connection per request, 192 clients: requests/s with 99% within 5 ms; ahead of 12 of 18, level with 2; behind xitca-web, Cameleer&#x27;s old server, actix-web, may-minihttp</small></span></a>
+<a class="card" href="#u-h2"><h3>Service-to-service HTTP/2</h3><p>64 connections with 100 streams each, as gRPC and service meshes use HTTP/2.</p><span class="res">Behind H2O: 11% more than simoom <small>Service-to-service HTTP/2, 64 connections x 100 streams: requests/s with 99% within 5 ms; ahead of 9 of 11, level with 1; behind H2O</small></span></a>
+<a class="card" href="#u-h3"><h3>Mobile clients over HTTP/3</h3><p>QUIC instead of TCP, for clients on lossy or changing networks.</p><span class="res">Behind H2O: 43% more than simoom <small>HTTP/3, 64 clients: requests/s with 99% within 1 ms; ahead of 2 of 3; behind H2O</small></span></a>
+<a class="card" href="#u-download"><h3>Downloads</h3><p>64 KB responses; 1 MB responses fill the network card for every server.</p><span class="res">Level with the best, actix-web <small>64 KB downloads, 64 clients: requests/s with 99% within 5 ms; ahead of 0 of 7, level with 7</small></span></a>
+<a class="card" href="#u-idle"><h3>Many idle connections</h3><p>Devices and push clients that stay connected and mostly say nothing.</p><span class="res">Behind nginx: 6% less than simoom <small>10,000 idle connections: memory per connection; ahead of 17 of 18; behind nginx</small></span></a>
+<a class="card" href="#u-spike"><h3>Traffic spikes</h3><p>195,000 requests per second offered, more than the network card can carry.</p><span class="res">Behind actix-web: 22x more than simoom <small>Traffic spike at 195,000 requests/s offered: answers within 1 ms per second; ahead of 9 of 18; behind actix-web, nginx, xitca-web, uWebSockets.js, Vert.x (Java), HAProxy, ntex, Netty (Java), fasthttp (Go)</small></span></a>
+<a class="card" href="#u-attack"><h3>Slow attackers</h3><p>Real requests while 10,000 slowloris and 1,000 slow-read connections press.</p><span class="res">Behind Go net/http: 44% lower than simoom <small>Under 11,000 slow attackers: p99 of real requests; ahead of 10 of 18, level with 3; behind Go net/http, HAProxy, Vert.x (Java), Netty (Java), H2O</small></span></a>
+<a class="card" href="#u-footprint"><h3>Start-up, size and memory</h3><p>What a server costs before and while it answers.</p><span class="res">First of 21: simoom 57% faster than the next best, hyper <small>Start-up, process start to first answer: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket); ahead of 20 of 20</small></span></a></div>
+<h3 id="u-status">Health checks and status endpoints</h3>
+<p class="intro">A small GET answered from memory: load-balancer probes, status pages, the busiest route of most APIs.</p>
+<div class="bars">
+<div class="bar-group" id="m-s1-64">
+<h4>Status endpoint, 64 clients: requests/s with 99% within 1 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">104,411 req/s (simoom 69,415 req/s) · 50% more than simoom</span></div>
+<div class="bar ahead"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:83.0%"></span></span><span class="val">86,701 req/s (simoom 69,415 req/s) · 25% more than simoom</span></div>
+<div class="bar ahead"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:79.7%"></span></span><span class="val">83,229 req/s (simoom 69,415 req/s) · 20% more than simoom</span></div>
+<div class="bar ahead"><span>may-minihttp</span><span class="track"><span class="fill" style="width:76.7%"></span></span><span class="val">158,598 req/s (simoom 137,443 req/s) · 15% more than simoom</span></div>
+<div class="bar ahead"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:75.1%"></span></span><span class="val">78,369 req/s (simoom 69,415 req/s) · 13% more than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:66.5%"></span></span><span class="val">128,914 req/s</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:54.7%"></span></span><span class="val">113,042 req/s (simoom 137,443 req/s) · simoom 22% more</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:52.6%"></span></span><span class="val">108,684 req/s (simoom 137,443 req/s) · simoom 26% more</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:51.5%"></span></span><span class="val">99,838 req/s (simoom 128,914 req/s) · simoom 29% more</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:51.0%"></span></span><span class="val">98,846 req/s (simoom 128,914 req/s) · simoom 30% more</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:50.2%"></span></span><span class="val">103,791 req/s (simoom 137,443 req/s) · simoom 32% more</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:49.6%"></span></span><span class="val">96,227 req/s (simoom 128,914 req/s) · simoom 34% more</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:43.5%"></span></span><span class="val">84,364 req/s (simoom 128,914 req/s) · simoom 53% more</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:39.5%"></span></span><span class="val">76,678 req/s (simoom 128,914 req/s) · simoom 68% more</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:36.7%"></span></span><span class="val">38,276 req/s (simoom 69,415 req/s) · simoom 81% more</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:34.1%"></span></span><span class="val">70,543 req/s (simoom 137,443 req/s) · simoom 95% more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:30.5%"></span></span><span class="val">31,854 req/s (simoom 69,415 req/s) · simoom 2.2x more</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:17.9%"></span></span><span class="val">36,925 req/s (simoom 137,443 req/s) · simoom 3.7x more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:9.2%"></span></span><span class="val">18,937 req/s (simoom 137,443 req/s) · simoom 7.3x more</span></div>
+</div>
+<div class="bar-group" id="m-s1-256">
+<h4>Status endpoint, 256 clients: requests/s with 99% within 1 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>may-minihttp</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">154,590 req/s (simoom 145,171 req/s) · 6% more than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:93.9%"></span></span><span class="val">137,889 req/s</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:91.5%"></span></span><span class="val">100,036 req/s (simoom 102,713 req/s) · level</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:88.7%"></span></span><span class="val">96,967 req/s (simoom 102,713 req/s) · simoom 6% more</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:87.3%"></span></span><span class="val">95,444 req/s (simoom 102,713 req/s) · simoom 8% more</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:75.5%"></span></span><span class="val">110,931 req/s (simoom 137,889 req/s) · simoom 24% more</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:73.8%"></span></span><span class="val">108,326 req/s (simoom 137,890 req/s) · simoom 27% more</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:72.6%"></span></span><span class="val">106,566 req/s (simoom 137,890 req/s) · simoom 29% more</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:69.1%"></span></span><span class="val">101,477 req/s (simoom 137,890 req/s) · simoom 36% more</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:62.7%"></span></span><span class="val">92,021 req/s (simoom 137,890 req/s) · simoom 50% more</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:60.2%"></span></span><span class="val">59,138 req/s (simoom 92,326 req/s) · simoom 56% more</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:59.5%"></span></span><span class="val">91,915 req/s (simoom 145,171 req/s) · simoom 58% more</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:37.0%"></span></span><span class="val">57,179 req/s (simoom 145,082 req/s) · simoom 2.5x more</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:33.7%"></span></span><span class="val">36,871 req/s (simoom 102,713 req/s) · simoom 2.8x more</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:26.2%"></span></span><span class="val">40,551 req/s (simoom 145,082 req/s) · simoom 3.6x more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:25.0%"></span></span><span class="val">24,600 req/s (simoom 92,326 req/s) · simoom 3.8x more</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:16.1%"></span></span><span class="val">24,900 req/s (simoom 145,171 req/s) · simoom 5.8x more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:8.1%"></span></span><span class="val">12,546 req/s (simoom 145,082 req/s) · simoom 12x more</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">0 req/s (simoom 145,082 req/s) · only simoom met the target</span></div>
+</div>
+<div class="bar-group" id="m-s1-1024">
+<h4>Status endpoint, 1,024 clients: requests/s with 99% within 1 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>may-minihttp</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">155,048 req/s (simoom 133,243 req/s) · 16% more than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:85.9%"></span></span><span class="val">133,243 req/s</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:71.9%"></span></span><span class="val">111,554 req/s (simoom 133,243 req/s) · simoom 19% more</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:68.7%"></span></span><span class="val">106,530 req/s (simoom 133,243 req/s) · simoom 25% more</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:67.0%"></span></span><span class="val">103,814 req/s (simoom 133,243 req/s) · simoom 28% more</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:57.4%"></span></span><span class="val">102,154 req/s (simoom 153,049 req/s) · simoom 50% more</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:57.3%"></span></span><span class="val">63,776 req/s (simoom 95,611 req/s) · simoom 50% more</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:51.7%"></span></span><span class="val">57,512 req/s (simoom 95,611 req/s) · simoom 66% more</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:51.1%"></span></span><span class="val">56,886 req/s (simoom 95,611 req/s) · simoom 68% more</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:48.8%"></span></span><span class="val">54,326 req/s (simoom 95,611 req/s) · simoom 76% more</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:46.6%"></span></span><span class="val">83,023 req/s (simoom 153,049 req/s) · simoom 84% more</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:43.6%"></span></span><span class="val">67,646 req/s (simoom 133,243 req/s) · simoom 2.0x more</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:43.2%"></span></span><span class="val">76,953 req/s (simoom 153,049 req/s) · simoom 2.0x more</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:42.5%"></span></span><span class="val">75,739 req/s (simoom 153,049 req/s) · simoom 2.0x more</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:36.7%"></span></span><span class="val">65,436 req/s (simoom 153,049 req/s) · simoom 2.3x more</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:27.6%"></span></span><span class="val">30,702 req/s (simoom 95,611 req/s) · simoom 3.1x more</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:20.6%"></span></span><span class="val">31,869 req/s (simoom 133,243 req/s) · simoom 4.2x more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:17.2%"></span></span><span class="val">19,118 req/s (simoom 95,611 req/s) · simoom 5.0x more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:8.1%"></span></span><span class="val">12,587 req/s (simoom 133,243 req/s) · simoom 11x more</span></div>
+</div>
+<div class="bar-group" id="m-p99-50k">
+<h4>Latency at a fixed 50,000 requests/s (256 clients): p99</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">355 µs</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:98.4%"></span></span><span class="val">391 µs (simoom 384 µs) · level</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:95.6%"></span></span><span class="val">405 µs (simoom 387 µs) · simoom 4% lower</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:94.5%"></span></span><span class="val">410 µs (simoom 387 µs) · simoom 6% lower</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:93.0%"></span></span><span class="val">416 µs (simoom 387 µs) · simoom 7% lower</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:92.7%"></span></span><span class="val">418 µs (simoom 387 µs) · simoom 7% lower</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:88.8%"></span></span><span class="val">400 µs (simoom 356 µs) · simoom 11% lower</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:85.8%"></span></span><span class="val">404 µs (simoom 346 µs) · simoom 14% lower</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:85.0%"></span></span><span class="val">431 µs (simoom 366 µs) · simoom 15% lower</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:82.7%"></span></span><span class="val">442 µs (simoom 366 µs) · simoom 17% lower</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:80.7%"></span></span><span class="val">441 µs (simoom 356 µs) · simoom 19% lower</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:76.2%"></span></span><span class="val">480 µs (simoom 366 µs) · simoom 24% lower</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:58.5%"></span></span><span class="val">608 µs (simoom 356 µs) · simoom 41% lower</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:42.4%"></span></span><span class="val">839 µs (simoom 356 µs) · simoom 2.4x lower</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:24.5%"></span></span><span class="val">1,451 µs (simoom 355 µs) · simoom 4.1x lower</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:23.6%"></span></span><span class="val">1,629 µs (simoom 384 µs) · simoom 4.2x lower</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:12.2%"></span></span><span class="val">3,140 µs (simoom 384 µs) · simoom 8.2x lower</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">1,519,387 µs (simoom 355 µs) · simoom 4282x lower</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">2,102,395 µs (simoom 355 µs) · simoom 5926x lower</span></div>
+</div>
+<div class="bar-group" id="m-cpu-50k">
+<h4>CPU per request at a fixed 50,000 requests/s</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">23.6 µs</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:85.2%"></span></span><span class="val">28.6 µs (simoom 24.3 µs) · simoom 15% lower</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:80.6%"></span></span><span class="val">30.4 µs (simoom 24.5 µs) · simoom 19% lower</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:77.1%"></span></span><span class="val">31.2 µs (simoom 24.1 µs) · simoom 23% lower</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:75.0%"></span></span><span class="val">32.1 µs (simoom 24.1 µs) · simoom 25% lower</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:74.3%"></span></span><span class="val">32.4 µs (simoom 24.1 µs) · simoom 26% lower</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:74.0%"></span></span><span class="val">32.9 µs (simoom 24.3 µs) · simoom 26% lower</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:73.9%"></span></span><span class="val">32.6 µs (simoom 24.1 µs) · simoom 26% lower</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:71.6%"></span></span><span class="val">34.2 µs (simoom 24.5 µs) · simoom 28% lower</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:70.7%"></span></span><span class="val">34.6 µs (simoom 24.5 µs) · simoom 29% lower</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:67.1%"></span></span><span class="val">36.2 µs (simoom 24.3 µs) · simoom 33% lower</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:66.5%"></span></span><span class="val">36.6 µs (simoom 24.3 µs) · simoom 34% lower</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:66.2%"></span></span><span class="val">35.6 µs (simoom 23.6 µs) · simoom 34% lower</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:64.1%"></span></span><span class="val">33.2 µs (simoom 21.3 µs) · simoom 36% lower</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:51.7%"></span></span><span class="val">47.0 µs (simoom 24.3 µs) · simoom 48% lower</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:44.6%"></span></span><span class="val">53.0 µs (simoom 23.7 µs) · simoom 2.2x lower</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:36.9%"></span></span><span class="val">64.1 µs (simoom 23.7 µs) · simoom 2.7x lower</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:30.8%"></span></span><span class="val">68.4 µs (simoom 21.1 µs) · simoom 3.2x lower</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:28.2%"></span></span><span class="val">86.3 µs (simoom 24.3 µs) · simoom 3.5x lower</span></div>
+</div>
+</div>
+<h3 id="u-api">JSON APIs</h3>
+<p class="intro">A 1 KB JSON body in, a 1 KB JSON body out, the shape of most service calls.</p>
+<div class="bars">
+<div class="bar-group" id="m-s3">
+<h4>JSON API, 1 KB in and out, 256 clients: requests/s with 99% within 1 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>may-minihttp</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">124,126 req/s (simoom 118,427 req/s) · 5% more than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:95.4%"></span></span><span class="val">118,427 req/s</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:83.1%"></span></span><span class="val">83,326 req/s (simoom 95,678 req/s) · simoom 15% more</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:80.1%"></span></span><span class="val">71,171 req/s (simoom 84,755 req/s) · simoom 19% more</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:77.4%"></span></span><span class="val">109,736 req/s (simoom 135,188 req/s) · simoom 23% more</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:75.4%"></span></span><span class="val">86,456 req/s (simoom 109,366 req/s) · simoom 26% more</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:75.4%"></span></span><span class="val">127,598 req/s (simoom 161,438 req/s) · simoom 27% more</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:71.4%"></span></span><span class="val">101,178 req/s (simoom 135,188 req/s) · simoom 34% more</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:61.2%"></span></span><span class="val">54,349 req/s (simoom 84,755 req/s) · simoom 56% more</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:49.8%"></span></span><span class="val">57,141 req/s (simoom 109,366 req/s) · simoom 91% more</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:19.6%"></span></span><span class="val">22,515 req/s (simoom 109,366 req/s) · simoom 4.9x more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:18.1%"></span></span><span class="val">20,755 req/s (simoom 109,366 req/s) · simoom 5.3x more</span></div>
+</div>
+</div>
+<h3 id="u-https">HTTPS APIs and new TLS clients</h3>
+<p class="intro">The same API over TLS 1.3, and how many new and returning clients the handshake can take per second.</p>
+<div class="bars">
+<div class="bar-group" id="m-s7-tls">
+<h4>HTTPS API, 256 clients: requests/s with 99% within 1 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">134,004 req/s</span></div>
+<div class="bar"><span>axum + rustls</span><span class="track"><span class="fill" style="width:77.1%"></span></span><span class="val">103,343 req/s (simoom 134,004 req/s) · simoom 30% more</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:76.8%"></span></span><span class="val">79,386 req/s (simoom 103,311 req/s) · simoom 30% more</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:59.5%"></span></span><span class="val">61,431 req/s (simoom 103,311 req/s) · simoom 68% more</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:39.5%"></span></span><span class="val">40,777 req/s (simoom 103,311 req/s) · simoom 2.5x more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:17.2%"></span></span><span class="val">28,755 req/s (simoom 167,300 req/s) · simoom 5.8x more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:11.5%"></span></span><span class="val">11,843 req/s (simoom 103,311 req/s) · simoom 8.7x more</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">0 req/s (simoom 103,311 req/s) · only simoom met the target</span></div>
+</div>
+<div class="bar-group" id="m-s7-full">
+<h4>New TLS 1.3 clients: full handshakes per second</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>axum + rustls</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">11,633/s (simoom 9,396/s) · 24% more than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:80.8%"></span></span><span class="val">9,431/s</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:58.2%"></span></span><span class="val">6,464/s (simoom 8,973/s) · simoom 39% more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:45.0%"></span></span><span class="val">5,247/s (simoom 9,410/s) · simoom 79% more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:44.4%"></span></span><span class="val">4,928/s (simoom 8,973/s) · simoom 82% more</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:33.3%"></span></span><span class="val">3,695/s (simoom 8,973/s) · simoom 2.4x more</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:31.4%"></span></span><span class="val">3,483/s (simoom 8,973/s) · simoom 2.6x more</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:13.7%"></span></span><span class="val">1,517/s (simoom 8,973/s) · simoom 5.9x more</span></div>
+</div>
+<div class="bar-group" id="m-s7-resumed">
+<h4>Returning TLS 1.3 clients: resumed handshakes per second</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>axum + rustls</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">13,537/s (simoom 12,388/s) · 9% more than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:91.5%"></span></span><span class="val">10,565/s</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:58.6%"></span></span><span class="val">6,351/s (simoom 9,924/s) · simoom 56% more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:47.6%"></span></span><span class="val">5,163/s (simoom 9,924/s) · simoom 92% more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:47.2%"></span></span><span class="val">6,555/s (simoom 12,717/s) · simoom 94% more</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:41.4%"></span></span><span class="val">4,487/s (simoom 9,924/s) · simoom 2.2x more</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:38.9%"></span></span><span class="val">4,216/s (simoom 9,924/s) · simoom 2.4x more</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:36.9%"></span></span><span class="val">4,004/s (simoom 9,924/s) · simoom 2.5x more</span></div>
+</div>
+</div>
+<h3 id="u-newconn">Clients that connect for every request</h3>
+<p class="intro">Serverless callers, scripts and devices that open a connection, send one request and close it.</p>
+<div class="bars">
+<div class="bar-group" id="m-s5">
+<h4>A new connection per request, 192 clients: requests/s with 99% within 5 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>xitca-web</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">21,149 req/s (simoom 16,359 req/s) · 29% more than simoom</span></div>
+<div class="bar ahead"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:84.1%"></span></span><span class="val">15,961 req/s (simoom 14,684 req/s) · 9% more than simoom</span></div>
+<div class="bar ahead"><span>actix-web</span><span class="track"><span class="fill" style="width:81.0%"></span></span><span class="val">17,137 req/s (simoom 16,359 req/s) · 5% more than simoom</span></div>
+<div class="bar ahead"><span>may-minihttp</span><span class="track"><span class="fill" style="width:80.6%"></span></span><span class="val">23,052 req/s (simoom 22,116 req/s) · 4% more than simoom</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:79.1%"></span></span><span class="val">22,618 req/s (simoom 22,116 req/s) · level</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:77.4%"></span></span><span class="val">16,378 req/s (simoom 16,359 req/s) · level</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:77.4%"></span></span><span class="val">17,323 req/s</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:72.8%"></span></span><span class="val">15,388 req/s (simoom 16,359 req/s) · simoom 6% more</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:71.0%"></span></span><span class="val">15,009 req/s (simoom 16,359 req/s) · simoom 9% more</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:70.9%"></span></span><span class="val">15,887 req/s (simoom 17,323 req/s) · simoom 9% more</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:69.8%"></span></span><span class="val">19,946 req/s (simoom 22,116 req/s) · simoom 11% more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:68.0%"></span></span><span class="val">15,226 req/s (simoom 17,323 req/s) · simoom 14% more</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:65.9%"></span></span><span class="val">18,847 req/s (simoom 22,116 req/s) · simoom 17% more</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:61.4%"></span></span><span class="val">13,747 req/s (simoom 17,323 req/s) · simoom 26% more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:59.7%"></span></span><span class="val">17,055 req/s (simoom 22,116 req/s) · simoom 30% more</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:59.2%"></span></span><span class="val">23,317 req/s (simoom 30,488 req/s) · simoom 31% more</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:57.4%"></span></span><span class="val">12,852 req/s (simoom 17,323 req/s) · simoom 35% more</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:54.5%"></span></span><span class="val">12,206 req/s (simoom 17,323 req/s) · simoom 42% more</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:37.9%"></span></span><span class="val">10,848 req/s (simoom 22,116 req/s) · simoom 2.0x more</span></div>
+</div>
+</div>
+<h3 id="u-h2">Service-to-service HTTP/2</h3>
+<p class="intro">64 connections with 100 streams each, as gRPC and service meshes use HTTP/2.</p>
+<div class="bars">
+<div class="bar-group" id="m-s8">
+<h4>Service-to-service HTTP/2, 64 connections x 100 streams: requests/s with 99% within 5 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>H2O</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">168,962 req/s (simoom 152,445 req/s) · 11% more than simoom</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:91.3%"></span></span><span class="val">154,298 req/s (simoom 152,445 req/s) · level</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:90.2%"></span></span><span class="val">153,230 req/s</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:84.5%"></span></span><span class="val">143,530 req/s (simoom 153,232 req/s) · simoom 7% more</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:73.5%"></span></span><span class="val">124,765 req/s (simoom 153,232 req/s) · simoom 23% more</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:60.4%"></span></span><span class="val">102,563 req/s (simoom 153,230 req/s) · simoom 49% more</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:51.8%"></span></span><span class="val">87,443 req/s (simoom 152,445 req/s) · simoom 74% more</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:48.3%"></span></span><span class="val">82,084 req/s (simoom 153,230 req/s) · simoom 87% more</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:42.9%"></span></span><span class="val">72,914 req/s (simoom 153,232 req/s) · simoom 2.1x more</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:28.6%"></span></span><span class="val">48,266 req/s (simoom 152,445 req/s) · simoom 3.2x more</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:21.0%"></span></span><span class="val">35,588 req/s (simoom 153,230 req/s) · simoom 4.3x more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:8.4%"></span></span><span class="val">14,206 req/s (simoom 152,445 req/s) · simoom 11x more</span></div>
+</div>
+</div>
+<h3 id="u-h3">Mobile clients over HTTP/3</h3>
+<p class="intro">QUIC instead of TCP, for clients on lossy or changing networks.</p>
+<div class="bars">
+<div class="bar-group" id="m-h3">
+<h4>HTTP/3, 64 clients: requests/s with 99% within 1 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>H2O</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">74,961 req/s (simoom 52,259 req/s) · 43% more than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:69.7%"></span></span><span class="val">75,916 req/s</span></div>
+<div class="bar"><span>quinn + h3</span><span class="track"><span class="fill" style="width:42.3%"></span></span><span class="val">42,518 req/s (simoom 70,001 req/s) · simoom 65% more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:4.5%"></span></span><span class="val">3,370 req/s (simoom 52,259 req/s) · simoom 16x more</span></div>
+</div>
+</div>
+<h3 id="u-download">Downloads</h3>
+<p class="intro">64 KB responses; 1 MB responses fill the network card for every server.</p>
+<div class="bars">
+<div class="bar-group" id="m-s4-64k">
+<h4>64 KB downloads, 64 clients: requests/s with 99% within 5 ms</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">3,780 req/s (simoom 3,773 req/s) · level</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">3,779 req/s (simoom 3,773 req/s) · level</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:99.9%"></span></span><span class="val">3,776 req/s (simoom 3,773 req/s) · level</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:99.8%"></span></span><span class="val">3,773 req/s</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:99.8%"></span></span><span class="val">3,771 req/s (simoom 3,772 req/s) · level</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:99.7%"></span></span><span class="val">3,780 req/s (simoom 3,786 req/s) · level</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:99.6%"></span></span><span class="val">3,779 req/s (simoom 3,786 req/s) · level</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:99.5%"></span></span><span class="val">3,773 req/s (simoom 3,786 req/s) · level</span></div>
+</div>
+</div>
+<h3 id="u-idle">Many idle connections</h3>
+<p class="intro">Devices and push clients that stay connected and mostly say nothing.</p>
+<div class="bars">
+<div class="bar-group" id="m-idle-10k">
+<h4>10,000 idle connections: memory per connection</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>nginx</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">538 B (simoom 575 B) · 6% less than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:93.6%"></span></span><span class="val">573 B</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:51.4%"></span></span><span class="val">1,038 B (simoom 570 B) · simoom 45% less</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:32.0%"></span></span><span class="val">1,681 B (simoom 575 B) · simoom 2.9x less</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:32.0%"></span></span><span class="val">1,682 B (simoom 575 B) · simoom 2.9x less</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:16.0%"></span></span><span class="val">3,363 B (simoom 575 B) · simoom 5.8x less</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:7.4%"></span></span><span class="val">7,207 B (simoom 570 B) · simoom 13x less</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:7.2%"></span></span><span class="val">7,412 B (simoom 573 B) · simoom 13x less</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:5.5%"></span></span><span class="val">9,772 B (simoom 570 B) · simoom 17x less</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:5.0%"></span></span><span class="val">10,564 B (simoom 570 B) · simoom 19x less</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:4.5%"></span></span><span class="val">11,892 B (simoom 573 B) · simoom 21x less</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:3.2%"></span></span><span class="val">16,581 B (simoom 570 B) · simoom 29x less</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:3.1%"></span></span><span class="val">17,544 B (simoom 575 B) · simoom 31x less</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:3.0%"></span></span><span class="val">17,790 B (simoom 573 B) · simoom 31x less</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:2.9%"></span></span><span class="val">18,674 B (simoom 573 B) · simoom 33x less</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:2.7%"></span></span><span class="val">20,293 B (simoom 575 B) · simoom 35x less</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:2.5%"></span></span><span class="val">21,714 B (simoom 570 B) · simoom 38x less</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:2.4%"></span></span><span class="val">21,888 B (simoom 573 B) · simoom 38x less</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:1.9%"></span></span><span class="val">28,449 B (simoom 575 B) · simoom 49x less</span></div>
+</div>
+<div class="bar-group" id="m-idle-100k">
+<h4>100,000 idle connections: memory per connection</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">528 B (simoom 532 B) · level</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:99.2%"></span></span><span class="val">532 B</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:40.3%"></span></span><span class="val">1,311 B (simoom 532 B) · simoom 2.5x less</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:31.4%"></span></span><span class="val">1,680 B (simoom 532 B) · simoom 3.2x less</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:11.5%"></span></span><span class="val">4,598 B (simoom 531 B) · simoom 8.7x less</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:7.7%"></span></span><span class="val">6,839 B (simoom 531 B) · simoom 13x less</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:5.2%"></span></span><span class="val">10,162 B (simoom 531 B) · simoom 19x less</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:5.0%"></span></span><span class="val">10,649 B (simoom 535 B) · simoom 20x less</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:3.3%"></span></span><span class="val">16,293 B (simoom 535 B) · simoom 30x less</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:3.2%"></span></span><span class="val">16,312 B (simoom 531 B) · simoom 31x less</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:3.1%"></span></span><span class="val">17,303 B (simoom 532 B) · simoom 33x less</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:2.6%"></span></span><span class="val">20,356 B (simoom 535 B) · simoom 38x less</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:2.6%"></span></span><span class="val">20,398 B (simoom 531 B) · simoom 38x less</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:2.5%"></span></span><span class="val">21,035 B (simoom 532 B) · simoom 40x less</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:1.4%"></span></span><span class="val">36,864 B (simoom 532 B) · simoom 69x less</span></div>
+</div>
+</div>
+<h3 id="u-spike">Traffic spikes</h3>
+<p class="intro">195,000 requests per second offered, more than the network card can carry.</p>
+<div class="bars">
+<div class="bar-group" id="m-s9">
+<h4>Traffic spike at 195,000 requests/s offered: answers within 1 ms per second</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>actix-web</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">59,015 req/s (simoom 2,743 req/s) · 22x more than simoom</span></div>
+<div class="bar ahead"><span>nginx</span><span class="track"><span class="fill" style="width:21.6%"></span></span><span class="val">29,135 req/s (simoom 6,264 req/s) · 4.7x more than simoom</span></div>
+<div class="bar ahead"><span>xitca-web</span><span class="track"><span class="fill" style="width:15.1%"></span></span><span class="val">8,887 req/s (simoom 2,743 req/s) · 3.2x more than simoom</span></div>
+<div class="bar ahead"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:6.7%"></span></span><span class="val">4,796 req/s (simoom 3,309 req/s) · 45% more than simoom</span></div>
+<div class="bar ahead"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:6.6%"></span></span><span class="val">4,724 req/s (simoom 3,309 req/s) · 43% more than simoom</span></div>
+<div class="bar ahead"><span>HAProxy</span><span class="track"><span class="fill" style="width:6.3%"></span></span><span class="val">8,462 req/s (simoom 6,264 req/s) · 35% more than simoom</span></div>
+<div class="bar ahead"><span>ntex</span><span class="track"><span class="fill" style="width:6.0%"></span></span><span class="val">3,524 req/s (simoom 2,743 req/s) · 28% more than simoom</span></div>
+<div class="bar ahead"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:5.7%"></span></span><span class="val">4,078 req/s (simoom 3,309 req/s) · 23% more than simoom</span></div>
+<div class="bar ahead"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:5.7%"></span></span><span class="val">4,053 req/s (simoom 3,309 req/s) · 22% more than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:4.6%"></span></span><span class="val">3,309 req/s</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:3.7%"></span></span><span class="val">2,179 req/s (simoom 2,743 req/s) · simoom 26% more</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:3.6%"></span></span><span class="val">4,811 req/s (simoom 6,264 req/s) · simoom 30% more</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:2.8%"></span></span><span class="val">3,724 req/s (simoom 6,264 req/s) · simoom 68% more</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:1.6%"></span></span><span class="val">956 req/s (simoom 2,743 req/s) · simoom 2.9x more</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">231 req/s (simoom 6,264 req/s) · simoom 27x more</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">0 req/s (simoom 6,264 req/s) · only simoom met the target</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">0 req/s (simoom 6,264 req/s) · only simoom met the target</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">0 req/s (simoom 3,309 req/s) · only simoom met the target</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">0 req/s (simoom 3,309 req/s) · only simoom met the target</span></div>
+</div>
+<div class="bar-group" id="m-s9-total">
+<h4>Traffic spike: all answers per second</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, higher is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">159,633 req/s (simoom 150,344 req/s) · 6% more than simoom</span></div>
+<div class="bar ahead"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:99.8%"></span></span><span class="val">159,263 req/s (simoom 150,344 req/s) · 6% more than simoom</span></div>
+<div class="bar ahead"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:97.4%"></span></span><span class="val">155,502 req/s (simoom 150,344 req/s) · 3% more than simoom</span></div>
+<div class="bar ahead"><span>axum</span><span class="track"><span class="fill" style="width:97.3%"></span></span><span class="val">160,356 req/s (simoom 155,270 req/s) · 3% more than simoom</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:96.9%"></span></span><span class="val">159,705 req/s (simoom 155,270 req/s) · level</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:96.1%"></span></span><span class="val">153,384 req/s (simoom 150,344 req/s) · level</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:95.8%"></span></span><span class="val">157,873 req/s (simoom 155,270 req/s) · level</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:95.2%"></span></span><span class="val">157,030 req/s (simoom 155,270 req/s) · level</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:94.9%"></span></span><span class="val">151,455 req/s (simoom 150,344 req/s) · level</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:94.4%"></span></span><span class="val">155,665 req/s (simoom 155,270 req/s) · level</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:94.4%"></span></span><span class="val">160,264 req/s (simoom 159,868 req/s) · level</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:94.3%"></span></span><span class="val">160,028 req/s (simoom 159,868 req/s) · level</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:94.3%"></span></span><span class="val">160,007 req/s (simoom 159,868 req/s) · level</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:94.2%"></span></span><span class="val">155,270 req/s</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:93.7%"></span></span><span class="val">159,107 req/s (simoom 159,868 req/s) · level</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:48.5%"></span></span><span class="val">77,379 req/s (simoom 150,344 req/s) · simoom 94% more</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:38.4%"></span></span><span class="val">65,179 req/s (simoom 159,868 req/s) · simoom 2.5x more</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:32.4%"></span></span><span class="val">54,944 req/s (simoom 159,868 req/s) · simoom 2.9x more</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:21.8%"></span></span><span class="val">37,083 req/s (simoom 159,868 req/s) · simoom 4.3x more</span></div>
+</div>
+</div>
+<h3 id="u-attack">Slow attackers</h3>
+<p class="intro">Real requests while 10,000 slowloris and 1,000 slow-read connections press.</p>
+<div class="bars">
+<div class="bar-group" id="m-s10">
+<h4>Under 11,000 slow attackers: p99 of real requests</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>Go net/http</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">445 µs (simoom 791 µs) · 44% lower than simoom</span></div>
+<div class="bar ahead"><span>HAProxy</span><span class="track"><span class="fill" style="width:85.3%"></span></span><span class="val">375 µs (simoom 568 µs) · 34% lower than simoom</span></div>
+<div class="bar ahead"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:77.1%"></span></span><span class="val">578 µs (simoom 791 µs) · 27% lower than simoom</span></div>
+<div class="bar ahead"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:70.5%"></span></span><span class="val">632 µs (simoom 791 µs) · 20% lower than simoom</span></div>
+<div class="bar ahead"><span>H2O</span><span class="track"><span class="fill" style="width:69.2%"></span></span><span class="val">462 µs (simoom 568 µs) · 19% lower than simoom</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:57.0%"></span></span><span class="val">561 µs (simoom 568 µs) · level</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:56.3%"></span></span><span class="val">791 µs</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:55.7%"></span></span><span class="val">799 µs (simoom 791 µs) · level</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:55.0%"></span></span><span class="val">1,026 µs (simoom 1,002 µs) · level</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:53.0%"></span></span><span class="val">1,065 µs (simoom 1,002 µs) · simoom 6% lower</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:29.8%"></span></span><span class="val">1,073 µs (simoom 568 µs) · simoom 47% lower</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:27.9%"></span></span><span class="val">1,146 µs (simoom 568 µs) · simoom 2.0x lower</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:20.5%"></span></span><span class="val">2,171 µs (simoom 791 µs) · simoom 2.7x lower</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:12.7%"></span></span><span class="val">4,428 µs (simoom 1,002 µs) · simoom 4.4x lower</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:8.2%"></span></span><span class="val">6,844 µs (simoom 1,002 µs) · simoom 6.8x lower</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:7.7%"></span></span><span class="val">4,147 µs (simoom 568 µs) · simoom 7.3x lower</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:3.3%"></span></span><span class="val">17,285 µs (simoom 1,002 µs) · simoom 17x lower</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">159,777 µs (simoom 791 µs) · simoom 202x lower</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">31,708,938 µs (simoom 568 µs) · simoom 55845x lower</span></div>
+</div>
+</div>
+<h3 id="u-footprint">Start-up, size and memory</h3>
+<p class="intro">What a server costs before and while it answers.</p>
+<div class="bars">
+<div class="bar-group" id="m-cold-plain">
+<h4>Start-up, process start to first answer: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">0.94 ms</span></div>
+<div class="bar"><span>simoom, smallest build</span><span class="track"><span class="fill" style="width:99.0%"></span></span><span class="val">0.98 ms (simoom 0.97 ms) · level</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:63.5%"></span></span><span class="val">1.48 ms (simoom 0.94 ms) · simoom 57% faster</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:60.3%"></span></span><span class="val">1.56 ms (simoom 0.94 ms) · simoom 66% faster</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:51.9%"></span></span><span class="val">1.81 ms (simoom 0.94 ms) · simoom 93% faster</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:51.7%"></span></span><span class="val">1.74 ms (simoom 0.90 ms) · simoom 93% faster</span></div>
+<div class="bar"><span>axum + rustls</span><span class="track"><span class="fill" style="width:49.2%"></span></span><span class="val">1.91 ms (simoom 0.94 ms) · simoom 2.0x faster</span></div>
+<div class="bar"><span>quinn + h3</span><span class="track"><span class="fill" style="width:48.0%"></span></span><span class="val">1.96 ms (simoom 0.94 ms) · simoom 2.1x faster</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:45.4%"></span></span><span class="val">2.07 ms (simoom 0.94 ms) · simoom 2.2x faster</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:31.9%"></span></span><span class="val">3.04 ms (simoom 0.97 ms) · simoom 3.1x faster</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:28.6%"></span></span><span class="val">3.29 ms (simoom 0.94 ms) · simoom 3.5x faster</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:25.9%"></span></span><span class="val">3.74 ms (simoom 0.97 ms) · simoom 3.9x faster</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:11.2%"></span></span><span class="val">8.03 ms (simoom 0.90 ms) · simoom 8.9x faster</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:6.3%"></span></span><span class="val">14.34 ms (simoom 0.90 ms) · simoom 16x faster</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:4.6%"></span></span><span class="val">19.57 ms (simoom 0.90 ms) · simoom 22x faster</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:2.7%"></span></span><span class="val">33.32 ms (simoom 0.90 ms) · simoom 37x faster</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:1.2%"></span></span><span class="val">72.84 ms (simoom 0.90 ms) · simoom 81x faster</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">112.58 ms (simoom 0.97 ms) · simoom 116x faster</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">200.42 ms (simoom 0.90 ms) · simoom 223x faster</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">366.56 ms (simoom 0.95 ms) · simoom 386x faster</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">467.01 ms (simoom 0.95 ms) · simoom 492x faster</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">723.57 ms (simoom 0.95 ms) · simoom 762x faster</span></div>
+</div>
+<div class="bar-group" id="m-cold">
+<h4>Start-up, process start to first answer: simoom&#x27;s full server (also TLS 1.3 and HTTP/3)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>simoom, smallest build</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">0.98 ms (simoom 1.73 ms) · 77% faster than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:56.6%"></span></span><span class="val">1.49 ms</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:55.9%"></span></span><span class="val">1.48 ms (simoom 1.46 ms) · level</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:53.0%"></span></span><span class="val">1.56 ms (simoom 1.46 ms) · simoom 7% faster</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:45.7%"></span></span><span class="val">1.81 ms (simoom 1.46 ms) · simoom 24% faster</span></div>
+<div class="bar"><span>axum + rustls</span><span class="track"><span class="fill" style="width:43.3%"></span></span><span class="val">1.91 ms (simoom 1.46 ms) · simoom 31% faster</span></div>
+<div class="bar"><span>quinn + h3</span><span class="track"><span class="fill" style="width:42.2%"></span></span><span class="val">1.96 ms (simoom 1.46 ms) · simoom 34% faster</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:40.0%"></span></span><span class="val">2.07 ms (simoom 1.46 ms) · simoom 42% faster</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:39.1%"></span></span><span class="val">1.74 ms (simoom 1.20 ms) · simoom 45% faster</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:32.2%"></span></span><span class="val">3.04 ms (simoom 1.73 ms) · simoom 76% faster</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:26.2%"></span></span><span class="val">3.74 ms (simoom 1.73 ms) · simoom 2.2x faster</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:25.1%"></span></span><span class="val">3.29 ms (simoom 1.46 ms) · simoom 2.3x faster</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:8.5%"></span></span><span class="val">8.03 ms (simoom 1.20 ms) · simoom 6.7x faster</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:4.7%"></span></span><span class="val">14.34 ms (simoom 1.20 ms) · simoom 12x faster</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:3.5%"></span></span><span class="val">19.57 ms (simoom 1.20 ms) · simoom 16x faster</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:2.0%"></span></span><span class="val">33.32 ms (simoom 1.20 ms) · simoom 28x faster</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">72.84 ms (simoom 1.20 ms) · simoom 61x faster</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">112.58 ms (simoom 1.73 ms) · simoom 65x faster</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">200.42 ms (simoom 1.20 ms) · simoom 167x faster</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">366.56 ms (simoom 1.52 ms) · simoom 241x faster</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">467.01 ms (simoom 1.52 ms) · simoom 307x faster</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">723.57 ms (simoom 1.52 ms) · simoom 476x faster</span></div>
+</div>
+<div class="bar-group" id="m-size-plain">
+<h4>Program size, stripped: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>may-minihttp</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">515 KB (simoom 735 KB) · 30% smaller than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:70.1%"></span></span><span class="val">735 KB</span></div>
+<div class="bar"><span>simoom, smallest build</span><span class="track"><span class="fill" style="width:69.3%"></span></span><span class="val">743 KB (simoom 735 KB) · level</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:50.2%"></span></span><span class="val">1,025 KB (simoom 735 KB) · simoom 28% smaller</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:40.1%"></span></span><span class="val">1,283 KB (simoom 735 KB) · simoom 43% smaller</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:39.4%"></span></span><span class="val">1,307 KB (simoom 735 KB) · simoom 44% smaller</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:34.4%"></span></span><span class="val">1,499 KB (simoom 735 KB) · simoom 2.0x smaller</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:28.1%"></span></span><span class="val">1,831 KB (simoom 735 KB) · simoom 2.5x smaller</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:24.9%"></span></span><span class="val">2,069 KB (simoom 735 KB) · simoom 2.8x smaller</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:22.9%"></span></span><span class="val">2,246 KB (simoom 735 KB) · simoom 3.1x smaller</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:21.0%"></span></span><span class="val">2,450 KB (simoom 735 KB) · simoom 3.3x smaller</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:13.7%"></span></span><span class="val">3,765 KB (simoom 735 KB) · simoom 5.1x smaller</span></div>
+<div class="bar"><span>axum + rustls</span><span class="track"><span class="fill" style="width:9.5%"></span></span><span class="val">5,400 KB (simoom 735 KB) · simoom 7.3x smaller</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:9.0%"></span></span><span class="val">5,739 KB (simoom 735 KB) · simoom 7.8x smaller</span></div>
+<div class="bar"><span>quinn + h3</span><span class="track"><span class="fill" style="width:8.9%"></span></span><span class="val">5,766 KB (simoom 735 KB) · simoom 7.8x smaller</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:8.3%"></span></span><span class="val">6,180 KB (simoom 735 KB) · simoom 8.4x smaller</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">48.5 MB (simoom 735 KB) · simoom 68x smaller</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">101.9 MB (simoom 735 KB) · simoom 142x smaller</span></div>
+</div>
+<div class="bar-group" id="m-size">
+<h4>Program size, stripped: simoom&#x27;s full server (also TLS 1.3 and HTTP/3)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: one round, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>may-minihttp</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">515 KB (simoom 1,550 KB) · 3.0x smaller than simoom</span></div>
+<div class="bar ahead"><span>simoom, smallest build</span><span class="track"><span class="fill" style="width:69.3%"></span></span><span class="val">743 KB (simoom 1,550 KB) · 2.1x smaller than simoom</span></div>
+<div class="bar ahead"><span>xitca-web</span><span class="track"><span class="fill" style="width:50.2%"></span></span><span class="val">1,025 KB (simoom 1,550 KB) · 34% smaller than simoom</span></div>
+<div class="bar ahead"><span>nginx</span><span class="track"><span class="fill" style="width:40.1%"></span></span><span class="val">1,283 KB (simoom 1,550 KB) · 17% smaller than simoom</span></div>
+<div class="bar ahead"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:39.4%"></span></span><span class="val">1,307 KB (simoom 1,550 KB) · 16% smaller than simoom</span></div>
+<div class="bar ahead"><span>H2O</span><span class="track"><span class="fill" style="width:34.4%"></span></span><span class="val">1,499 KB (simoom 1,550 KB) · 3% smaller than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:33.2%"></span></span><span class="val">1,550 KB</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:28.1%"></span></span><span class="val">1,831 KB (simoom 1,550 KB) · simoom 15% smaller</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:24.9%"></span></span><span class="val">2,069 KB (simoom 1,550 KB) · simoom 25% smaller</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:22.9%"></span></span><span class="val">2,246 KB (simoom 1,550 KB) · simoom 31% smaller</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:21.0%"></span></span><span class="val">2,450 KB (simoom 1,550 KB) · simoom 37% smaller</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:13.7%"></span></span><span class="val">3,765 KB (simoom 1,550 KB) · simoom 2.4x smaller</span></div>
+<div class="bar"><span>axum + rustls</span><span class="track"><span class="fill" style="width:9.5%"></span></span><span class="val">5,400 KB (simoom 1,550 KB) · simoom 3.5x smaller</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:9.0%"></span></span><span class="val">5,739 KB (simoom 1,550 KB) · simoom 3.7x smaller</span></div>
+<div class="bar"><span>quinn + h3</span><span class="track"><span class="fill" style="width:8.9%"></span></span><span class="val">5,766 KB (simoom 1,550 KB) · simoom 3.7x smaller</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:8.3%"></span></span><span class="val">6,180 KB (simoom 1,550 KB) · simoom 4.0x smaller</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">48.5 MB (simoom 1,550 KB) · simoom 32x smaller</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">101.9 MB (simoom 1,550 KB) · simoom 67x smaller</span></div>
+</div>
+<div class="bar-group" id="m-base">
+<h4>Memory at rest (PSS)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 3 rounds, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>simoom, smallest build</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">901 KB (simoom 1,869 KB) · 2.1x less than simoom</span></div>
+<div class="bar ahead"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:77.8%"></span></span><span class="val">1,142 KB (simoom 1,844 KB) · 38% less than simoom</span></div>
+<div class="bar ahead"><span>hyper</span><span class="track"><span class="fill" style="width:64.9%"></span></span><span class="val">1,315 KB (simoom 1,769 KB) · 26% less than simoom</span></div>
+<div class="bar ahead"><span>xitca-web</span><span class="track"><span class="fill" style="width:63.2%"></span></span><span class="val">1,349 KB (simoom 1,769 KB) · 24% less than simoom</span></div>
+<div class="bar ahead"><span>axum</span><span class="track"><span class="fill" style="width:58.2%"></span></span><span class="val">1,466 KB (simoom 1,769 KB) · 17% less than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:48.2%"></span></span><span class="val">1,844 KB</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:45.0%"></span></span><span class="val">1,885 KB (simoom 1,761 KB) · simoom 7% less</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:41.0%"></span></span><span class="val">2,069 KB (simoom 1,761 KB) · simoom 15% less</span></div>
+<div class="bar"><span>axum + rustls</span><span class="track"><span class="fill" style="width:27.4%"></span></span><span class="val">3,110 KB (simoom 1,769 KB) · simoom 43% less</span></div>
+<div class="bar"><span>quinn + h3</span><span class="track"><span class="fill" style="width:24.6%"></span></span><span class="val">3,468 KB (simoom 1,769 KB) · simoom 2.0x less</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:17.7%"></span></span><span class="val">5,028 KB (simoom 1,844 KB) · simoom 2.7x less</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:14.1%"></span></span><span class="val">6,396 KB (simoom 1,869 KB) · simoom 3.4x less</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:11.1%"></span></span><span class="val">8,108 KB (simoom 1,869 KB) · simoom 4.3x less</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:9.7%"></span></span><span class="val">9,152 KB (simoom 1,844 KB) · simoom 5.0x less</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:1.9%"></span></span><span class="val">45.8 MB (simoom 1,873 KB) · simoom 25x less</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:1.4%"></span></span><span class="val">62.1 MB (simoom 1,844 KB) · simoom 34x less</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:1.3%"></span></span><span class="val">68.9 MB (simoom 1,869 KB) · simoom 38x less</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:1.2%"></span></span><span class="val">70.7 MB (simoom 1,844 KB) · simoom 39x less</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:1.2%"></span></span><span class="val">72.6 MB (simoom 1,869 KB) · simoom 40x less</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:1.1%"></span></span><span class="val">79.4 MB (simoom 1,869 KB) · simoom 43x less</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">94.3 MB (simoom 1,869 KB) · simoom 52x less</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">139.5 MB (simoom 1,844 KB) · simoom 77x less</span></div>
+</div>
+<div class="bar-group" id="m-peak-s1">
+<h4>Peak memory while serving the status endpoint (PSS)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 2 rounds, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>simoom, smallest build</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">2,099 KB (simoom 3,010 KB) · 30% less than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:69.7%"></span></span><span class="val">2,864 KB</span></div>
+<div class="bar"><span>xitca-web</span><span class="track"><span class="fill" style="width:46.9%"></span></span><span class="val">4,279 KB (simoom 2,880 KB) · simoom 33% less</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:37.5%"></span></span><span class="val">5,352 KB (simoom 2,880 KB) · simoom 46% less</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:33.8%"></span></span><span class="val">6,203 KB (simoom 3,008 KB) · simoom 2.1x less</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:29.1%"></span></span><span class="val">6,912 KB (simoom 2,880 KB) · simoom 2.4x less</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:16.3%"></span></span><span class="val">12.6 MB (simoom 3,010 KB) · simoom 4.3x less</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:13.0%"></span></span><span class="val">14.9 MB (simoom 2,848 KB) · simoom 5.3x less</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:12.0%"></span></span><span class="val">16.1 MB (simoom 2,848 KB) · simoom 5.8x less</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:9.4%"></span></span><span class="val">20.4 MB (simoom 2,833 KB) · simoom 7.4x less</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:7.2%"></span></span><span class="val">28.3 MB (simoom 3,008 KB) · simoom 9.6x less</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:3.0%"></span></span><span class="val">68.8 MB (simoom 3,008 KB) · simoom 23x less</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:3.0%"></span></span><span class="val">65.1 MB (simoom 2,840 KB) · simoom 23x less</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:2.9%"></span></span><span class="val">71.3 MB (simoom 3,008 KB) · simoom 24x less</span></div>
+<div class="bar"><span>Envoy</span><span class="track"><span class="fill" style="width:2.8%"></span></span><span class="val">69.8 MB (simoom 2,840 KB) · simoom 25x less</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:2.2%"></span></span><span class="val">92.1 MB (simoom 3,010 KB) · simoom 31x less</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:1.7%"></span></span><span class="val">122.6 MB (simoom 3,010 KB) · simoom 42x less</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:1.4%"></span></span><span class="val">143.1 MB (simoom 3,008 KB) · simoom 49x less</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">437.3 MB (simoom 3,010 KB) · simoom 149x less</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">441.7 MB (simoom 3,010 KB) · simoom 150x less</span></div>
+</div>
+<div class="bar-group" id="m-peak-s3">
+<h4>Peak memory while serving the JSON API (PSS)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 2 rounds, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>simoom, smallest build</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">2,209 KB (simoom 3,058 KB) · 28% less than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:72.2%"></span></span><span class="val">2,992 KB</span></div>
+<div class="bar"><span>ntex</span><span class="track"><span class="fill" style="width:24.4%"></span></span><span class="val">8,860 KB (simoom 2,988 KB) · simoom 3.0x less</span></div>
+<div class="bar"><span>actix-web</span><span class="track"><span class="fill" style="width:19.3%"></span></span><span class="val">10.9 MB (simoom 2,988 KB) · simoom 3.7x less</span></div>
+<div class="bar"><span>fasthttp (Go)</span><span class="track"><span class="fill" style="width:16.3%"></span></span><span class="val">13.3 MB (simoom 3,058 KB) · simoom 4.4x less</span></div>
+<div class="bar"><span>axum</span><span class="track"><span class="fill" style="width:13.2%"></span></span><span class="val">16.0 MB (simoom 2,988 KB) · simoom 5.5x less</span></div>
+<div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:12.1%"></span></span><span class="val">17.4 MB (simoom 2,988 KB) · simoom 6.0x less</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:10.5%"></span></span><span class="val">20.6 MB (simoom 3,058 KB) · simoom 6.9x less</span></div>
+<div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:7.6%"></span></span><span class="val">29.2 MB (simoom 3,129 KB) · simoom 9.5x less</span></div>
+<div class="bar"><span>Kestrel (.NET)</span><span class="track"><span class="fill" style="width:1.8%"></span></span><span class="val">118.5 MB (simoom 3,058 KB) · simoom 40x less</span></div>
+<div class="bar"><span>uWebSockets.js</span><span class="track"><span class="fill" style="width:1.8%"></span></span><span class="val">121.8 MB (simoom 3,058 KB) · simoom 41x less</span></div>
+<div class="bar"><span>Vert.x (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">458.1 MB (simoom 3,058 KB) · simoom 153x less</span></div>
+<div class="bar"><span>Netty (Java)</span><span class="track"><span class="fill" style="width:1.0%"></span></span><span class="val">454.6 MB (simoom 2,996 KB) · simoom 155x less</span></div>
+</div>
+<div class="bar-group" id="m-peak-s7">
+<h4>Peak memory while serving HTTPS (PSS)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 2 rounds, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">6,983 KB</span></div>
+<div class="bar"><span>H2O</span><span class="track"><span class="fill" style="width:83.4%"></span></span><span class="val">9,701 KB (simoom 8,089 KB) · simoom 17% less</span></div>
+<div class="bar"><span>axum + rustls</span><span class="track"><span class="fill" style="width:44.0%"></span></span><span class="val">16.4 MB (simoom 7,385 KB) · simoom 2.3x less</span></div>
+<div class="bar"><span>Go net/http</span><span class="track"><span class="fill" style="width:26.4%"></span></span><span class="val">25.9 MB (simoom 6,997 KB) · simoom 3.8x less</span></div>
+<div class="bar"><span>Cameleer&#x27;s old server</span><span class="track"><span class="fill" style="width:19.6%"></span></span><span class="val">40.3 MB (simoom 8,089 KB) · simoom 5.1x less</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:11.2%"></span></span><span class="val">70.3 MB (simoom 8,089 KB) · simoom 8.9x less</span></div>
+<div class="bar"><span>nginx</span><span class="track"><span class="fill" style="width:9.2%"></span></span><span class="val">86.2 MB (simoom 8,089 KB) · simoom 11x less</span></div>
+<div class="bar"><span>HAProxy</span><span class="track"><span class="fill" style="width:4.8%"></span></span><span class="val">164.9 MB (simoom 8,089 KB) · simoom 21x less</span></div>
+</div>
+<div class="bar-group" id="m-peak-h3">
+<h4>Peak memory while serving HTTP/3 (PSS)</h4>
+<p class="axis">Bar: simoom = 100 on the same droplet, longer is better. Value: median of 2 rounds, lower is better; in brackets, simoom in the same runs.</p>
+<div class="bar ahead"><span>H2O</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">23.7 MB (simoom 42.1 MB) · 44% less than simoom</span></div>
+<div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:56.3%"></span></span><span class="val">41.1 MB</span></div>
+<div class="bar"><span>quinn + h3</span><span class="track"><span class="fill" style="width:43.3%"></span></span><span class="val">54.1 MB (simoom 41.5 MB) · simoom 23% less</span></div>
+<div class="bar"><span>Caddy</span><span class="track"><span class="fill" style="width:24.2%"></span></span><span class="val">98.2 MB (simoom 42.1 MB) · simoom 2.3x less</span></div>
+</div>
+</div>
+<h3 id="matrix">Every server, every measure</h3>
+<p class="intro">simoom's advantage on the same droplet, median of rounds: above 1.00 simoom is better, below 1.00 the other server is. Column names link to the charts above.</p>
+<div class="c-table-wrap"><table class="c-table matrix"><thead><tr><th>server</th><th class="num" title="Status endpoint, 64 clients: requests/s with 99% within 1 ms"><a href="#m-s1-64">s1-64</a></th><th class="num" title="Status endpoint, 256 clients: requests/s with 99% within 1 ms"><a href="#m-s1-256">s1-256</a></th><th class="num" title="Status endpoint, 1,024 clients: requests/s with 99% within 1 ms"><a href="#m-s1-1024">s1-1024</a></th><th class="num" title="Latency at a fixed 50,000 requests/s (256 clients): p99"><a href="#m-p99-50k">p99-50k</a></th><th class="num" title="CPU per request at a fixed 50,000 requests/s"><a href="#m-cpu-50k">cpu-50k</a></th><th class="num" title="JSON API, 1 KB in and out, 256 clients: requests/s with 99% within 1 ms"><a href="#m-s3">s3</a></th><th class="num" title="64 KB downloads, 64 clients: requests/s with 99% within 5 ms"><a href="#m-s4-64k">s4-64k</a></th><th class="num" title="A new connection per request, 192 clients: requests/s with 99% within 5 ms"><a href="#m-s5">s5</a></th><th class="num" title="HTTPS API, 256 clients: requests/s with 99% within 1 ms"><a href="#m-s7-tls">s7-tls</a></th><th class="num" title="New TLS 1.3 clients: full handshakes per second"><a href="#m-s7-full">s7-full</a></th><th class="num" title="Returning TLS 1.3 clients: resumed handshakes per second"><a href="#m-s7-resumed">s7-resumed</a></th><th class="num" title="Service-to-service HTTP/2, 64 connections x 100 streams: requests/s with 99% within 5 ms"><a href="#m-s8">s8</a></th><th class="num" title="HTTP/3, 64 clients: requests/s with 99% within 1 ms"><a href="#m-h3">h3</a></th><th class="num" title="Traffic spike at 195,000 requests/s offered: answers within 1 ms per second"><a href="#m-s9">s9</a></th><th class="num" title="Traffic spike: all answers per second"><a href="#m-s9-total">s9-total</a></th><th class="num" title="Under 11,000 slow attackers: p99 of real requests"><a href="#m-s10">s10</a></th><th class="num" title="10,000 idle connections: memory per connection"><a href="#m-idle-10k">idle-10k</a></th><th class="num" title="100,000 idle connections: memory per connection"><a href="#m-idle-100k">idle-100k</a></th><th class="num" title="Start-up, process start to first answer: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket)"><a href="#m-cold-plain">cold-plain</a></th><th class="num" title="Start-up, process start to first answer: simoom&#x27;s full server (also TLS 1.3 and HTTP/3)"><a href="#m-cold">cold</a></th><th class="num" title="Program size, stripped: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket)"><a href="#m-size-plain">size-plain</a></th><th class="num" title="Program size, stripped: simoom&#x27;s full server (also TLS 1.3 and HTTP/3)"><a href="#m-size">size</a></th><th class="num" title="Memory at rest (PSS)"><a href="#m-base">base</a></th><th class="num" title="Peak memory while serving the status endpoint (PSS)"><a href="#m-peak-s1">peak-s1</a></th><th class="num" title="Peak memory while serving the JSON API (PSS)"><a href="#m-peak-s3">peak-s3</a></th><th class="num" title="Peak memory while serving HTTPS (PSS)"><a href="#m-peak-s7">peak-s7</a></th><th class="num" title="Peak memory while serving HTTP/3 (PSS)"><a href="#m-peak-h3">peak-h3</a></th></tr></thead><tbody><tr><td>actix-web</td><td class="num"><span class="win">1.29</span></td><td class="num"><span class="win">1.29</span></td><td class="num"><span class="win">1.84</span></td><td class="num"><span class="win">1.06</span></td><td class="num"><span class="win">1.30</span></td><td class="num"><span class="win">1.56</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="loss">0.95</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">2.10</span></td><td class="num">–</td><td class="num"><span class="loss">0.05</span></td><td class="num"><span class="">0.98</span></td><td class="num"><span class="win">4.42</span></td><td class="num"><span class="win">20.75</span></td><td class="num"><span class="win">19.90</span></td><td class="num"><span class="win">1.93</span></td><td class="num"><span class="win">1.24</span></td><td class="num"><span class="win">3.33</span></td><td class="num"><span class="win">1.58</span></td><td class="num"><span class="win">1.07</span></td><td class="num"><span class="win">2.40</span></td><td class="num"><span class="win">3.74</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>axum</td><td class="num"><span class="win">1.34</span></td><td class="num"><span class="win">1.36</span></td><td class="num"><span class="win">1.99</span></td><td class="num"><span class="win">1.17</span></td><td class="num"><span class="win">1.51</span></td><td class="num"><span class="win">1.27</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="win">1.09</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.23</span></td><td class="num">–</td><td class="num"><span class="win">2.87</span></td><td class="num"><span class="loss">0.97</span></td><td class="num"><span class="win">1.06</span></td><td class="num"><span class="win">38.20</span></td><td class="num"><span class="win">38.05</span></td><td class="num"><span class="win">1.66</span></td><td class="num"><span class="win">1.07</span></td><td class="num"><span class="win">3.05</span></td><td class="num"><span class="win">1.45</span></td><td class="num"><span class="loss">0.83</span></td><td class="num"><span class="win">5.35</span></td><td class="num"><span class="win">5.48</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>axum + rustls</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.30</span></td><td class="num"><span class="loss">0.81</span></td><td class="num"><span class="loss">0.92</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">2.03</span></td><td class="num"><span class="win">1.31</span></td><td class="num"><span class="win">7.34</span></td><td class="num"><span class="win">3.48</span></td><td class="num"><span class="win">1.76</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">2.27</span></td><td class="num">–</td></tr>
+<tr><td>Caddy</td><td class="num"><span class="win">7.26</span></td><td class="num"><span class="win">11.56</span></td><td class="num"><span class="win">10.59</span></td><td class="num"><span class="win">4282.37</span></td><td class="num"><span class="win">3.55</span></td><td class="num">–</td><td class="num"><span class="">1.00</span></td><td class="num"><span class="win">1.30</span></td><td class="num"><span class="win">8.72</span></td><td class="num"><span class="win">1.82</span></td><td class="num"><span class="win">1.92</span></td><td class="num"><span class="win">10.73</span></td><td class="num"><span class="win">15.51</span></td><td class="num"><span class="win">1000000.00</span></td><td class="num"><span class="win">4.31</span></td><td class="num"><span class="">0.99</span></td><td class="num"><span class="win">49.48</span></td><td class="num"><span class="win">69.29</span></td><td class="num"><span class="win">37.02</span></td><td class="num"><span class="win">27.77</span></td><td class="num"><span class="win">67.60</span></td><td class="num"><span class="win">32.06</span></td><td class="num"><span class="win">25.06</span></td><td class="num"><span class="win">23.49</span></td><td class="num">–</td><td class="num"><span class="win">8.90</span></td><td class="num"><span class="win">2.33</span></td></tr>
+<tr><td>Cameleer&#x27;s old server</td><td class="num"><span class="win">1.22</span></td><td class="num"><span class="win">1000000.00</span></td><td class="num"><span class="win">1.28</span></td><td class="num"><span class="win">1.71</span></td><td class="num"><span class="win">1.49</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="loss">0.92</span></td><td class="num"><span class="win">1000000.00</span></td><td class="num"><span class="win">5.91</span></td><td class="num"><span class="win">2.21</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.68</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="win">55845.26</span></td><td class="num"><span class="win">5.85</span></td><td class="num">–</td><td class="num"><span class="win">1.93</span></td><td class="num"><span class="win">1.45</span></td><td class="num"><span class="win">1.78</span></td><td class="num"><span class="loss">0.84</span></td><td class="num"><span class="loss">0.62</span></td><td class="num"><span class="win">23.41</span></td><td class="num">–</td><td class="num"><span class="win">5.10</span></td><td class="num">–</td></tr>
+<tr><td>Envoy</td><td class="num"><span class="win">3.72</span></td><td class="num"><span class="win">5.83</span></td><td class="num"><span class="win">4.18</span></td><td class="num"><span class="win">5925.58</span></td><td class="num"><span class="win">3.24</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">2.04</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">3.16</span></td><td class="num">–</td><td class="num"><span class="win">1000000.00</span></td><td class="num"><span class="win">2.91</span></td><td class="num"><span class="win">7.30</span></td><td class="num"><span class="win">30.51</span></td><td class="num"><span class="win">32.52</span></td><td class="num"><span class="win">80.93</span></td><td class="num"><span class="win">60.70</span></td><td class="num"><span class="win">141.94</span></td><td class="num"><span class="win">67.32</span></td><td class="num"><span class="win">34.48</span></td><td class="num"><span class="win">25.18</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>fasthttp (Go)</td><td class="num"><span class="loss">0.80</span></td><td class="num"><span class="win">1.08</span></td><td class="num"><span class="win">1.66</span></td><td class="num"><span class="win">1.18</span></td><td class="num"><span class="win">1.56</span></td><td class="num"><span class="win">1.26</span></td><td class="num">–</td><td class="num"><span class="win">1.31</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="loss">0.82</span></td><td class="num"><span class="loss">0.97</span></td><td class="num"><span class="">1.01</span></td><td class="num"><span class="win">29.09</span></td><td class="num"><span class="win">30.72</span></td><td class="num"><span class="win">3.13</span></td><td class="num"><span class="win">1.76</span></td><td class="num"><span class="win">7.81</span></td><td class="num"><span class="win">3.70</span></td><td class="num"><span class="win">3.42</span></td><td class="num"><span class="win">4.29</span></td><td class="num"><span class="win">4.44</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>Go net/http</td><td class="num"><span class="win">2.18</span></td><td class="num"><span class="win">3.75</span></td><td class="num"><span class="win">5.00</span></td><td class="num"><span class="win">8.17</span></td><td class="num"><span class="win">2.24</span></td><td class="num"><span class="win">5.27</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="win">1.14</span></td><td class="num"><span class="win">5.82</span></td><td class="num"><span class="win">1.79</span></td><td class="num"><span class="win">1.94</span></td><td class="num"><span class="win">4.31</span></td><td class="num">–</td><td class="num"><span class="win">1000000.00</span></td><td class="num"><span class="win">1.94</span></td><td class="num"><span class="loss">0.56</span></td><td class="num"><span class="win">38.09</span></td><td class="num"><span class="win">38.41</span></td><td class="num"><span class="win">3.86</span></td><td class="num"><span class="win">2.16</span></td><td class="num"><span class="win">8.41</span></td><td class="num"><span class="win">3.99</span></td><td class="num"><span class="win">4.34</span></td><td class="num"><span class="win">7.39</span></td><td class="num"><span class="win">6.89</span></td><td class="num"><span class="win">3.79</span></td><td class="num">–</td></tr>
+<tr><td>H2O</td><td class="num"><span class="win">1.95</span></td><td class="num"><span class="win">3.58</span></td><td class="num"><span class="win">1.97</span></td><td class="num"><span class="win">4.09</span></td><td class="num"><span class="win">1.93</span></td><td class="num">–</td><td class="num"><span class="">1.00</span></td><td class="num"><span class="win">1.17</span></td><td class="num"><span class="win">1.30</span></td><td class="num"><span class="win">1.39</span></td><td class="num"><span class="win">1.56</span></td><td class="num"><span class="loss">0.90</span></td><td class="num"><span class="loss">0.70</span></td><td class="num"><span class="win">27.12</span></td><td class="num"><span class="win">2.45</span></td><td class="num"><span class="loss">0.81</span></td><td class="num"><span class="win">2.92</span></td><td class="num"><span class="win">3.16</span></td><td class="num"><span class="win">15.93</span></td><td class="num"><span class="win">11.95</span></td><td class="num"><span class="win">2.04</span></td><td class="num"><span class="loss">0.97</span></td><td class="num"><span class="win">2.73</span></td><td class="num"><span class="win">2.06</span></td><td class="num">–</td><td class="num"><span class="win">1.20</span></td><td class="num"><span class="loss">0.56</span></td></tr>
+<tr><td>HAProxy</td><td class="num"><span class="win">1.32</span></td><td class="num"><span class="win">1.58</span></td><td class="num"><span class="win">1.25</span></td><td class="num"><span class="win">1.24</span></td><td class="num"><span class="win">1.50</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.11</span></td><td class="num"><span class="win">1.68</span></td><td class="num"><span class="win">2.58</span></td><td class="num"><span class="win">2.48</span></td><td class="num"><span class="">0.99</span></td><td class="num">–</td><td class="num"><span class="loss">0.74</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="loss">0.66</span></td><td class="num"><span class="win">2.93</span></td><td class="num"><span class="win">2.46</span></td><td class="num"><span class="win">222.69</span></td><td class="num"><span class="win">167.02</span></td><td class="num"><span class="win">5.12</span></td><td class="num"><span class="win">2.43</span></td><td class="num"><span class="win">77.49</span></td><td class="num"><span class="win">48.73</span></td><td class="num">–</td><td class="num"><span class="win">20.88</span></td><td class="num">–</td></tr>
+<tr><td>hyper</td><td class="num"><span class="win">1.53</span></td><td class="num"><span class="win">1.24</span></td><td class="num"><span class="win">1.50</span></td><td class="num"><span class="win">1.08</span></td><td class="num"><span class="win">1.35</span></td><td class="num"><span class="win">1.19</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="">1.00</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.07</span></td><td class="num">–</td><td class="num"><span class="win">1.26</span></td><td class="num"><span class="">0.99</span></td><td class="num"><span class="">1.02</span></td><td class="num"><span class="win">31.05</span></td><td class="num"><span class="win">30.45</span></td><td class="num"><span class="win">1.57</span></td><td class="num"><span class="">1.01</span></td><td class="num"><span class="win">2.81</span></td><td class="num"><span class="win">1.33</span></td><td class="num"><span class="loss">0.74</span></td><td class="num"><span class="win">5.79</span></td><td class="num"><span class="win">5.95</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>Kestrel (.NET)</td><td class="num"><span class="win">1.81</span></td><td class="num"><span class="win">2.79</span></td><td class="num"><span class="win">3.11</span></td><td class="num"><span class="win">4.24</span></td><td class="num"><span class="win">2.71</span></td><td class="num"><span class="win">4.86</span></td><td class="num">–</td><td class="num"><span class="win">1.42</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.87</span></td><td class="num">–</td><td class="num"><span class="win">1000000.00</span></td><td class="num"><span class="">0.99</span></td><td class="num"><span class="win">201.99</span></td><td class="num"><span class="win">18.53</span></td><td class="num"><span class="win">19.14</span></td><td class="num"><span class="win">385.85</span></td><td class="num"><span class="win">241.16</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">37.75</span></td><td class="num"><span class="win">41.71</span></td><td class="num"><span class="win">39.70</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>may-minihttp</td><td class="num"><span class="loss">0.87</span></td><td class="num"><span class="loss">0.94</span></td><td class="num"><span class="loss">0.86</span></td><td class="num"><span class="win">1.13</span></td><td class="num"><span class="win">1.17</span></td><td class="num"><span class="loss">0.95</span></td><td class="num">–</td><td class="num"><span class="loss">0.96</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.30</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="win">1.89</span></td><td class="num"><span class="win">35.29</span></td><td class="num"><span class="win">39.54</span></td><td class="num"><span class="win">8.92</span></td><td class="num"><span class="win">6.69</span></td><td class="num"><span class="loss">0.70</span></td><td class="num"><span class="loss">0.33</span></td><td class="num"><span class="win">4.96</span></td><td class="num"><span class="win">9.62</span></td><td class="num"><span class="win">9.55</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>Netty (Java)</td><td class="num"><span class="loss">0.83</span></td><td class="num"><span class="win">1.06</span></td><td class="num"><span class="win">1.76</span></td><td class="num"><span class="win">1.31</span></td><td class="num"><span class="win">1.41</span></td><td class="num"><span class="win">1.23</span></td><td class="num">–</td><td class="num"><span class="win">1.35</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="loss">0.81</span></td><td class="num"><span class="">0.98</span></td><td class="num"><span class="loss">0.80</span></td><td class="num"><span class="win">12.64</span></td><td class="num"><span class="win">8.66</span></td><td class="num"><span class="win">491.59</span></td><td class="num"><span class="win">307.24</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">39.77</span></td><td class="num"><span class="win">148.78</span></td><td class="num"><span class="win">155.39</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>nginx</td><td class="num"><span class="win">1.26</span></td><td class="num"><span class="win">2.54</span></td><td class="num"><span class="win">1.19</span></td><td class="num"><span class="win">2.36</span></td><td class="num"><span class="win">1.35</span></td><td class="num">–</td><td class="num"><span class="">1.00</span></td><td class="num"><span class="">0.98</span></td><td class="num"><span class="win">2.53</span></td><td class="num"><span class="win">2.43</span></td><td class="num"><span class="win">2.35</span></td><td class="num"><span class="win">1.74</span></td><td class="num">–</td><td class="num"><span class="loss">0.21</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="win">2.02</span></td><td class="num"><span class="loss">0.94</span></td><td class="num"><span class="">0.99</span></td><td class="num"><span class="win">21.74</span></td><td class="num"><span class="win">16.31</span></td><td class="num"><span class="win">1.75</span></td><td class="num"><span class="loss">0.83</span></td><td class="num"><span class="win">39.28</span></td><td class="num"><span class="win">24.26</span></td><td class="num">–</td><td class="num"><span class="win">10.91</span></td><td class="num">–</td></tr>
+<tr><td>ntex</td><td class="num"><span class="win">1.30</span></td><td class="num"><span class="win">1.27</span></td><td class="num"><span class="win">2.02</span></td><td class="num"><span class="win">1.08</span></td><td class="num"><span class="win">1.33</span></td><td class="num"><span class="win">1.15</span></td><td class="num">–</td><td class="num"><span class="win">1.06</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="loss">0.78</span></td><td class="num"><span class="">1.00</span></td><td class="num"><span class="win">17.24</span></td><td class="num"><span class="win">32.59</span></td><td class="num">–</td><td class="num"><span class="win">2.20</span></td><td class="num"><span class="win">1.42</span></td><td class="num"><span class="win">2.49</span></td><td class="num"><span class="win">1.18</span></td><td class="num"><span class="win">1.17</span></td><td class="num"><span class="win">1.86</span></td><td class="num"><span class="win">2.97</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>quinn + h3</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.65</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">2.09</span></td><td class="num"><span class="win">1.34</span></td><td class="num"><span class="win">7.84</span></td><td class="num"><span class="win">3.72</span></td><td class="num"><span class="win">1.96</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.30</span></td></tr>
+<tr><td>uWebSockets.js</td><td class="num"><span class="loss">0.89</span></td><td class="num"><span class="win">1.56</span></td><td class="num"><span class="win">1.50</span></td><td class="num"><span class="win">1.21</span></td><td class="num"><span class="win">1.40</span></td><td class="num"><span class="win">1.91</span></td><td class="num">–</td><td class="num"><span class="win">1.09</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="loss">0.69</span></td><td class="num"><span class="loss">0.94</span></td><td class="num"><span class="win">2.74</span></td><td class="num"><span class="win">1.82</span></td><td class="num">–</td><td class="num"><span class="win">116.06</span></td><td class="num"><span class="win">65.08</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">43.50</span></td><td class="num"><span class="win">31.32</span></td><td class="num"><span class="win">40.79</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>Vert.x (Java)</td><td class="num"><span class="loss">0.66</span></td><td class="num"><span class="">1.03</span></td><td class="num"><span class="win">1.68</span></td><td class="num"><span class="">1.02</span></td><td class="num"><span class="win">1.24</span></td><td class="num"><span class="win">1.34</span></td><td class="num">–</td><td class="num"><span class="win">1.26</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">1.49</span></td><td class="num">–</td><td class="num"><span class="loss">0.70</span></td><td class="num"><span class="loss">0.94</span></td><td class="num"><span class="loss">0.73</span></td><td class="num"><span class="win">17.14</span></td><td class="num"><span class="win">12.88</span></td><td class="num"><span class="win">761.65</span></td><td class="num"><span class="win">476.03</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="win">51.67</span></td><td class="num"><span class="win">150.27</span></td><td class="num"><span class="win">153.41</span></td><td class="num">–</td><td class="num">–</td></tr>
+<tr><td>xitca-web</td><td class="num"><span class="win">1.68</span></td><td class="num"><span class="win">1.50</span></td><td class="num"><span class="win">2.34</span></td><td class="num"><span class="win">1.05</span></td><td class="num"><span class="win">1.35</span></td><td class="num">–</td><td class="num">–</td><td class="num"><span class="loss">0.77</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"><span class="loss">0.31</span></td><td class="num"><span class="">0.97</span></td><td class="num"><span class="win">6.83</span></td><td class="num"><span class="win">12.94</span></td><td class="num">–</td><td class="num"><span class="win">3.50</span></td><td class="num"><span class="win">2.25</span></td><td class="num"><span class="win">1.39</span></td><td class="num"><span class="loss">0.66</span></td><td class="num"><span class="loss">0.76</span></td><td class="num"><span class="win">1.49</span></td><td class="num">–</td><td class="num">–</td><td class="num">–</td></tr></tbody></table></div>
+<p class="note">The data behind this section: <a href="c4.json">c4.json</a>, generated from the raw records in <a href="https://github.com/Cameleering/simoom/tree/main/bench/results">bench/results</a> by <code>bench/cloud/c4-report.py</code> and <code>scripts/c4-site.py</code>.</p>
+</div>
+</section>
+<section class="c-sec" id="losses"><div class="wrap"><h2>Where simoom is behind</h2><p class="intro">Every measure where another server beat simoom by more than 3% on the same droplet, generated from the same data as the charts.</p><ul class="losses"><li><b>Status endpoint, 64 clients: requests/s with 99% within 1 ms.</b> Vert.x (Java) (50% more than simoom), fasthttp (Go) (25% more than simoom), Netty (Java) (20% more than simoom), may-minihttp (15% more than simoom), uWebSockets.js (13% more than simoom). <a href="#m-s1-64">Chart</a></li>
+<li><b>Status endpoint, 256 clients: requests/s with 99% within 1 ms.</b> may-minihttp (6% more than simoom). <a href="#m-s1-256">Chart</a></li>
+<li><b>Status endpoint, 1,024 clients: requests/s with 99% within 1 ms.</b> may-minihttp (16% more than simoom). <a href="#m-s1-1024">Chart</a></li>
+<li><b>JSON API, 1 KB in and out, 256 clients: requests/s with 99% within 1 ms.</b> may-minihttp (5% more than simoom). <a href="#m-s3">Chart</a></li>
+<li><b>A new connection per request, 192 clients: requests/s with 99% within 5 ms.</b> xitca-web (29% more than simoom), Cameleer&#x27;s old server (9% more than simoom), actix-web (5% more than simoom), may-minihttp (4% more than simoom). <a href="#m-s5">Chart</a></li>
+<li><b>New TLS 1.3 clients: full handshakes per second.</b> axum + rustls (24% more than simoom). <a href="#m-s7-full">Chart</a></li>
+<li><b>Returning TLS 1.3 clients: resumed handshakes per second.</b> axum + rustls (9% more than simoom). <a href="#m-s7-resumed">Chart</a></li>
+<li><b>Service-to-service HTTP/2, 64 connections x 100 streams: requests/s with 99% within 5 ms.</b> H2O (11% more than simoom). <a href="#m-s8">Chart</a></li>
+<li><b>HTTP/3, 64 clients: requests/s with 99% within 1 ms.</b> H2O (43% more than simoom). <a href="#m-h3">Chart</a></li>
+<li><b>Traffic spike at 195,000 requests/s offered: answers within 1 ms per second.</b> actix-web (22x more than simoom), nginx (4.7x more than simoom), xitca-web (3.2x more than simoom), uWebSockets.js (45% more than simoom), Vert.x (Java) (43% more than simoom), HAProxy (35% more than simoom), ntex (28% more than simoom), Netty (Java) (23% more than simoom), fasthttp (Go) (22% more than simoom). <a href="#m-s9">Chart</a></li>
+<li><b>Traffic spike: all answers per second.</b> uWebSockets.js (6% more than simoom), Vert.x (Java) (6% more than simoom), fasthttp (Go) (3% more than simoom), axum (3% more than simoom). <a href="#m-s9-total">Chart</a></li>
+<li><b>Under 11,000 slow attackers: p99 of real requests.</b> Go net/http (44% lower than simoom), HAProxy (34% lower than simoom), Vert.x (Java) (27% lower than simoom), Netty (Java) (20% lower than simoom), H2O (19% lower than simoom). <a href="#m-s10">Chart</a></li>
+<li><b>10,000 idle connections: memory per connection.</b> nginx (6% less than simoom). <a href="#m-idle-10k">Chart</a></li>
+<li><b>Program size, stripped: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket).</b> may-minihttp (30% smaller than simoom). <a href="#m-size-plain">Chart</a></li>
+<li><b>Program size, stripped: simoom&#x27;s full server (also TLS 1.3 and HTTP/3).</b> may-minihttp (3.0x smaller than simoom), xitca-web (34% smaller than simoom), nginx (17% smaller than simoom), Cameleer&#x27;s old server (16% smaller than simoom), H2O (3% smaller than simoom). <a href="#m-size">Chart</a></li>
+<li><b>Memory at rest (PSS).</b> Cameleer&#x27;s old server (38% less than simoom), hyper (26% less than simoom), xitca-web (24% less than simoom), axum (17% less than simoom). <a href="#m-base">Chart</a></li>
+<li><b>Peak memory while serving HTTP/3 (PSS).</b> H2O (44% less than simoom). <a href="#m-peak-h3">Chart</a></li><li><b>Coverage.</b> Every figure comes from 4-vCPU droplets with a single-queue network card. Larger machines and multi-queue network cards have not been measured.</li></ul></div></section>
+<!-- c4:end -->
 
 <section class="c-sec" id="method">
   <div class="wrap">
     <h2>How it was measured</h2>
     <div class="two">
       <div class="pane">
-        <h3>Machines and load</h3>
+        <h3>Machines and fairness</h3>
         <ul>
-          <li><strong>Server:</strong> DigitalOcean <code>c-4</code> droplets, 4 dedicated vCPUs (Xeon Platinum 8280), Bangalore region, Ubuntu 24.04. Their NIC has one receive queue.</li>
-          <li><strong>Load:</strong> two separate load droplets, open loop: requests are sent at a fixed rate whatever the server does, so a slow server can't slow the load down and hide its own latency (no coordinated omission).</li>
-          <li><strong>Same droplet only:</strong> droplets of the same type differed by up to 7x for every server, so a comparison always uses one droplet.</li>
+          <li><strong>Server:</strong> DigitalOcean <code>c-4</code> droplets, 4 dedicated vCPUs, Bangalore region, Ubuntu 24.04, a network card with one receive queue.</li>
+          <li><strong>Three lanes:</strong> each with its own server droplet and two load droplets. simoom ran in every lane and every round, so every server is compared with simoom on the same droplet, with the same load machines, in the same round.</li>
+          <li><strong>Rotation:</strong> the server droplets rotate between rounds, so each lane meets each droplet. The published ratio is the median of the per-round ratios.</li>
+          <li><strong>Open loop:</strong> requests are sent at a fixed rate whatever the server does, so a slow server can't slow the load down and hide its own latency.</li>
         </ul>
       </div>
       <div class="pane">
         <h3>What is counted</h3>
         <ul>
-          <li><strong>Headline figure:</strong> the highest steady rate at which 99% of answers arrive within 1 ms (the "SLO throughput"), verified by longer runs after the search.</li>
-          <li><strong>S1:</strong> a GET with a 13-byte answer, one request in flight per connection, at 64, 256 and 1,024 connections.</li>
-          <li><strong>Versions:</strong> hyper 1.12.0, may_minihttp 0.1.11, xitca-web 0.7.1, h2o 2.3.0-DEV, nginx 1.24.0, haproxy 2.8.30.</li>
+          <li><strong>Throughput:</strong> the highest steady rate at which 99% of answers arrive within 1 ms (5 ms for new connections, downloads and HTTP/2) with no errors. A run that stalls counts as a miss.</li>
+          <li><strong>Rounds:</strong> round 1 ran every scenario for every server. Rounds 2 and 3 repeated the status endpoint at 256 clients, the JSON API, new connections, TLS and CPU on the other two droplets. Each chart says how many rounds it holds.</li>
+          <li><strong>Builds:</strong> each server in its fastest documented configuration; the programs and their configuration are in <a href="https://github.com/Cameleering/simoom/tree/main/bench/competitors">bench/competitors</a>.</li>
+          <li><strong>simoom:</strong> the benchmark server with all features, commit <code>a81c368</code>. Its smallest build appears only in the footprint charts.</li>
         </ul>
       </div>
     </div>
-    <p class="note">Raw HDR logs, scripts and analyses are in the repository: <a href="https://github.com/Cameleering/simoom/tree/main/bench/results">bench/results</a>, scripts in <a href="https://github.com/Cameleering/simoom/tree/main/bench/cloud">bench/cloud</a>, competitor programs in <a href="https://github.com/Cameleering/simoom/tree/main/bench/competitors">bench/competitors</a>.</p>
-  </div>
-</section>
-
-<section class="c-sec" id="plain">
-  <div class="wrap">
-    <h2>Plain HTTP against hyper and may-minihttp</h2>
-    <p class="intro">S1, requests per second with p99 under 1 ms, median of three rounds on one droplet, 2026-11-12.</p>
-    <div class="c-table-wrap"><table class="c-table">
-      <thead><tr><th>server</th><th class="num">64 connections</th><th class="num">256 connections</th><th class="num">1,024 connections</th></tr></thead>
-      <tbody>
-        <tr><td>simoom (epoll)</td><td class="num"><span class="win">170,648</span></td><td class="num"><span class="win">172,638</span></td><td class="num">138,644</td></tr>
-        <tr><td>simoom (io_uring)</td><td class="num">152,714</td><td class="num">172,331</td><td class="num"><span class="win">148,429</span></td></tr>
-        <tr><td>may-minihttp 0.1.11</td><td class="num">158,598</td><td class="num">150,673</td><td class="num">120,610</td></tr>
-        <tr><td>hyper 1.12.0</td><td class="num">122,240</td><td class="num">144,443</td><td class="num">115,102</td></tr>
-      </tbody>
-    </table></div>
-    <p class="note">This round replaces the plain-HTTP rows of campaign 3 (2026-11-11), where simoom trailed may-minihttp at 64 and 256 connections and hyper at 1,024. The cause was a simoom loop placed on the CPU that handles the network card's receive interrupts; the loops now keep off it (issue K12). The before-and-after runs: <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-12-epoll/analysis.md">analysis of 2026-11-12</a>.</p>
-  </div>
-</section>
-
-<section class="c-sec" id="tls">
-  <div class="wrap">
-    <h2>TLS 1.3 against h2o</h2>
-    <p class="intro">simoom brings its own TLS 1.3. Campaign 3, 2026-11-11, simoom on its io_uring back end, each row on one droplet.</p>
-    <div class="c-table-wrap"><table class="c-table">
-      <thead><tr><th>scenario</th><th class="num">simoom</th><th class="num">best other on the droplet</th><th class="num">result</th></tr></thead>
-      <tbody>
-        <tr><td>full TLS 1.3 handshakes per second</td><td class="num"><span class="win">10,083</span></td><td class="num">h2o 7,711</td><td class="num">+31%</td></tr>
-        <tr><td>resumed TLS 1.3 handshakes per second</td><td class="num"><span class="win">11,213</span></td><td class="num">h2o 7,758</td><td class="num">+45%</td></tr>
-        <tr><td>S1 over TLS, 256 connections, p99 under 1 ms</td><td class="num"><span class="win">160,441</span></td><td class="num">h2o 97,219</td><td class="num">+65%</td></tr>
-        <tr><td>1 MB responses over TLS</td><td class="num">1.94 Gbit/s</td><td class="num">nginx 1.94 Gbit/s</td><td class="num">tie, at the network limit</td></tr>
-      </tbody>
-    </table></div>
-    <p class="note">The 2026-11-12 round repeated the handshakes alone, closed loop with 192 connections over four runs: 8.7k full and 9.8k resumed with epoll, 8.9k–9.4k and 9.9k–10.6k with io_uring.</p>
-  </div>
-</section>
-
-<section class="c-sec" id="http3">
-  <div class="wrap">
-    <h2>HTTP/3 and HTTP/2</h2>
-    <div class="c-table-wrap"><table class="c-table">
-      <thead><tr><th>scenario (campaign 3, 2026-11-11)</th><th class="num">simoom</th><th class="num">best other on the droplet</th><th class="num">result</th></tr></thead>
-      <tbody>
-        <tr><td>HTTP/3 S1, p99 under 1 ms</td><td class="num"><span class="win">106,947</span></td><td class="num">h2o 94,507</td><td class="num">+13%</td></tr>
-        <tr><td>HTTP/3 1 MB download</td><td class="num">1.90 Gbit/s</td><td class="num">h2o 1.90 Gbit/s</td><td class="num">tie, at the network limit</td></tr>
-        <tr><td>HTTP/2 without TLS, 100 streams, p99 under 5 ms</td><td class="num">152.5k</td><td class="num">h2o 152.6k</td><td class="num">tie, at the network limit</td></tr>
-      </tbody>
-    </table></div>
-  </div>
-</section>
-
-<section class="c-sec" id="campaign">
-  <div class="wrap">
-    <h2>CPU, memory and other scenarios</h2>
-    <div class="c-table-wrap"><table class="c-table">
-      <thead><tr><th>scenario (campaign 3, 2026-11-11)</th><th class="num">simoom</th><th class="num">best other on the droplet</th></tr></thead>
-      <tbody>
-        <tr><td>CPU per request at a fixed 50k req/s</td><td class="num"><span class="win">25.05 µs</span></td><td class="num">hyper 28.10 µs (simoom 11% less)</td></tr>
-        <tr><td>1 KB JSON echo, p99 under 1 ms</td><td class="num">153,526</td><td class="num">hyper 152,822 (tie)</td></tr>
-        <tr><td>peak memory during S1 at 256 connections</td><td class="num"><span class="win">2.5 MB</span></td><td class="num">xitca 4.1 MB</td></tr>
-        <tr><td>memory per idle connection, 10k / 100k open</td><td class="num">594 / 533 B</td><td class="num">nginx 522 / 532 B</td></tr>
-        <tr><td>memory per idle connection, 10k open, against hyper (same campaign, another lane)</td><td class="num"><span class="win">596 B</span></td><td class="num">hyper 17,791 B (simoom 30x less)</td></tr>
-        <tr><td>1 MB responses, plain</td><td class="num">1.95 Gbit/s</td><td class="num">nginx 1.95 Gbit/s (tie, at the network limit)</td></tr>
-        <tr><td>a handler that blocks for 100 ms, 500 clients</td><td class="num">4,925 req/s, 0 errors</td><td class="num">Cameleer's old server 4,925</td></tr>
-      </tbody>
-    </table></div>
-    <p class="note">Full tables: <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-11-campaign3/summary.md">summary</a>, <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-11-campaign3/compare.md">comparison with campaign 2</a> and <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-11-campaign3/analysis.md">analysis</a>, which names the droplet of every figure. The default build holds 520 B per idle connection at 100k.</p>
+    <p class="note">The review that led to this campaign: <a href="https://github.com/Cameleering/simoom/blob/main/docs/benchmark-review.md">docs/benchmark-review.md</a>. The analysis, with every anomaly: <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-12-campaign4/analysis.md">campaign 4 analysis</a>. Raw records, scripts and programs: <a href="https://github.com/Cameleering/simoom/tree/main/bench/results">bench/results</a>, <a href="https://github.com/Cameleering/simoom/tree/main/bench/cloud">bench/cloud</a>.</p>
   </div>
 </section>
 
@@ -221,33 +782,7 @@
       </tbody>
     </table></div>
     <p class="note">The HTTP/1.1 and full rows are from 2026-11-11, the TLS row from 2026-11-12.</p>
-    <h3>Whole programs, stripped (campaign 3, 2026-11-11)</h3>
-    <div class="c-table-wrap"><table class="c-table">
-      <thead><tr><th>benchmark server</th><th>what it serves</th><th class="num">size</th></tr></thead>
-      <tbody>
-        <tr><td>simoom, default features</td><td>HTTP/1.1, HTTP/2 without TLS, WebSocket</td><td class="num"><span class="win">742 KB</span></td></tr>
-        <tr><td>hyper 1.12.0 on tokio</td><td>HTTP/1.1, HTTP/2 without TLS</td><td class="num">2,069 KB (simoom 2.8x smaller)</td></tr>
-        <tr><td>simoom, HTTP/1.1 only</td><td>HTTP/1.1</td><td class="num">536 KB</td></tr>
-        <tr><td>may-minihttp 0.1.11</td><td>HTTP/1.1</td><td class="num"><span class="win">515 KB</span> (4% smaller than simoom)</td></tr>
-      </tbody>
-    </table></div>
-    <p class="note">hyper was built with <code>lto = "fat"</code>, one codegen unit and <code>panic = "abort"</code>, its smallest fast build. About 181 KB of every Rust program here is the standard library's backtrace code. Programs: <a href="https://github.com/Cameleering/simoom/tree/main/bench/competitors">bench/competitors</a>; sizes from the <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-11-campaign3/summary.md">campaign 3 summary</a>.</p>
-  </div>
-</section>
-
-<section class="c-sec" id="losses">
-  <div class="wrap">
-    <h2>Where simoom is behind</h2>
-    <p class="intro">Losses are part of the result.</p>
-    <ul class="losses">
-      <li><b>Heavy overload.</b> At 195k req/s offered, 1.17 times what the droplet's network card carries, simoom answers the most requests in total (160.3k against nginx's 145.5k), but nginx answers far more of them within 1 ms (52.4k against 6.4k). nginx's figure changed 20-fold between droplets, so it is recorded as a limit of the test at that rate (issue K13).</li>
-      <li><b>A degraded network path.</b> On a droplet with a slow network path, may-minihttp kept 114.7k req/s while simoom and the other servers fell to 17–62k. The interrupt-placement fix (K12) has not been rerun on such a droplet.</li>
-      <li><b>A new connection for every request.</b> On one droplet simoom handled 19.3k connections per second against xitca's 24.3k (−21%). On another, simoom led with 22.1k against hyper's 19.3k.</li>
-      <li><b>Slow attackers.</b> With 10,000 slowloris and 1,000 slow-read attackers, simoom's p99 for real requests was 8% above haproxy's (784 µs against 724 µs).</li>
-      <li><b>Idle memory with TLS</b> is 3.3% above Cameleer's old server (1,360 KB against 1,317 KB).</li>
-      <li><b>Executable size:</b> the HTTP/1.1-only executable is 4% larger than may-minihttp's.</li>
-      <li><b>Coverage:</b> every cloud figure comes from 4-vCPU droplets with a single-queue network card. Larger machines and multi-queue NICs have not been measured.</li>
-    </ul>
+    <p class="note">Whole benchmark programs, simoom against every other server, are in the footprint charts above: <a href="#u-footprint">start-up, size and memory</a>.</p>
   </div>
 </section>
 
@@ -272,10 +807,10 @@
 <section class="c-sec faq" id="faq">
   <div class="wrap">
     <h2>Common questions</h2>
-    <details><summary>What is the fastest Rust HTTP server?</summary><p>It depends on the scenario and the machine. In simoom's runs on one 4-vCPU DigitalOcean droplet, simoom led plain HTTP at 64 and 256 connections and over TLS, io_uring simoom led at 1,024 connections, and may-minihttp held up better on a degraded network path. Numbers from different machines should not be compared: droplets of the same type differed by up to 7x.</p></details>
+    <details><summary>What is the fastest Rust HTTP server?</summary><p>It depends on the use case. In campaign 4, with 10 Rust servers among the 21 on the same droplets, may-minihttp led plain requests per second by 5–16% and simoom was second; simoom led HTTPS throughput, CPU per request and start-up; actix-web kept the most answers within 1 ms during a traffic spike. Numbers from different machines should not be compared: droplets of the same type differed by up to 7x.</p></details>
     <details><summary>Why p99 under 1 ms instead of maximum requests per second?</summary><p>A server that answers more requests but makes some of them wait seconds is not faster for the people waiting. The headline figure is the highest steady rate at which 99% of answers arrive within 1 ms, with the load sent at a fixed rate so a slow server cannot slow the load down and hide its latency.</p></details>
-    <details><summary>Why are only servers on the same droplet compared?</summary><p>Droplets of the same type differed by up to 7x for every server, and one had a degraded network path for all of them. A comparison across droplets would measure the machines, not the servers.</p></details>
-    <details><summary>Can I rerun the benchmarks?</summary><p>Yes. The scripts are in <code>bench/cloud</code> in the repository, the competitor programs in <code>bench/competitors</code>, and the raw HDR logs, tables and analyses in <code>bench/results</code>. <code>scripts/size.sh</code> reproduces the size table.</p></details>
+    <details><summary>Why are only servers on the same droplet compared?</summary><p>Droplets of the same type differed by up to 7x for every server in earlier campaigns. A comparison across droplets would measure the machines, not the servers. In campaign 4 simoom ran in every lane and every round, so every server has a simoom run on its own droplet to be compared with.</p></details>
+    <details><summary>Can I rerun the benchmarks?</summary><p>Yes. The scripts are in <code>bench/cloud</code> in the repository, the competitor programs in <code>bench/competitors</code>, and the raw records, HDR logs and analyses in <code>bench/results</code>. <code>bench/cloud/c4-report.py</code> turns the records into the tables on this page, and <code>scripts/size.sh</code> reproduces the size table.</p></details>
     <details><summary>Has anyone else measured simoom?</summary><p>Not yet. Every figure here was measured by the project. If you measure it differently and get a different number, open an issue with your method.</p></details>
   </div>
 </section>
@@ -284,7 +819,7 @@
   <div class="wrap">
     <h2>Read on</h2>
     <div class="cta">
-      <a class="btn primary" href="../compare/">Compare with hyper, axum, nginx and others</a>
+      <a class="btn primary" href="../compare/">Head to head with hyper, axum, may-minihttp, nginx and H2O</a>
       <a class="btn" href="../docs/guides/features-and-size.html">Features and binary size</a>
       <a class="btn" href="../../cameleering/ledger/">The Cameleering ledger</a>
     </div>

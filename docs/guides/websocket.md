@@ -175,8 +175,9 @@ Yes, in the separate `simoom-client` crate: `client.websocket("ws://...").connec
 
 ### How many WebSocket connections can one server hold?
 
-Idle connections cost little: about half a kilobyte each was measured for idle HTTP connections
-at 100,000 open (see the [benchmarks](https://cameleer.ing/simoom/benchmarks/)). Real limits come
+Idle connections cost little: in benchmark campaign 4 (2026-11-12), an idle HTTP connection took
+573 bytes with 10,000 open and 532 bytes with 100,000 open (see the
+[benchmarks](https://cameleer.ing/simoom/benchmarks/)). Real limits come
 from your handler's state, compression, and `Limits::max_connections`.
 
 ### Do I need to answer pings?
