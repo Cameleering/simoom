@@ -496,12 +496,13 @@ fn event_driven_response_larger_than_the_stream_window_finishes() {
     assert!(cl.resp[&id].body == body);
 }
 
-/// A server that has the request it needs stops reading with STOP_SENDING(H3_NO_ERROR) and
-/// answers (as h3 over quinn does after every request). RFC 9114 §4.1.1: the client must not
-/// discard the response. Both a GET whose FIN was already sent and a POST still uploading.
+/// A server that has the request it needs stops reading and answers. RFC 9114 §4.1.1: the client
+/// must not discard the response. A GET whose FIN was already sent, stopped with H3_NO_ERROR and
+/// with code 0 (what quinn sends for every request stream it drops unread), and a POST still
+/// uploading, stopped with H3_NO_ERROR.
 #[test]
-fn stop_sending_no_error_keeps_the_response() {
-    for (req, fin) in [(get("/stop"), true), (post("/upload", 100_000), false)] {
+fn stop_sending_after_the_request_keeps_the_response() {
+    for (req, fin, stop) in [(get("/stop"), true, code::NO_ERROR), (get("/quinn"), true, 0), (post("/upload", 100_000), false, code::NO_ERROR)] {
         let mut h = H3Pair::new(Link::default(), 41, Some(H3Config::default()), H3Config::default());
         let (h3, conn) = h.client_mut();
         let id = h3.send_request(conn, &refs(&req), fin).unwrap();
@@ -515,7 +516,7 @@ fn stop_sending_no_error_keeps_the_response() {
             let events: Vec<H3Event> = h.sev.drain(..).collect();
             if !answered && events.iter().any(|e| matches!(e, H3Event::Headers { stream, .. } if *stream == id)) {
                 answered = true;
-                h.sconn().stream_stop(id, code::NO_ERROR).unwrap();
+                h.sconn().stream_stop(id, stop).unwrap();
                 let (h3, conn) = h.server_mut();
                 h3.send_headers(conn, id, &[(b":status", b"200"), (b"content-length", b"4")], false).unwrap();
                 h3.send_body(conn, id, b"done", true).unwrap();

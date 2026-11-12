@@ -372,13 +372,16 @@ impl Http3 {
             return Err(H3Error::new(code::CLOSED_CRITICAL_STREAM, "critical stream stopped"));
         }
         if let Some(r) = self.reqs.get_mut(&id) {
+            // STOP_SENDING ends only our sending direction; the other side goes on (RFC 9114
+            // §4.1.1: a server may answer before it has read the whole request, and the client
+            // must not discard a complete response because its request was cut off). Once our
+            // side was already finished there is nothing to report: quinn, for one, stops every
+            // request stream it has not read to the end, with code 0. While we were still
+            // sending, H3_NO_ERROR means "answered without the rest"; any other code abandons it.
+            let was_done = r.send_done;
             r.send_done = true;
             r.out.clear();
-            // STOP_SENDING ends only our sending direction. With H3_NO_ERROR the peer already has
-            // what it needs: a server may answer before it has read the whole request, and the
-            // client must not discard that response (RFC 9114 §4.1.1), so the receiving side goes
-            // on. Any other code abandons the request.
-            if code_ != code::NO_ERROR {
+            if !was_done && code_ != code::NO_ERROR {
                 self.events.push_back(H3Event::Reset { stream: id, code: code_ });
             }
             self.maybe_drop(id);
