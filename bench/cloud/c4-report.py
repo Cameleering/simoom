@@ -16,12 +16,17 @@ import sys
 from collections import defaultdict
 
 REF = "simoom"
-CAP = 99.0  # stands for "only simoom met the target" (JSON has no infinity)
+CAP = 1e6  # stands for "only simoom met the target" (JSON has no infinity); no real ratio comes near it
 
 
 def parse(path):
     recs = defaultdict(list)
-    for line in open(path, encoding="utf-8", errors="replace"):
+    import os
+    sup = os.path.join(os.path.dirname(os.path.abspath(path)), "supplement.txt")  # hand-run records, documented in the file
+    lines = list(open(path, encoding="utf-8", errors="replace"))
+    if os.path.exists(sup):
+        lines += [l for l in open(sup, encoding="utf-8") if not l.startswith("#")]
+    for line in lines:
         line = line.strip()
         if " " not in line:
             continue
@@ -151,7 +156,6 @@ METRICS = [
     ("size-plain", "footprint", "Program size, stripped: simoom's default build (HTTP/1.1, HTTP/2, WebSocket)", "KB", False, kb(with_ref(rec("SIZE", "bytes", absent=("variant",)), rec("SIZE", "bytes", {"variant": "min_server"})))),
     ("size", "footprint", "Program size, stripped: simoom's full server (also TLS 1.3 and HTTP/3)", "KB", False, kb(rec("SIZE", "bytes", absent=("variant",)))),
     ("base", "footprint", "Memory at rest (PSS)", "KB", False, rec("BASE", "pss_kb")),
-    ("peak", "footprint", "Peak memory over the whole run (PSS)", "KB", False, rec("PEAK", "pss_kb")),
     ("peak-s1", "footprint", "Peak memory while serving the status endpoint (PSS)", "KB", False, speak_metric("S1")),
     ("peak-s3", "footprint", "Peak memory while serving the JSON API (PSS)", "KB", False, speak_metric("S3")),
     ("peak-s7", "footprint", "Peak memory while serving HTTPS (PSS)", "KB", False, speak_metric("S7")),
@@ -178,6 +182,10 @@ def speak_from_samples(raw_dir):
     out = defaultdict(lambda: defaultdict(dict))
     if not samples:
         return out
+    # every scenario's end time on its droplet, from every lane: in rounds 2 and 3 a lane moves to a
+    # droplet that may still be finishing another lane's last server, so a window starts at the
+    # previous event on the same droplet, whichever lane wrote it
+    events = defaultdict(list)
     for lane_dir in sorted(glob.glob(os.path.join(raw_dir, "lane*"))):
         lane = os.path.basename(lane_dir)
         droplet = {}
@@ -190,15 +198,17 @@ def speak_from_samples(raw_dir):
         pf = os.path.join(lane_dir, "progress.txt")
         if not os.path.exists(pf):
             continue
-        prev = None
         for line in open(pf, encoding="utf-8"):
             m = re.match(r"(\S+Z) round=(\d+) server=(\S+) scenario=(\S+)", line)
             if not m:
                 continue
             t = int(datetime.datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp())
-            rnd, srvname, scen = m.group(2), m.group(3), m.group(4)
+            events[droplet.get(m.group(2), "")].append((t, lane, m.group(2), m.group(3), m.group(4)))
+    for d, evs in events.items():
+        pts = samples.get(d, [])
+        prev = None
+        for t, lane, rnd, srvname, scen in sorted(evs):
             if prev is not None and scen not in ("S6", "COLD"):
-                pts = samples.get(droplet.get(rnd, ""), [])
                 vals = [v for (ts, v) in pts if prev < ts <= t]
                 if vals:
                     out[(srvname, scen)][(lane, rnd)] = max(vals)
@@ -212,35 +222,41 @@ def med(vals):
 
 
 def compute(R):
+    """Per server, every cell (lane, round) where simoom also ran gives one same-droplet ratio
+    (good/bad, > 1: simoom ahead). The published row is the cell whose ratio is the median; with an
+    even number of cells, the lower of the two middle ones, the one less favourable to simoom. The
+    row shows that cell's two values, so the ratio always matches the values printed next to it,
+    and a single bad run can't move the result past the other runs. Every cell is in "cells"."""
     out = {}
     for mid, use, title, unit, hib, fn in METRICS:
         data = fn(R)
         ref = data.get(REF, {})
         rows = {}
         for srv, cells in data.items():
-            ratios = []
+            pairs = []
             for c, v in cells.items():
                 r = ref.get(c)
                 if r is None or v is None:
                     continue
-                good, bad = (r, v) if hib else (v, r)        # ratio good/bad > 1: simoom ahead
+                good, bad = (r, v) if hib else (v, r)
                 if good == 0 and bad == 0:
                     continue
-                if bad == 0:
-                    ratios.append(CAP)                       # only simoom met the target
-                elif good == 0:
-                    ratios.append(0.0)                       # only the other server met it
-                else:
-                    ratios.append(min(good / bad, CAP))
-            ratios = [x for x in ratios if x is not None]
+                a_ = CAP if bad == 0 else (0.0 if good == 0 else good / bad)
+                pairs.append((a_, c, v, r))
+            pairs.sort(key=lambda t: t[0])
+            pick = pairs[(len(pairs) - 1) // 2] if pairs else None
             rows[srv] = {
-                "value": med(cells.values()),
+                "value": pick[2] if pick else med(cells.values()),
                 "rounds": len(cells),
                 "lanes": sorted({c[0] for c in cells}),
-                "simoom_same_droplet": med([ref[c] for c in cells if c in ref]),
-                "simoom_advantage": med(ratios) if ratios else None,
-                "samples": len(ratios),
+                "simoom_same_droplet": pick[3] if pick else None,
+                "simoom_advantage": (1.0 if srv == REF else pick[0]) if pick else None,
+                "samples": len(pairs),
+                "cells": [{"lane": c[0], "round": c[1], "value": v, "simoom": r, "advantage": a_} for a_, c, v, r in pairs],
             }
+            if srv == REF:
+                rows[srv]["value"] = med(cells.values())
+                rows[srv]["simoom_same_droplet"] = rows[srv]["value"]
         out[mid] = {"use": use, "title": title, "unit": unit, "higher_is_better": hib, "rows": rows}
     return out
 
@@ -294,8 +310,11 @@ def main():
     R = parse(sys.argv[1])
     import os
     raw = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), "raw")
+    ran = {(x.get("server"), x.get("scenario")) for x in R["RESULT"]}
     for (srv, scen), cells in speak_from_samples(raw).items():
         scen = "S1" if scen == "S1R" else scen
+        if (srv, scen) not in ran:
+            continue                                         # a scenario this server skipped (nginx has no HTTP/3)
         SPEAK_TS.setdefault(scen, defaultdict(dict))[srv].update(cells)
     res = compute(R)
     if "--json" in sys.argv:

@@ -1,0 +1,12 @@
+## simoom
+COLDSTART min_ms=1.32 median_ms=1.52 max_ms=2.07 runs=20
+## simoom min_server
+COLDSTART min_ms=0.87 median_ms=0.95 max_ms=1.17 runs=20
+## netty
+COLDSTART min_ms=440.82 median_ms=467.01 max_ms=501.14 runs=20
+## vertx
+COLDSTART min_ms=661.43 median_ms=723.57 max_ms=745.79 runs=20
+## kestrel
+COLDSTART min_ms=334.11 median_ms=366.56 max_ms=419.79 runs=20
+## uws
+COLDSTART min_ms=102.76 median_ms=115.29 max_ms=134.15 runs=20

@@ -1,0 +1,10 @@
+# Campaign 4 supplement, 2026-11-12 20:15 UTC, srvC (the lane 3 droplet, same as round 1 of netty, vertx, kestrel),
+# after the lanes had finished. The campaign's own start-up step failed for these three: the launch
+# command printed by run.sh --print is shell-escaped, so the JVM classpath wildcard reached java as \*,
+# and Kestrel lost DOTNET_ROOT. Re-run by hand with the run.sh command line, next to a fresh simoom run.
+# Raw output: coldstart-manual-srvC.txt. Read by bench/cloud/c4-report.py as cell (manual, 1).
+COLDSTART session=manual round=1 srv=srvC server=simoom min_ms=1.32 median_ms=1.52 max_ms=2.07 runs=20
+COLDSTART session=manual round=1 srv=srvC server=simoom variant=min_server min_ms=0.87 median_ms=0.95 max_ms=1.17 runs=20
+COLDSTART session=manual round=1 srv=srvC server=netty min_ms=440.82 median_ms=467.01 max_ms=501.14 runs=20
+COLDSTART session=manual round=1 srv=srvC server=vertx min_ms=661.43 median_ms=723.57 max_ms=745.79 runs=20
+COLDSTART session=manual round=1 srv=srvC server=kestrel min_ms=334.11 median_ms=366.56 max_ms=419.79 runs=20

@@ -1,0 +1,500 @@
+--- session lane1
+==> 16:10:13 lane 1 start: rounds [1 2 3], servers [simoom hyper axum axum-rustls actix ntex xitca quinn-h3], loads [10.122.0.4 10.122.0.11], deadline 2026-11-13T01:10:00Z
+==> 16:10:14 round 1 on srvA: simoom (S1 S3 S4 S5 S7 S8 S9 S10 H3 CPU S6 COLD)
+==> 16:10:32   simoom S1
+==> 16:15:02   simoom S3
+==> 16:16:30   simoom S4
+==> 16:18:05   simoom S5
+==> 16:19:33   simoom S7
+==> 16:21:31   simoom S8
+==> 16:22:44   simoom S9
+==> 16:23:22   simoom S10
+==> 16:25:15   simoom H3
+==> 16:27:24   simoom CPU
+==> 16:27:48   simoom S6
+==> 16:29:47   simoom COLD
+==> 16:29:52 round 1 on srvA: hyper (S1 S3 S4 S5 S8 S9 S10 CPU S6 COLD)
+==> 16:30:10   hyper S1
+==> 16:36:01   hyper S3
+==> 16:37:28   hyper S4
+==> 16:38:45   hyper S5
+==> 16:40:16   hyper S8
+==> 16:41:06   hyper S9
+==> 16:41:46   hyper S10
+==> 16:43:41   hyper CPU
+==> 16:44:06   hyper S6
+==> 16:46:19   hyper COLD
+==> 16:46:21 round 1 on srvA: axum (S1 S3 S4 S5 S8 S9 S10 CPU S6 COLD)
+==> 16:46:39   axum S1
+==> 16:52:31   axum S3
+==> 16:53:59   axum S4
+==> 16:55:16   axum S5
+==> 16:56:44   axum S8
+==> 16:57:35   axum S9
+==> 16:58:14   axum S10
+==> 17:00:11   axum CPU
+==> 17:00:35   axum S6
+==> 17:02:43   axum COLD
+==> 17:02:45 round 1 on srvA: axum-rustls (S7 COLD)
+==> 17:03:03   axum-rustls S7
+==> 17:05:09   axum-rustls COLD
+==> 17:05:12 round 1 on srvA: actix (S1 S3 S4 S5 S8 S9 S10 CPU S6 COLD)
+==> 17:05:30   actix S1
+==> 17:11:18   actix S3
+==> 17:12:46   actix S4
+==> 17:14:02   actix S5
+==> 17:15:31   actix S8
+==> 17:16:58   actix S9
+==> 17:17:36   actix S10
+==> 17:19:30   actix CPU
+==> 17:19:54   actix S6
+==> 17:22:05   actix COLD
+==> 17:22:08 round 1 on srvA: ntex (S1 S3 S5 S9 S10 CPU S6 COLD)
+==> 17:22:26   ntex S1
+==> 17:28:13   ntex S3
+==> 17:29:42   ntex S5
+==> 17:31:10   ntex S9
+==> 17:31:48   ntex S10
+==> 17:33:41   ntex CPU
+==> 17:34:05   ntex S6
+==> 17:35:44   ntex COLD
+==> 17:35:46 round 1 on srvA: xitca (S1 S5 S9 S10 CPU S6 COLD)
+==> 17:36:04   xitca S1
+==> 17:41:54   xitca S5
+==> 17:43:22   xitca S9
+==> 17:44:00   xitca S10
+==> 17:45:53   xitca CPU
+==> 17:46:18   xitca S6
+==> 17:47:56   xitca COLD
+==> 17:47:59 round 1 on srvA: quinn-h3 (H3 COLD)
+==> 17:48:17   quinn-h3 H3
+==> 17:50:22   quinn-h3 COLD
+==> 17:50:25 lane 1 waiting for the other lanes to finish round 1
+==> 18:27:27 round 2 on srvB: simoom (S1R S3 S5 S7 H3 CPU)
+==> 18:27:45   simoom S1R
+==> 18:29:25   simoom S3
+==> 18:30:54   simoom S5
+==> 18:32:23   simoom S7
+==> 18:34:28   simoom H3
+==> 18:36:34   simoom CPU
+==> 18:36:59 round 2 on srvB: hyper (S1R S3 S5 CPU)
+==> 18:37:18   hyper S1R
+==> 18:39:02   hyper S3
+==> 18:40:33   hyper S5
+==> 18:42:03   hyper CPU
+==> 18:42:28 round 2 on srvB: axum (S1R S3 S5 CPU)
+==> 18:42:46   axum S1R
+==> 18:44:25   axum S3
+==> 18:45:53   axum S5
+==> 18:47:25   axum CPU
+==> 18:47:51 round 2 on srvB: axum-rustls (S7)
+==> 18:48:09   axum-rustls S7
+==> 18:50:14 round 2 on srvB: actix (S1R S3 S5 CPU)
+==> 18:50:32   actix S1R
+==> 18:52:12   actix S3
+==> 18:53:40   actix S5
+==> 18:55:08   actix CPU
+==> 18:55:33 round 2 on srvB: ntex (S1R S3 S5 CPU)
+==> 18:55:51   ntex S1R
+==> 18:57:31   ntex S3
+==> 18:58:59   ntex S5
+==> 19:00:27   ntex CPU
+==> 19:00:52 round 2 on srvB: xitca (S1R S5 CPU)
+==> 19:01:10   xitca S1R
+==> 19:02:49   xitca S5
+==> 19:04:10   xitca CPU
+==> 19:04:35 round 2 on srvB: quinn-h3 (H3)
+==> 19:04:53   quinn-h3 H3
+==> 19:06:59 lane 1 waiting for the other lanes to finish round 2
+==> 19:19:41 round 3 on srvC: simoom (S1R S3 S5 S7 H3 CPU)
+==> 19:19:59   simoom S1R
+==> 19:21:38   simoom S3
+==> 19:23:06   simoom S5
+==> 19:24:34   simoom S7
+==> 19:26:40   simoom H3
+==> 19:28:51   simoom CPU
+==> 19:29:16 round 3 on srvC: hyper (S1R S3 S5 CPU)
+==> 19:29:34   hyper S1R
+==> 19:31:13   hyper S3
+==> 19:32:41   hyper S5
+==> 19:34:09   hyper CPU
+==> 19:34:34 round 3 on srvC: axum (S1R S3 S5 CPU)
+==> 19:34:53   axum S1R
+==> 19:36:31   axum S3
+==> 19:37:22   axum S5
+==> 19:38:49   axum CPU
+==> 19:39:16 round 3 on srvC: axum-rustls (S7)
+==> 19:39:34   axum-rustls S7
+==> 19:41:43 round 3 on srvC: actix (S1R S3 S5 CPU)
+==> 19:42:01   actix S1R
+==> 19:43:42   actix S3
+==> 19:45:10   actix S5
+==> 19:46:38   actix CPU
+==> 19:47:04 round 3 on srvC: ntex (S1R S3 S5 CPU)
+==> 19:47:22   ntex S1R
+==> 19:49:02   ntex S3
+==> 19:50:30   ntex S5
+==> 19:51:57   ntex CPU
+==> 19:52:23 round 3 on srvC: xitca (S1R S5 CPU)
+==> 19:52:41   xitca S1R
+==> 19:54:20   xitca S5
+==> 19:55:49   xitca CPU
+==> 19:56:14 round 3 on srvC: quinn-h3 (H3)
+==> 19:56:32   quinn-h3 H3
+==> 19:58:38 campaign done
+CAMPAIGN DONE 2026-11-12T19:58:38Z
+--- session lane2
+==> 16:10:15 lane 2 start: rounds [1 2 3], servers [simoom may-minihttp nginx h2o haproxy envoy caddy cameleer-http-min], loads [10.122.0.7 10.122.0.8], deadline 2026-11-13T01:10:00Z
+==> 16:10:16 round 1 on srvB: simoom (S1 S3 S4 S5 S7 S8 S9 S10 H3 CPU S6 COLD)
+==> 16:10:35   simoom S1
+==> 16:16:19   simoom S3
+==> 16:17:47   simoom S4
+==> 16:19:23   simoom S5
+==> 16:20:53   simoom S7
+==> 16:22:58   simoom S8
+==> 16:23:55   simoom S9
+==> 16:24:34   simoom S10
+==> 16:26:27   simoom H3
+==> 16:28:39   simoom CPU
+==> 16:29:04   simoom S6
+==> 16:31:00   simoom COLD
+==> 16:31:06 round 1 on srvB: may-minihttp (S1 S3 S5 S9 S10 CPU S6 COLD)
+==> 16:31:25   may-minihttp S1
+==> 16:36:42   may-minihttp S3
+==> 16:38:09   may-minihttp S5
+==> 16:39:39   may-minihttp S9
+==> 16:40:17   may-minihttp S10
+==> 16:42:14   may-minihttp CPU
+==> 16:42:39   may-minihttp S6
+==> 16:44:40   may-minihttp COLD
+==> 16:44:42 round 1 on srvB: nginx (S1 S4 S5 S7 S8 S9 S10 H3 CPU S6 COLD)
+==> 16:45:00   nginx S1
+==> 16:50:50   nginx S4
+==> 16:52:26   nginx S5
+==> 16:53:54   nginx S7
+==> 16:56:01   nginx S8
+==> 16:56:51   nginx S9
+==> 16:57:30   nginx S10
+==> 16:59:23   nginx H3
+==> 16:59:24   nginx CPU
+==> 16:59:48   nginx S6
+==> 17:01:43   nginx COLD
+==> 17:01:46 round 1 on srvB: h2o (S1 S4 S5 S7 S8 S9 S10 H3 CPU S6 COLD)
+==> 17:02:05   h2o S1
+==> 17:07:49   h2o S4
+==> 17:09:24   h2o S5
+==> 17:10:54   h2o S7
+==> 17:12:59   h2o S8
+==> 17:13:57   h2o S9
+==> 17:14:35   h2o S10
+==> 17:16:28   h2o H3
+==> 17:18:34   h2o CPU
+==> 17:18:59   h2o S6
+==> 17:22:28   h2o COLD
+==> 17:22:31 round 1 on srvB: haproxy (S1 S5 S7 S8 S9 S10 CPU S6 COLD)
+==> 17:22:50   haproxy S1
+==> 17:28:39   haproxy S5
+==> 17:30:06   haproxy S7
+==> 17:32:13   haproxy S8
+==> 17:33:19   haproxy S9
+==> 17:33:57   haproxy S10
+==> 17:35:51   haproxy CPU
+==> 17:36:16   haproxy S6
+==> 17:38:12   haproxy COLD
+==> 17:38:19 round 1 on srvB: envoy (S1 S5 S8 S9 S10 CPU S6 COLD)
+==> 17:38:38   envoy S1
+==> 17:44:26   envoy S5
+==> 17:45:54   envoy S8
+==> 17:47:21   envoy S9
+==> 17:47:59   envoy S10
+==> 17:49:52   envoy CPU
+==> 17:50:17   envoy S6
+==> 17:52:12   envoy COLD
+==> 17:52:16 round 1 on srvB: caddy (S1 S4 S5 S7 S8 S9 S10 H3 CPU S6 COLD)
+==> 17:52:34   caddy S1
+==> 17:58:17   caddy S4
+==> 17:59:53   caddy S5
+==> 18:01:21   caddy S7
+==> 18:03:25   caddy S8
+==> 18:04:53   caddy S9
+==> 18:05:31   caddy S10
+==> 18:07:25   caddy H3
+==> 18:09:29   caddy CPU
+==> 18:09:54   caddy S6
+==> 18:12:19   caddy COLD
+==> 18:12:22 round 1 on srvB: cameleer-http-min (S1 S5 S7 S9 S10 CPU S6 COLD)
+==> 18:12:41   cameleer-http-min S1
+==> 18:18:27   cameleer-http-min S5
+==> 18:19:57   cameleer-http-min S7
+==> 18:22:11   cameleer-http-min S9
+==> 18:22:48   cameleer-http-min S10
+==> 18:24:45   cameleer-http-min CPU
+==> 18:25:11   cameleer-http-min S6
+==> 18:27:20   cameleer-http-min COLD
+==> 18:27:23 lane 2 waiting for the other lanes to finish round 1
+==> 18:27:24 round 2 on srvC: simoom (S1R S3 S5 S7 H3 CPU)
+==> 18:27:42   simoom S1R
+==> 18:29:17   simoom S3
+==> 18:30:45   simoom S5
+==> 18:32:14   simoom S7
+==> 18:34:19   simoom H3
+==> 18:36:28   simoom CPU
+==> 18:36:53 round 2 on srvC: may-minihttp (S1R S3 S5 CPU)
+==> 18:37:11   may-minihttp S1R
+==> 18:38:14   may-minihttp S3
+==> 18:39:36   may-minihttp S5
+==> 18:41:04   may-minihttp CPU
+==> 18:41:30 round 2 on srvC: nginx (S1R S5 S7 H3 CPU)
+==> 18:41:48   nginx S1R
+==> 18:43:30   nginx S5
+==> 18:44:58   nginx S7
+==> 18:47:05   nginx H3
+==> 18:47:06   nginx CPU
+==> 18:47:31 round 2 on srvC: h2o (S1R S5 S7 H3 CPU)
+==> 18:47:50   h2o S1R
+==> 18:49:29   h2o S5
+==> 18:50:57   h2o S7
+==> 18:53:04   h2o H3
+==> 18:55:12   h2o CPU
+==> 18:55:41 round 2 on srvC: haproxy (S1R S5 S7 CPU)
+==> 18:56:00   haproxy S1R
+==> 18:57:40   haproxy S5
+==> 18:59:07   haproxy S7
+==> 19:01:15   haproxy CPU
+==> 19:01:40 round 2 on srvC: envoy (S1R S5 CPU)
+==> 19:01:59   envoy S1R
+==> 19:03:40   envoy S5
+==> 19:05:08   envoy CPU
+==> 19:05:35 round 2 on srvC: caddy (S1R S5 S7 H3 CPU)
+==> 19:05:54   caddy S1R
+==> 19:07:33   caddy S5
+==> 19:09:01   caddy S7
+==> 19:11:06   caddy H3
+==> 19:13:11   caddy CPU
+==> 19:14:07 round 2 on srvC: cameleer-http-min (S1R S5 S7 CPU)
+==> 19:14:26   cameleer-http-min S1R
+==> 19:15:28   cameleer-http-min S5
+==> 19:16:58   cameleer-http-min S7
+==> 19:19:07   cameleer-http-min CPU
+==> 19:19:32 lane 2 waiting for the other lanes to finish round 2
+==> 19:19:34 round 3 on srvA: simoom (S1R S3 S5 S7 H3 CPU)
+==> 19:19:52   simoom S1R
+==> 19:21:25   simoom S3
+==> 19:22:54   simoom S5
+==> 19:24:21   simoom S7
+==> 19:26:19   simoom H3
+==> 19:28:29   simoom CPU
+==> 19:28:55 round 3 on srvA: may-minihttp (S1R S3 S5 CPU)
+==> 19:29:13   may-minihttp S1R
+==> 19:30:30   may-minihttp S3
+==> 19:31:59   may-minihttp S5
+==> 19:33:26   may-minihttp CPU
+==> 19:33:52 round 3 on srvA: nginx (S1R S5 S7 H3 CPU)
+==> 19:34:10   nginx S1R
+==> 19:35:52   nginx S5
+==> 19:37:20   nginx S7
+==> 19:39:26   nginx H3
+==> 19:39:28   nginx CPU
+==> 19:39:53 round 3 on srvA: h2o (S1R S5 S7 H3 CPU)
+==> 19:40:12   h2o S1R
+==> 19:41:51   h2o S5
+==> 19:43:19   h2o S7
+==> 19:45:25   h2o H3
+==> 19:47:33   h2o CPU
+==> 19:48:02 round 3 on srvA: haproxy (S1R S5 S7 CPU)
+==> 19:48:21   haproxy S1R
+==> 19:50:01   haproxy S5
+==> 19:51:30   haproxy S7
+==> 19:53:37   haproxy CPU
+==> 19:54:03 round 3 on srvA: envoy (S1R S5 CPU)
+==> 19:54:21   envoy S1R
+==> 19:56:01   envoy S5
+==> 19:57:29   envoy CPU
+==> 19:57:56 round 3 on srvA: caddy (S1R S5 S7 H3 CPU)
+==> 19:58:15   caddy S1R
+==> 19:59:54   caddy S5
+==> 20:01:22   caddy S7
+==> 20:03:27   caddy H3
+==> 20:05:31   caddy CPU
+==> 20:06:28 round 3 on srvA: cameleer-http-min (S1R S5 S7 CPU)
+==> 20:06:47   cameleer-http-min S1R
+==> 20:08:26   cameleer-http-min S5
+==> 20:09:54   cameleer-http-min S7
+==> 20:12:04   cameleer-http-min CPU
+==> 20:12:29 campaign done
+CAMPAIGN DONE 2026-11-12T20:12:29Z
+--- session lane3
+==> 16:10:17 lane 3 start: rounds [1 2 3], servers [simoom go-nethttp fasthttp netty vertx kestrel uws simoom-default], loads [10.122.0.10 10.122.0.6], deadline 2026-11-13T01:10:00Z
+==> 16:10:19 round 1 on srvC: simoom (S1 S3 S4 S5 S7 S8 S9 S10 H3 CPU S6 COLD)
+==> 16:10:37   simoom S1
+==> 16:16:26   simoom S3
+==> 16:17:54   simoom S4
+==> 16:19:30   simoom S5
+==> 16:20:57   simoom S7
+==> 16:23:03   simoom S8
+==> 16:24:17   simoom S9
+==> 16:24:55   simoom S10
+==> 16:26:48   simoom H3
+==> 16:28:57   simoom CPU
+==> 16:29:22   simoom S6
+==> 16:31:19   simoom COLD
+==> 16:31:26 round 1 on srvC: go-nethttp (S1 S3 S4 S5 S7 S8 S9 S10 CPU S6 COLD)
+==> 16:31:44   go-nethttp S1
+==> 16:37:29   go-nethttp S3
+==> 16:38:57   go-nethttp S4
+==> 16:40:33   go-nethttp S5
+==> 16:42:00   go-nethttp S7
+==> 16:44:05   go-nethttp S8
+==> 16:45:32   go-nethttp S9
+==> 16:46:10   go-nethttp S10
+==> 16:48:05   go-nethttp CPU
+==> 16:48:30   go-nethttp S6
+==> 16:50:29   go-nethttp COLD
+==> 16:50:32 round 1 on srvC: fasthttp (S1 S3 S5 S9 S10 CPU S6 COLD)
+==> 16:50:51   fasthttp S1
+==> 16:56:37   fasthttp S3
+==> 16:58:05   fasthttp S5
+==> 16:59:33   fasthttp S9
+==> 17:00:11   fasthttp S10
+==> 17:02:05   fasthttp CPU
+==> 17:02:30   fasthttp S6
+==> 17:04:27   fasthttp COLD
+==> 17:04:30 round 1 on srvC: netty (S1 S3 S5 S9 S10 CPU S6 COLD)
+==> 17:04:49   netty S1
+==> 17:10:36   netty S3
+==> 17:12:06   netty S5
+==> 17:13:36   netty S9
+==> 17:14:14   netty S10
+==> 17:16:08   netty CPU
+==> 17:16:33   netty S6
+==> 17:18:34   netty COLD
+==> 17:18:37 round 1 on srvC: vertx (S1 S3 S5 S8 S9 S10 CPU S6 COLD)
+==> 17:18:56   vertx S1
+==> 17:24:45   vertx S3
+==> 17:26:15   vertx S5
+==> 17:27:44   vertx S8
+==> 17:28:34   vertx S9
+==> 17:29:13   vertx S10
+==> 17:31:08   vertx CPU
+==> 17:31:33   vertx S6
+==> 17:33:33   vertx COLD
+==> 17:33:36 round 1 on srvC: kestrel (S1 S3 S5 S8 S9 S10 CPU S6 COLD)
+==> 17:33:57   kestrel S1
+==> 17:39:47   kestrel S3
+==> 17:41:15   kestrel S5
+==> 17:42:43   kestrel S8
+==> 17:43:34   kestrel S9
+==> 17:44:13   kestrel S10
+==> 17:46:10   kestrel CPU
+==> 17:46:35   kestrel S6
+==> 17:48:45   kestrel COLD
+==> 17:48:48 round 1 on srvC: uws (S1 S3 S5 S9 S10 CPU S6 COLD)
+==> 17:49:07   uws S1
+==> 17:54:56   uws S3
+==> 17:56:24   uws S5
+==> 17:57:52   uws S9
+==> 17:58:30   uws S10
+==> 18:00:23   uws CPU
+==> 18:00:48   uws S6
+==> 18:02:34   uws COLD
+==> 18:02:39 round 1 on srvC: simoom-default (S1 S3 S4 S5 S8 S9 S10 CPU S6 COLD)
+==> 18:02:57   simoom-default S1
+==> 18:08:01   simoom-default S3
+==> 18:09:22   simoom-default S4
+==> 18:10:39   simoom-default S5
+==> 18:12:07   simoom-default S8
+==> 18:13:35   simoom-default S9
+==> 18:14:13   simoom-default S10
+==> 18:16:06   simoom-default CPU
+==> 18:16:31   simoom-default S6
+==> 18:18:28   simoom-default COLD
+==> 18:18:31 lane 3 waiting for the other lanes to finish round 1
+==> 18:27:33 round 2 on srvA: simoom (S1R S3 S5 S7 H3 CPU)
+==> 18:27:52   simoom S1R
+==> 18:29:31   simoom S3
+==> 18:31:00   simoom S5
+==> 18:31:50   simoom S7
+==> 18:33:58   simoom H3
+==> 18:36:05   simoom CPU
+==> 18:36:31 round 2 on srvA: go-nethttp (S1R S3 S5 S7 CPU)
+==> 18:36:50   go-nethttp S1R
+==> 18:38:29   go-nethttp S3
+==> 18:39:58   go-nethttp S5
+==> 18:41:26   go-nethttp S7
+==> 18:43:32   go-nethttp CPU
+==> 18:43:57 round 2 on srvA: fasthttp (S1R S3 S5 CPU)
+==> 18:44:16   fasthttp S1R
+==> 18:45:55   fasthttp S3
+==> 18:47:24   fasthttp S5
+==> 18:48:51   fasthttp CPU
+==> 18:49:17 round 2 on srvA: netty (S1R S3 S5 CPU)
+==> 18:49:36   netty S1R
+==> 18:51:16   netty S3
+==> 18:52:44   netty S5
+==> 18:54:13   netty CPU
+==> 18:54:39 round 2 on srvA: vertx (S1R S3 S5 CPU)
+==> 18:54:59   vertx S1R
+==> 18:56:39   vertx S3
+==> 18:58:08   vertx S5
+==> 18:59:35   vertx CPU
+==> 19:00:02 round 2 on srvA: kestrel (S1R S3 S5 CPU)
+==> 19:00:22   kestrel S1R
+==> 19:02:01   kestrel S3
+==> 19:03:29   kestrel S5
+==> 19:04:58   kestrel CPU
+==> 19:05:24 round 2 on srvA: uws (S1R S3 S5 CPU)
+==> 19:05:42   uws S1R
+==> 19:07:23   uws S3
+==> 19:08:52   uws S5
+==> 19:10:20   uws CPU
+==> 19:10:46 round 2 on srvA: simoom-default (S1R S3 S5 CPU)
+==> 19:11:04   simoom-default S1R
+==> 19:12:13   simoom-default S3
+==> 19:13:41   simoom-default S5
+==> 19:15:09   simoom-default CPU
+==> 19:15:34 lane 3 waiting for the other lanes to finish round 2
+==> 19:19:36 round 3 on srvB: simoom (S1R S3 S5 S7 H3 CPU)
+==> 19:19:54   simoom S1R
+==> 19:21:36   simoom S3
+==> 19:23:05   simoom S5
+==> 19:24:34   simoom S7
+==> 19:26:32   simoom H3
+==> 19:28:38   simoom CPU
+==> 19:29:04 round 3 on srvB: go-nethttp (S1R S3 S5 S7 CPU)
+==> 19:29:22   go-nethttp S1R
+==> 19:31:02   go-nethttp S3
+==> 19:32:30   go-nethttp S5
+==> 19:33:59   go-nethttp S7
+==> 19:36:04   go-nethttp CPU
+==> 19:36:30 round 3 on srvB: fasthttp (S1R S3 S5 CPU)
+==> 19:36:48   fasthttp S1R
+==> 19:38:27   fasthttp S3
+==> 19:39:55   fasthttp S5
+==> 19:41:24   fasthttp CPU
+==> 19:41:50 round 3 on srvB: netty (S1R S3 S5 CPU)
+==> 19:42:09   netty S1R
+==> 19:43:49   netty S3
+==> 19:45:18   netty S5
+==> 19:46:49   netty CPU
+==> 19:47:15 round 3 on srvB: vertx (S1R S3 S5 CPU)
+==> 19:47:34   vertx S1R
+==> 19:49:14   vertx S3
+==> 19:50:42   vertx S5
+==> 19:52:13   vertx CPU
+==> 19:52:39 round 3 on srvB: kestrel (S1R S3 S5 CPU)
+==> 19:53:00   kestrel S1R
+==> 19:54:38   kestrel S3
+==> 19:56:06   kestrel S5
+==> 19:57:37   kestrel CPU
+==> 19:58:02 round 3 on srvB: uws (S1R S3 S5 CPU)
+==> 19:58:21   uws S1R
+==> 20:00:00   uws S3
+==> 20:01:29   uws S5
+==> 20:02:58   uws CPU
+==> 20:03:24 round 3 on srvB: simoom-default (S1R S3 S5 CPU)
+==> 20:03:42   simoom-default S1R
+==> 20:05:20   simoom-default S3
+==> 20:06:48   simoom-default S5
+==> 20:08:16   simoom-default CPU
+==> 20:08:41 campaign done
+CAMPAIGN DONE 2026-11-12T20:08:41Z

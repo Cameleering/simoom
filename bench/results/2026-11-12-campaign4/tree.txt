@@ -1,0 +1,57 @@
+--- session lane1
+simoom commit (measured): a81c368f84ea474bdb702b09faa8e03ad0a729c4
+overlaid from the working tree: crates/simoom-bench bench scripts/bench-facade.sh scripts/bench-modes.sh scripts/bench-validate.sh
+benchmark diff against a81c368:
+ bench/cloud/campaign-ctl.sh |  1 +
+ bench/cloud/campaign.sh     | 21 +++++++++++++++++++++
+ 2 files changed, 22 insertions(+)
+  new: bench/cloud/c4-report.py
+  new: bench/competitors/axum-rustls/Cargo.lock
+  new: bench/competitors/axum-rustls/Cargo.toml
+  new: bench/competitors/axum-rustls/run.sh
+  new: bench/competitors/axum-rustls/setup.sh
+  new: bench/competitors/axum-rustls/src/main.rs
+  new: bench/competitors/quinn-h3/Cargo.lock
+  new: bench/competitors/quinn-h3/Cargo.toml
+  new: bench/competitors/quinn-h3/run.sh
+  new: bench/competitors/quinn-h3/setup.sh
+  new: bench/competitors/quinn-h3/src/main.rs
+crates outside the overlay differ from the working tree in: 
+--- session lane2
+simoom commit (measured): a81c368f84ea474bdb702b09faa8e03ad0a729c4
+overlaid from the working tree: crates/simoom-bench bench scripts/bench-facade.sh scripts/bench-modes.sh scripts/bench-validate.sh
+benchmark diff against a81c368:
+ bench/cloud/campaign-ctl.sh |  1 +
+ bench/cloud/campaign.sh     | 21 +++++++++++++++++++++
+ 2 files changed, 22 insertions(+)
+  new: bench/cloud/c4-report.py
+  new: bench/competitors/axum-rustls/Cargo.lock
+  new: bench/competitors/axum-rustls/Cargo.toml
+  new: bench/competitors/axum-rustls/run.sh
+  new: bench/competitors/axum-rustls/setup.sh
+  new: bench/competitors/axum-rustls/src/main.rs
+  new: bench/competitors/quinn-h3/Cargo.lock
+  new: bench/competitors/quinn-h3/Cargo.toml
+  new: bench/competitors/quinn-h3/run.sh
+  new: bench/competitors/quinn-h3/setup.sh
+  new: bench/competitors/quinn-h3/src/main.rs
+crates outside the overlay differ from the working tree in: 
+--- session lane3
+simoom commit (measured): a81c368f84ea474bdb702b09faa8e03ad0a729c4
+overlaid from the working tree: crates/simoom-bench bench scripts/bench-facade.sh scripts/bench-modes.sh scripts/bench-validate.sh
+benchmark diff against a81c368:
+ bench/cloud/campaign-ctl.sh |  1 +
+ bench/cloud/campaign.sh     | 21 +++++++++++++++++++++
+ 2 files changed, 22 insertions(+)
+  new: bench/cloud/c4-report.py
+  new: bench/competitors/axum-rustls/Cargo.lock
+  new: bench/competitors/axum-rustls/Cargo.toml
+  new: bench/competitors/axum-rustls/run.sh
+  new: bench/competitors/axum-rustls/setup.sh
+  new: bench/competitors/axum-rustls/src/main.rs
+  new: bench/competitors/quinn-h3/Cargo.lock
+  new: bench/competitors/quinn-h3/Cargo.toml
+  new: bench/competitors/quinn-h3/run.sh
+  new: bench/competitors/quinn-h3/setup.sh
+  new: bench/competitors/quinn-h3/src/main.rs
+crates outside the overlay differ from the working tree in: 

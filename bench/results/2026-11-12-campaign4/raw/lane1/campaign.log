@@ -1,0 +1,144 @@
+==> 16:10:13 lane 1 start: rounds [1 2 3], servers [simoom hyper axum axum-rustls actix ntex xitca quinn-h3], loads [10.122.0.4 10.122.0.11], deadline 2026-11-13T01:10:00Z
+==> 16:10:14 round 1 on srvA: simoom (S1 S3 S4 S5 S7 S8 S9 S10 H3 CPU S6 COLD)
+==> 16:10:32   simoom S1
+==> 16:15:02   simoom S3
+==> 16:16:30   simoom S4
+==> 16:18:05   simoom S5
+==> 16:19:33   simoom S7
+==> 16:21:31   simoom S8
+==> 16:22:44   simoom S9
+==> 16:23:22   simoom S10
+==> 16:25:15   simoom H3
+==> 16:27:24   simoom CPU
+==> 16:27:48   simoom S6
+==> 16:29:47   simoom COLD
+==> 16:29:52 round 1 on srvA: hyper (S1 S3 S4 S5 S8 S9 S10 CPU S6 COLD)
+==> 16:30:10   hyper S1
+==> 16:36:01   hyper S3
+==> 16:37:28   hyper S4
+==> 16:38:45   hyper S5
+==> 16:40:16   hyper S8
+==> 16:41:06   hyper S9
+==> 16:41:46   hyper S10
+==> 16:43:41   hyper CPU
+==> 16:44:06   hyper S6
+==> 16:46:19   hyper COLD
+==> 16:46:21 round 1 on srvA: axum (S1 S3 S4 S5 S8 S9 S10 CPU S6 COLD)
+==> 16:46:39   axum S1
+==> 16:52:31   axum S3
+==> 16:53:59   axum S4
+==> 16:55:16   axum S5
+==> 16:56:44   axum S8
+==> 16:57:35   axum S9
+==> 16:58:14   axum S10
+==> 17:00:11   axum CPU
+==> 17:00:35   axum S6
+==> 17:02:43   axum COLD
+==> 17:02:45 round 1 on srvA: axum-rustls (S7 COLD)
+==> 17:03:03   axum-rustls S7
+==> 17:05:09   axum-rustls COLD
+==> 17:05:12 round 1 on srvA: actix (S1 S3 S4 S5 S8 S9 S10 CPU S6 COLD)
+==> 17:05:30   actix S1
+==> 17:11:18   actix S3
+==> 17:12:46   actix S4
+==> 17:14:02   actix S5
+==> 17:15:31   actix S8
+==> 17:16:58   actix S9
+==> 17:17:36   actix S10
+==> 17:19:30   actix CPU
+==> 17:19:54   actix S6
+==> 17:22:05   actix COLD
+==> 17:22:08 round 1 on srvA: ntex (S1 S3 S5 S9 S10 CPU S6 COLD)
+==> 17:22:26   ntex S1
+==> 17:28:13   ntex S3
+==> 17:29:42   ntex S5
+==> 17:31:10   ntex S9
+==> 17:31:48   ntex S10
+==> 17:33:41   ntex CPU
+==> 17:34:05   ntex S6
+==> 17:35:44   ntex COLD
+==> 17:35:46 round 1 on srvA: xitca (S1 S5 S9 S10 CPU S6 COLD)
+==> 17:36:04   xitca S1
+==> 17:41:54   xitca S5
+==> 17:43:22   xitca S9
+==> 17:44:00   xitca S10
+==> 17:45:53   xitca CPU
+==> 17:46:18   xitca S6
+==> 17:47:56   xitca COLD
+==> 17:47:59 round 1 on srvA: quinn-h3 (H3 COLD)
+==> 17:48:17   quinn-h3 H3
+==> 17:50:22   quinn-h3 COLD
+==> 17:50:25 lane 1 waiting for the other lanes to finish round 1
+==> 18:27:27 round 2 on srvB: simoom (S1R S3 S5 S7 H3 CPU)
+==> 18:27:45   simoom S1R
+==> 18:29:25   simoom S3
+==> 18:30:54   simoom S5
+==> 18:32:23   simoom S7
+==> 18:34:28   simoom H3
+==> 18:36:34   simoom CPU
+==> 18:36:59 round 2 on srvB: hyper (S1R S3 S5 CPU)
+==> 18:37:18   hyper S1R
+==> 18:39:02   hyper S3
+==> 18:40:33   hyper S5
+==> 18:42:03   hyper CPU
+==> 18:42:28 round 2 on srvB: axum (S1R S3 S5 CPU)
+==> 18:42:46   axum S1R
+==> 18:44:25   axum S3
+==> 18:45:53   axum S5
+==> 18:47:25   axum CPU
+==> 18:47:51 round 2 on srvB: axum-rustls (S7)
+==> 18:48:09   axum-rustls S7
+==> 18:50:14 round 2 on srvB: actix (S1R S3 S5 CPU)
+==> 18:50:32   actix S1R
+==> 18:52:12   actix S3
+==> 18:53:40   actix S5
+==> 18:55:08   actix CPU
+==> 18:55:33 round 2 on srvB: ntex (S1R S3 S5 CPU)
+==> 18:55:51   ntex S1R
+==> 18:57:31   ntex S3
+==> 18:58:59   ntex S5
+==> 19:00:27   ntex CPU
+==> 19:00:52 round 2 on srvB: xitca (S1R S5 CPU)
+==> 19:01:10   xitca S1R
+==> 19:02:49   xitca S5
+==> 19:04:10   xitca CPU
+==> 19:04:35 round 2 on srvB: quinn-h3 (H3)
+==> 19:04:53   quinn-h3 H3
+==> 19:06:59 lane 1 waiting for the other lanes to finish round 2
+==> 19:19:41 round 3 on srvC: simoom (S1R S3 S5 S7 H3 CPU)
+==> 19:19:59   simoom S1R
+==> 19:21:38   simoom S3
+==> 19:23:06   simoom S5
+==> 19:24:34   simoom S7
+==> 19:26:40   simoom H3
+==> 19:28:51   simoom CPU
+==> 19:29:16 round 3 on srvC: hyper (S1R S3 S5 CPU)
+==> 19:29:34   hyper S1R
+==> 19:31:13   hyper S3
+==> 19:32:41   hyper S5
+==> 19:34:09   hyper CPU
+==> 19:34:34 round 3 on srvC: axum (S1R S3 S5 CPU)
+==> 19:34:53   axum S1R
+==> 19:36:31   axum S3
+==> 19:37:22   axum S5
+==> 19:38:49   axum CPU
+==> 19:39:16 round 3 on srvC: axum-rustls (S7)
+==> 19:39:34   axum-rustls S7
+==> 19:41:43 round 3 on srvC: actix (S1R S3 S5 CPU)
+==> 19:42:01   actix S1R
+==> 19:43:42   actix S3
+==> 19:45:10   actix S5
+==> 19:46:38   actix CPU
+==> 19:47:04 round 3 on srvC: ntex (S1R S3 S5 CPU)
+==> 19:47:22   ntex S1R
+==> 19:49:02   ntex S3
+==> 19:50:30   ntex S5
+==> 19:51:57   ntex CPU
+==> 19:52:23 round 3 on srvC: xitca (S1R S5 CPU)
+==> 19:52:41   xitca S1R
+==> 19:54:20   xitca S5
+==> 19:55:49   xitca CPU
+==> 19:56:14 round 3 on srvC: quinn-h3 (H3)
+==> 19:56:32   quinn-h3 H3
+==> 19:58:38 campaign done
+CAMPAIGN DONE 2026-11-12T19:58:38Z

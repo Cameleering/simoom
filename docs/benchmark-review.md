@@ -85,3 +85,28 @@ memory) for every server. Then the site is generated from that table, nothing el
   simoom's client, and the benchmark's HTTP/3 load generator built on it, threw the response away.
   Without the fix quinn + h3 would have been scored as failing most requests. Campaign 4 measures
   simoom with this fix.
+
+## 7. Outcome (2026-11-13)
+
+Campaign 4 ran on 2026-11-12 from 16:10 to 20:12 UTC: three lanes, three rounds, simoom and 20
+other servers. Its results:
+
+- the analysis: [bench/results/2026-11-12-campaign4/analysis.md](../bench/results/2026-11-12-campaign4/analysis.md);
+- every measure and every server: [report.md](../bench/results/2026-11-12-campaign4/report.md).
+
+The site's benchmark, home and compare pages are now generated from it by
+`scripts/c4-site.py`. Hand-written figures from earlier campaigns were removed.
+
+In one line per use case:
+
+- **First:** start-up, CPU per request, HTTPS throughput.
+- **Joint first:** downloads.
+- **Second:**
+  - status endpoints and JSON APIs, behind may-minihttp;
+  - HTTP/2 and HTTP/3, behind H2O;
+  - idle memory, behind nginx.
+- **Fifth:** a connection per request.
+- **Sixth:** slow attackers.
+- **Tenth:** answers within 1 ms during a traffic spike.
+
+The losses are on the site in the same charts as the wins.

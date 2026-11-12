@@ -362,7 +362,8 @@ run_server() { # run_server ROUND HOST SRVNAME NAME SCENARIOS
             on "$S" "b=${v#*:}; cp \$b /tmp/size.bin && strip -s /tmp/size.bin; echo \"SIZE variant=${v%%:*} bytes=\$(stat -c %s /tmp/size.bin) unstripped=\$(stat -c %s \$b) path=\$b\"" | rec "$tag"
           done
         fi
-        on "$S" "$SB coldstart --addr 127.0.0.1:8080 --repeat 20 -- \$($SRVSH cmd $n)" 2>&1 | grep -E '^COLDSTART|simoom-bench:' | sed 's/^simoom-bench: /FAILED step=coldstart /' | rec "$tag"
+        # eval undoes the %q quoting of run.sh --print (a JVM classpath wildcard must reach java as *)
+        on "$S" "eval \"$SB coldstart --addr 127.0.0.1:8080 --repeat 20 -- \$($SRVSH cmd $n)\"" 2>&1 | grep -E '^COLDSTART|simoom-bench:' | sed 's/^simoom-bench: /FAILED step=coldstart /' | rec "$tag"
         # like-for-like with Cameleer's cameleer-http (docs/STATUS.md): the smallest servers,
         # plain and with TLS, the same reply and arguments
         local cert="--cert /opt/bench/cert/cert.pem --key /opt/bench/cert/key.pem" cv=""
