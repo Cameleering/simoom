@@ -81,9 +81,9 @@
         <a class="btn" href="benchmarks/">See the numbers and the losses</a>
       </div>
       <dl class="facts">
-        <div><dt>0</dt><dd>crates.io dependencies, not even for tests</dd></div>
-        <div><dt>0.73 ms</dt><dd>from process start to the first answer</dd></div>
-        <div><dt>215 KB</dt><dd>added to your binary for HTTP/1.1</dd></div>
+        <div><dt>2.8x</dt><dd>smaller program than hyper: 742 KB vs 2,069 KB</dd></div>
+        <div><dt>30x</dt><dd>less memory per idle connection than hyper: 596 B vs 17.8 KB</dd></div>
+        <div><dt>+20%</dt><dd>requests per second over hyper, 99% answered within 1 ms</dd></div>
       </dl>
     </div>
     <div class="win" aria-label="A complete simoom server in Rust">
@@ -108,6 +108,56 @@
 }</code></pre>
       <footer><b>cargo add simoom</b> · Rust 1.89+ · Linux, Windows, macOS</footer>
     </div>
+  </div>
+</section>
+
+<section class="c-sec" id="glance">
+  <div class="wrap">
+    <h2>Smaller, lighter and quicker to start, measured</h2>
+    <p class="intro">What each number means and what it is measured against. Shorter bars are better on this row; the speed comparisons follow further down.</p>
+    <div class="glance">
+      <div class="g">
+        <h3>Start-up</h3>
+        <p class="what">Time from launching the program to its first answer. A serverless function pays it on every cold request.</p>
+        <span class="ratio">37% <small>faster with TLS</small></span>
+        <div class="m">
+          <div class="us"><span class="row"><span>simoom</span><b>0.87 ms</b></span><span class="t"><i style="width:63.5%"></i></span></div>
+          <div><span class="row"><span>Cameleer's old server</span><b>1.37 ms</b></span><span class="t"><i style="width:100%"></i></span></div>
+        </div>
+        <p class="fine">Without TLS: 0.73 ms against 0.77 ms (5% faster). Same machine, 10 alternating rounds.</p>
+      </div>
+      <div class="g">
+        <h3>Program size</h3>
+        <p class="what">How big the finished, stripped program is: what you copy to a device or a function image.</p>
+        <span class="ratio">2.8x <small>smaller than hyper</small></span>
+        <div class="m">
+          <div class="us"><span class="row"><span>simoom</span><b>742 KB</b></span><span class="t"><i style="width:35.9%"></i></span></div>
+          <div><span class="row"><span>hyper + tokio</span><b>2,069 KB</b></span><span class="t"><i style="width:100%"></i></span></div>
+        </div>
+        <p class="fine">Both serve HTTP/1.1 and HTTP/2 without TLS; simoom also has WebSocket. HTTP/1.1 only: 536 KB, where may-minihttp is 4% smaller (515 KB).</p>
+      </div>
+      <div class="g">
+        <h3>Memory per connection</h3>
+        <p class="what">What each open but quiet connection costs. It adds up with many clients, live updates or devices that stay connected.</p>
+        <span class="ratio">30x <small>less than hyper</small></span>
+        <div class="m">
+          <div class="us"><span class="row"><span>simoom</span><b>596 B</b></span><span class="t"><i style="width:3.4%"></i></span></div>
+          <div><span class="row"><span>hyper</span><b>17,791 B</b></span><span class="t"><i style="width:100%"></i></span></div>
+        </div>
+        <p class="fine">10,000 idle connections. nginx is level at 522 B. About 1 MB for the whole server at rest.</p>
+      </div>
+      <div class="g">
+        <h3>CPU per request</h3>
+        <p class="what">Processor time spent on each answer at a fixed load. Less CPU means a smaller machine or a lower bill.</p>
+        <span class="ratio">11% <small>less than hyper</small></span>
+        <div class="m">
+          <div class="us"><span class="row"><span>simoom</span><b>25.05 µs</b></span><span class="t"><i style="width:89.1%"></i></span></div>
+          <div><span class="row"><span>hyper</span><b>28.10 µs</b></span><span class="t"><i style="width:100%"></i></span></div>
+        </div>
+        <p class="fine">50,000 requests per second, same droplet. Against Cameleer's old server: 13 µs against 23 µs (43% less).</p>
+      </div>
+    </div>
+    <p class="note">Start-up: WSL2 workstation, 2026-11-11. Size, memory and CPU: campaign 3 on DigitalOcean c-4 droplets, 2026-11-11; memory per connection does not depend on how fast the droplet is. Sources and every other figure in <a href="benchmarks/#campaign">the benchmarks</a>.</p>
   </div>
 </section>
 
@@ -153,18 +203,18 @@
     <p class="intro">Requests per second while 99% of answers still arrive within 1 ms, measured on one 4-vCPU DigitalOcean droplet per comparison, with the load coming at a fixed rate from two other machines.</p>
     <div class="bars">
       <div class="bar-group">
-        <h4>Plain HTTP, 256 connections (2026-11-12, median of three rounds)</h4>
+        <h4><b class="gain">+20%</b> over hyper, +15% over may-minihttp: plain HTTP, 256 connections (2026-11-12, median of three rounds)</h4>
         <div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="val">172,638</span></div>
         <div class="bar"><span>may-minihttp</span><span class="track"><span class="fill" style="width:87.3%"></span></span><span class="val">150,673</span></div>
         <div class="bar"><span>hyper</span><span class="track"><span class="fill" style="width:83.7%"></span></span><span class="val">144,443</span></div>
       </div>
       <div class="bar-group">
-        <h4>The same over TLS 1.3 (2026-11-11)</h4>
+        <h4><b class="gain">+65%</b> over h2o: the same over TLS 1.3 (2026-11-11)</h4>
         <div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="val">160,441</span></div>
         <div class="bar"><span>h2o</span><span class="track"><span class="fill" style="width:60.6%"></span></span><span class="val">97,219</span></div>
       </div>
       <div class="bar-group">
-        <h4>HTTP/3 over QUIC (2026-11-11)</h4>
+        <h4><b class="gain">+13%</b> over h2o: HTTP/3 over QUIC (2026-11-11)</h4>
         <div class="bar us"><span>simoom</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="val">106,947</span></div>
         <div class="bar"><span>h2o</span><span class="track"><span class="fill" style="width:88.4%"></span></span><span class="val">94,507</span></div>
       </div>

@@ -163,6 +163,7 @@
         <tr><td>1 KB JSON echo, p99 under 1 ms</td><td class="num">153,526</td><td class="num">hyper 152,822 (tie)</td></tr>
         <tr><td>peak memory during S1 at 256 connections</td><td class="num"><span class="win">2.5 MB</span></td><td class="num">xitca 4.1 MB</td></tr>
         <tr><td>memory per idle connection, 10k / 100k open</td><td class="num">594 / 533 B</td><td class="num">nginx 522 / 532 B</td></tr>
+        <tr><td>memory per idle connection, 10k open, against hyper (same campaign, another lane)</td><td class="num"><span class="win">596 B</span></td><td class="num">hyper 17,791 B (simoom 30x less)</td></tr>
         <tr><td>1 MB responses, plain</td><td class="num">1.95 Gbit/s</td><td class="num">nginx 1.95 Gbit/s (tie, at the network limit)</td></tr>
         <tr><td>a handler that blocks for 100 ms, 500 clients</td><td class="num">4,925 req/s, 0 errors</td><td class="num">Cameleer's old server 4,925</td></tr>
       </tbody>
@@ -219,7 +220,18 @@
         <tr><td>everything: HTTP/1.1, HTTP/2, HTTP/3, TLS, WebSocket, io_uring</td><td class="num">935,064 B</td><td class="num">1,048,576 B</td></tr>
       </tbody>
     </table></div>
-    <p class="note">As a whole executable, the HTTP/1.1-only server is 536 KB stripped against may-minihttp's 515 KB; about 181 KB of either is the standard library's backtrace code. The HTTP/1.1 and full rows are from 2026-11-11, the TLS row from 2026-11-12.</p>
+    <p class="note">The HTTP/1.1 and full rows are from 2026-11-11, the TLS row from 2026-11-12.</p>
+    <h3>Whole programs, stripped (campaign 3, 2026-11-11)</h3>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>benchmark server</th><th>what it serves</th><th class="num">size</th></tr></thead>
+      <tbody>
+        <tr><td>simoom, default features</td><td>HTTP/1.1, HTTP/2 without TLS, WebSocket</td><td class="num"><span class="win">742 KB</span></td></tr>
+        <tr><td>hyper 1.12.0 on tokio</td><td>HTTP/1.1, HTTP/2 without TLS</td><td class="num">2,069 KB (simoom 2.8x smaller)</td></tr>
+        <tr><td>simoom, HTTP/1.1 only</td><td>HTTP/1.1</td><td class="num">536 KB</td></tr>
+        <tr><td>may-minihttp 0.1.11</td><td>HTTP/1.1</td><td class="num"><span class="win">515 KB</span> (4% smaller than simoom)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">hyper was built with <code>lto = "fat"</code>, one codegen unit and <code>panic = "abort"</code>, its smallest fast build. About 181 KB of every Rust program here is the standard library's backtrace code. Programs: <a href="https://github.com/Cameleering/simoom/tree/main/bench/competitors">bench/competitors</a>; sizes from the <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-11-campaign3/summary.md">campaign 3 summary</a>.</p>
   </div>
 </section>
 
