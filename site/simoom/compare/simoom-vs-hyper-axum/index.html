@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hyper and axum vs simoom: Rust HTTP servers compared</title>
+<meta name="description" content="hyper vs simoom on one machine: 172,638 vs 144,443 req/s at p99 under 1 ms, 11% less CPU per request, no tokio. And when hyper or axum is the better pick.">
+<link rel="canonical" href="https://cameleer.ing/simoom/compare/simoom-vs-hyper-axum/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="hyper and axum vs simoom: Rust HTTP servers compared">
+<meta property="og:description" content="Same-droplet numbers for hyper 1.12.0 and simoom, the losses, and an honest answer to when hyper or axum on tokio is the better choice.">
+<meta property="og:url" content="https://cameleer.ing/simoom/compare/simoom-vs-hyper-axum/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<link rel="stylesheet" href="../../../assets/compare.css">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "TechArticle",
+ "headline": "hyper and axum vs simoom: Rust HTTP servers compared",
+ "description": "hyper 1.12.0 and simoom measured on the same 4-vCPU droplet: plain HTTP throughput at p99 under 1 ms, CPU per request and the losses, plus when hyper or axum on tokio is the better choice.",
+ "url": "https://cameleer.ing/simoom/compare/simoom-vs-hyper-axum/",
+ "inLanguage": "en", "image": "https://cameleer.ing/simoom/og.jpg",
+ "author": {"@type": "Person", "name": "Sudheesh PM"},
+ "publisher": {"@type": "Organization", "name": "Cameleering", "url": "https://cameleer.ing/cameleering/"},
+ "about": [{"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom"}, {"@type": "SoftwareSourceCode", "name": "hyper", "codeRepository": "https://github.com/hyperium/hyper"}, {"@type": "SoftwareSourceCode", "name": "axum", "codeRepository": "https://github.com/tokio-rs/axum"}]}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+ {"@type": "ListItem", "position": 1, "name": "simoom", "item": "https://cameleer.ing/simoom/"},
+ {"@type": "ListItem", "position": 2, "name": "Compare", "item": "https://cameleer.ing/simoom/compare/"},
+ {"@type": "ListItem", "position": 3, "name": "hyper and axum vs simoom"}]}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
+ {"@type": "Question", "name": "Is simoom faster than hyper?", "acceptedAnswer": {"@type": "Answer", "text": "On the same 4-vCPU droplet on 2026-11-12, simoom served 170,648, 172,638 and 138,644 plain requests per second with p99 under 1 ms at 64, 256 and 1,024 connections, against hyper's 122,240, 144,443 and 115,102 (medians of three rounds). At a fixed 50k req/s it used 25.05 µs of CPU per request against hyper's 28.10. In an earlier round on another droplet hyper led at 1,024 connections (166.9k against 138.6k), and the 1 KB JSON echo and HTTP/2 tests were ties."}},
+ {"@type": "Question", "name": "Can I use hyper without tokio?", "acceptedAnswer": {"@type": "Answer", "text": "hyper is built for async Rust and in practice runs on tokio. If the goal is no async runtime at all, simoom is built that way: a service is a plain function on an event loop thread, and slow work goes to a bounded offload pool or to your own threads."}},
+ {"@type": "Question", "name": "hyper vs axum vs simoom: which should I use?", "acceptedAnswer": {"@type": "Answer", "text": "For a typical web API on tokio with middleware, extractors and a team that knows the ecosystem, axum is the safer choice. For a low-level HTTP library inside the tokio world, use hyper. For an embedded server with no async runtime, no third-party crates, HTTP/3 and a small binary, use simoom."}},
+ {"@type": "Question", "name": "Does simoom work with tower middleware?", "acceptedAnswer": {"@type": "Answer", "text": "No. simoom has its own Service type, a Router and optional helpers for compression, CORS, cookies, multipart, conditional requests and authentication. It does not implement tower's traits, so tower layers and axum extractors do not plug into it."}},
+ {"@type": "Question", "name": "Does hyper support HTTP/3?", "acceptedAnswer": {"@type": "Answer", "text": "Not by itself. HTTP/3 for the hyper ecosystem lives in the separate h3 crate, which describes itself as experimental. simoom ships HTTP/3, QUIC v1 and TLS 1.3 in-tree as cargo features."}}]}
+</script>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../../docs/">Docs</a>
+      <a class="keep" href="../../use-cases/">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../" aria-current="page">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="c-hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="../../">simoom</a> / <a href="../">Compare</a> / hyper and axum vs simoom</p>
+    <p class="kicker">Same droplet. Measured.</p>
+    <h1>hyper and axum vs simoom</h1>
+    <p class="lede">hyper is Rust's default HTTP library, and axum is the framework most teams build on top of it, both on tokio. simoom takes a different road: no async runtime, no third-party crates, HTTP/3 and TLS in the box. We measured hyper and simoom on the same machine. Here is what came out, including where hyper is ahead.</p>
+    <div class="stats">
+      <div class="stat"><b>+20%</b><span>plain requests per second at 256 connections</span><small>172,638 vs 144,443</small></div>
+      <div class="stat"><b>+40%</b><span>at 64 connections</span><small>170,648 vs 122,240</small></div>
+      <div class="stat"><b>11%</b><span>less CPU per request at 50k req/s</span><small>25.05 µs vs 28.10 µs</small></div>
+      <div class="stat"><b>0</b><span>async runtimes or third-party crates</span><small>std only</small></div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="glance">
+  <div class="wrap">
+    <h2>hyper, axum and simoom at a glance</h2>
+    <p class="intro">Wins and losses in one table. "Measured" rows are hyper 1.12.0 and simoom on the same DigitalOcean c-4 droplet; axum was not benchmarked.</p>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th></th><th>hyper / axum</th><th>simoom</th></tr></thead>
+      <tbody>
+        <tr><td>What it is</td><td>hyper: HTTP/1 and HTTP/2 library; axum: framework on tokio, tower and hyper</td><td>HTTP/1.1, HTTP/2 and HTTP/3 server engine with its own TLS 1.3, WebSocket and a client</td></tr>
+        <tr><td>Runtime</td><td>tokio (async/await)</td><td class="win">none: plain functions on one event loop per core</td></tr>
+        <tr><td>Third-party crates</td><td>tokio, tower and their dependency trees</td><td class="win">0, not even for tests</td></tr>
+        <tr><td>HTTP/3</td><td>not in hyper; the separate <code>h3</code> crate describes itself as experimental</td><td class="win">in-tree, a cargo feature; 54 of 58 QUIC Interop Runner pairs</td></tr>
+        <tr><td>TLS</td><td>rustls or native-tls, chosen by you</td><td>its own TLS 1.3; not independently audited yet</td></tr>
+        <tr><td>Middleware and ecosystem</td><td class="win">tower layers, axum extractors, many integrations, years of production use</td><td>a router and optional helpers; version 0.1.0</td></tr>
+        <tr><td>Plain HTTP, 64 / 256 / 1,024 connections (req/s, p99 ≤ 1 ms)</td><td>122,240 / 144,443 / 115,102</td><td class="win">170,648 / 172,638 / 138,644</td></tr>
+        <tr><td>CPU per request at 50k req/s</td><td>28.10 µs</td><td class="win">25.05 µs</td></tr>
+        <tr><td>1 KB JSON echo (req/s, p99 ≤ 1 ms)</td><td>152,822</td><td>153,526 (a tie)</td></tr>
+        <tr><td>HTTP/2 without TLS, 100 streams (p99 ≤ 5 ms)</td><td>151.3k</td><td>152.5k (a tie, at the network limit)</td></tr>
+        <tr><td>A new connection per request</td><td>19.3k/s</td><td class="win">22.1k/s</td></tr>
+        <tr><td>Plain HTTP, 1,024 connections, an earlier round on another droplet</td><td class="win">166.9k</td><td>138.6k (−17%)</td></tr>
+        <tr><td>Overload at 1.17x the network limit, answered within 1 ms</td><td>6.1k</td><td>6.4k (both far below nginx's 52.4k)</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">Plain HTTP rows: 2026-11-12, median of three rounds on one droplet. The other rows: campaign 3, 2026-11-11, droplet srvB, where both servers ran. Details in the <a href="../../benchmarks/">benchmarks</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="results">
+  <div class="wrap">
+    <h2>Plain HTTP throughput</h2>
+    <p class="intro">Requests per second while 99% of answers still arrive within 1 ms: a GET with a 13-byte reply, one request in flight per connection. Median of three rounds on the same droplet, 2026-11-12.</p>
+    <p class="legend"><span><i style="background:var(--signal)"></i>simoom (epoll)</span><span><i style="background:var(--java)"></i>hyper 1.12.0</span></p>
+    <div class="bars">
+      <div class="bar-group"><h4>64 connections</h4>
+        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">170,648 req/s</span></div>
+        <div class="bar"><span>hyper</span><span class="track"><i class="fill" style="width:71.6%"></i></span><span class="val">122,240 req/s</span></div>
+      </div>
+      <div class="bar-group"><h4>256 connections</h4>
+        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">172,638 req/s</span></div>
+        <div class="bar"><span>hyper</span><span class="track"><i class="fill" style="width:83.7%"></i></span><span class="val">144,443 req/s</span></div>
+      </div>
+      <div class="bar-group"><h4>1,024 connections</h4>
+        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">138,644 req/s</span></div>
+        <div class="bar"><span>hyper</span><span class="track"><i class="fill" style="width:83.0%"></i></span><span class="val">115,102 req/s</span></div>
+      <p>simoom's io_uring back end reached 148,429 at 1,024 connections in the same round.</p>
+      </div>
+    </div>
+    <p class="note">The single rounds vary: hyper passed 168,653 at 64 connections in one round and 122,240 in the other two. The analysis calls this search noisy at this precision and treats the fixed-rate runs and repeated handshakes as the firmer evidence. All rounds: <a href="../../benchmarks/#plain">plain HTTP results</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="when">
+  <div class="wrap">
+    <h2>When to pick hyper or axum instead</h2>
+    <p class="intro">For many Rust services, axum on tokio is the right answer, and that is fine.</p>
+    <div class="two">
+      <div class="pane">
+        <h3>Pick hyper or axum when</h3>
+        <ul>
+          <li>Your program is already async and runs on tokio, or uses libraries that need it (database drivers, gRPC, cloud SDKs).</li>
+          <li>You want tower middleware, axum extractors, OpenAPI generators and the rest of the ecosystem.</li>
+          <li>Your team already knows axum, and hiring and onboarding matter more than footprint.</li>
+          <li>You need a library with years of production use and many contributors. simoom is at 0.1.0.</li>
+          <li>You want independently audited TLS: pair hyper with rustls.</li>
+        </ul>
+      </div>
+      <div class="pane good">
+        <h3>Pick simoom when</h3>
+        <ul>
+          <li>You don't want an async runtime in a program that never needed one: a CLI, a desktop app, a daemon, a device.</li>
+          <li>Every third-party crate is a review: simoom has none, from the TLS handshake to QUIC.</li>
+          <li>Binary size and start-up count: about 215 KB added for HTTP/1.1, and 0.73 ms from process start to the first answer.</li>
+          <li>You want HTTP/3 without a separate experimental stack.</li>
+          <li>Throughput per core matters and you can live with a smaller API.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="code">
+  <div class="wrap">
+    <h2>What the code looks like</h2>
+    <p class="intro">No <code>async</code>, no runtime to start. A route is a function that takes the request and a reply.</p>
+    <pre class="cmd">use simoom::{Outcome, Reply, Request, Router, Server};
+
+let router = Router::new()
+    .get("/health", |_: &amp;mut Request&lt;'_&gt;, r: Reply&lt;'_&gt;| r.body_static(b"ok"))
+    .get("/users/:id", |req: &amp;mut Request&lt;'_&gt;, r: Reply&lt;'_&gt;| -&gt; Outcome {
+        let id = req.param_str("id").unwrap_or("").to_string();
+        r.header("content-type", "application/json").body(format!("{{\"id\":\"{id}\"}}"))
+    });
+
+let server = Server::builder().listen("0.0.0.0:8080").service(router).start().expect("start");</pre>
+    <p class="note">Slow work (a database query, a call to another service) goes to the bounded offload pool with <code>simoom::blocking</code>, or to your own threads with <code>Reply::defer</code>. See <a href="../../docs/guides/routing.html">routing</a> and <a href="../../docs/guides/slow-work.html">slow work</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="how">
+  <div class="wrap">
+    <h2>How it was measured</h2>
+    <div class="two">
+      <div class="pane">
+        <h3>Setup</h3>
+        <ul>
+          <li>DigitalOcean <code>c-4</code> droplets (4 dedicated vCPUs, Xeon Platinum 8280, Bangalore), Ubuntu 24.04.</li>
+          <li>One server droplet, two separate load droplets, open-loop load: requests arrive at a fixed rate whether or not the server keeps up.</li>
+          <li>hyper 1.12.0 from its pinned <code>Cargo.lock</code>; simoom from the measured commit.</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>Rules</h3>
+        <ul>
+          <li>Headline: the highest steady rate whose p99 stays at or under 1 ms (5 ms for HTTP/2 with 100 streams).</li>
+          <li>Plain HTTP: median of three rounds on one droplet, 2026-11-12. Other rows: campaign 3, 2026-11-11, one round on droplet srvB.</li>
+          <li>Only servers on the same droplet are compared; raw HDR logs and scripts are in <code>bench/results/</code>.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">Method and every number: <a href="../../benchmarks/#method">benchmark method</a>, <a href="../../benchmarks/#losses">the losses</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec faq" id="faq">
+  <div class="wrap">
+    <h2>Common questions</h2>
+    <details><summary>Is simoom faster than hyper?</summary><p>On the same 4-vCPU droplet on 2026-11-12, simoom served 170,648, 172,638 and 138,644 plain requests per second with p99 under 1 ms at 64, 256 and 1,024 connections, against hyper's 122,240, 144,443 and 115,102 (medians of three rounds). At a fixed 50k req/s it used 25.05 µs of CPU per request against hyper's 28.10. In an earlier round on another droplet hyper led at 1,024 connections (166.9k against 138.6k), and the 1 KB JSON echo and HTTP/2 tests were ties.</p></details>
+    <details><summary>Can I use hyper without tokio?</summary><p>hyper is built for async Rust and in practice runs on tokio. If the goal is no async runtime at all, simoom is built that way: a service is a plain function on an event loop thread, and slow work goes to a bounded offload pool or to your own threads.</p></details>
+    <details><summary>hyper vs axum vs simoom: which should I use?</summary><p>For a typical web API on tokio with middleware, extractors and a team that knows the ecosystem, axum is the safer choice. For a low-level HTTP library inside the tokio world, use hyper. For an embedded server with no async runtime, no third-party crates, HTTP/3 and a small binary, use simoom.</p></details>
+    <details><summary>Does simoom work with tower middleware?</summary><p>No. simoom has its own Service type, a Router and optional helpers for compression, CORS, cookies, multipart, conditional requests and authentication. It does not implement tower's traits, so tower layers and axum extractors do not plug into it.</p></details>
+    <details><summary>Does hyper support HTTP/3?</summary><p>Not by itself. HTTP/3 for the hyper ecosystem lives in the separate h3 crate, which describes itself as experimental. simoom ships HTTP/3, QUIC v1 and TLS 1.3 in-tree as cargo features.</p></details>
+  </div>
+</section>
+
+<section class="c-sec" id="start">
+  <div class="wrap">
+    <h2>Try it next to your hyper service</h2>
+    <p class="intro">Add the crate, serve the same route on another port, and measure both on your own machine.</p>
+    <pre class="cmd">cargo add simoom</pre>
+    <div class="cta">
+      <a class="btn primary" href="../../docs/guides/getting-started.html">Getting started</a>
+      <a class="btn" href="../simoom-vs-may-minihttp/">may-minihttp vs simoom</a>
+      <a class="btn" href="../../alternatives/rust-http-server-without-tokio/">Servers without tokio</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. Other product names are trademarks of their owners.</p>
+    </div>
+    <div>
+      <h4>Use cases</h4>
+      <ul>
+        <li><a href="../../use-cases/">All use cases</a></li>
+        <li><a href="../../use-cases/serverless-cold-start/">Serverless functions</a></li>
+        <li><a href="../../use-cases/edge-iot-http-server/">Edge and IoT devices</a></li>
+        <li><a href="../../use-cases/http3-server/">HTTP/3 in Rust</a></li>
+        <li><a href="../">Compare</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../../docs/">Documentation</a></li>
+        <li><a href="../../docs/guides/getting-started.html">Getting started</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script>addEventListener('scroll',function(){document.getElementById('top').classList.toggle('scrolled',scrollY>8)},{passive:true})</script>
+</body>
+</html>

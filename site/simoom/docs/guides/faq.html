@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>simoom FAQ | simoom</title>
+<meta name="description" content="Short answers about simoom: no async runtime, zero dependencies, HTTP/3 without quinn, small builds, what it doesn&#x27;t do, and how ready it is.">
+<link rel="canonical" href="https://cameleer.ing/simoom/docs/guides/faq.html">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="simoom FAQ">
+<meta property="og:description" content="Short answers about simoom: no async runtime, zero dependencies, HTTP/3 without quinn, small builds, what it doesn&#x27;t do, and how ready it is.">
+<meta property="og:url" content="https://cameleer.ing/simoom/docs/guides/faq.html">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="alternate" type="text/markdown" href="faq.md" title="Markdown source">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "simoom FAQ", "description": "Short answers about simoom: no async runtime, zero dependencies, HTTP/3 without quinn, small builds, what it doesn't do, and how ready it is.", "url": "https://cameleer.ing/simoom/docs/guides/faq.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 3, "name": "simoom FAQ", "item": "https://cameleer.ing/simoom/docs/guides/faq.html"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Is there a Rust HTTP server without tokio?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. simoom has no async runtime at all. It runs its own event loop per CPU core on epoll, io_uring, IOCP or kqueue, and a service is a plain function. Slow work goes to a bounded offload pool (simoom::blocking) or to your own threads (Reply::defer). Streaming, server-sent events and WebSocket all work without async. See Slow work."}}, {"@type": "Question", "name": "Is there a Rust web server with zero dependencies?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. simoom's crates have no crates.io dependencies, not even for tests. Calls into the operating system go through extern declarations in one crate, simoom-sys, and SIMD goes through core::arch. TLS, QUIC, HTTP/2, HTTP/3 and the compression codecs are all written in the repository."}}, {"@type": "Question", "name": "Is simoom std-only or no_std?", "acceptedAnswer": {"@type": "Answer", "text": "std-only. It uses the Rust standard library and nothing else, so it needs an operating system: Linux, Windows or macOS. It doesn't run on bare-metal microcontrollers without an OS."}}, {"@type": "Question", "name": "Can I serve HTTP/3 from Rust without quinn, rustls or OpenSSL?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. simoom implements QUIC v1, HTTP/3, QPACK and TLS 1.3 itself, and HTTP/3 is a cargo feature of the same server that serves HTTP/1.1 and HTTP/2. It passes 54 of 58 supported pairs in the QUIC Interop Runner; the four failures are 0-RTT (refused by design) and ECN (not implemented). See HTTP/2 and HTTP/3."}}, {"@type": "Question", "name": "What is the smallest Rust HTTP server for AWS Lambda or serverless?", "acceptedAnswer": {"@type": "Answer", "text": "An HTTP/1.1-only simoom build adds about 215 KB to the binary, gives the first answer 0.73 ms after the process starts and idles at about 1 MB. Build with default-features = false, features = [\"http1\"]. See Features and size."}}, {"@type": "Question", "name": "How do I embed an HTTP server in a Rust app?", "acceptedAnswer": {"@type": "Answer", "text": "Add simoom, build a server with Server::builder(), give it a service or a Router, and call start(). It runs on its own threads and returns a handle you can stop() and join(), so the rest of your program carries on. See Getting started."}}, {"@type": "Question", "name": "Can I run a WebSocket server in a Rust CLI or desktop app?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Start the server on 127.0.0.1:0, print or open the chosen port, and push updates with a WebSocketHandler or server-sent events. The server starts in about a millisecond and adds no async runtime to your program. See WebSocket."}}, {"@type": "Question", "name": "Does simoom run on a Raspberry Pi or other ARM boards?", "acceptedAnswer": {"@type": "Answer", "text": "It is built for small devices, and the ARM SIMD and crypto code paths compile. They are compile-checked only so far: the test suite runs on Windows and Linux on x86-64, and the benchmarks ran on x86-64. Reports from ARM hardware are welcome."}}, {"@type": "Question", "name": "How does simoom compare with hyper?", "acceptedAnswer": {"@type": "Answer", "text": "On the same 4-vCPU cloud machine, simoom served more plain HTTP requests per second with p99 under 1 ms and used less CPU per request than hyper; the numbers and the method are on the benchmarks page. hyper is far more mature, has years of production use and a large ecosystem (axum is built on it). simoom has no dependencies, a smaller footprint, its own TLS and HTTP/3. Choose by what matters more to you."}}, {"@type": "Question", "name": "Should I use simoom or axum?", "acceptedAnswer": {"@type": "Answer", "text": "axum gives you extractors, middleware and a large ecosystem on top of tokio. simoom gives you a small synchronous API, a router and optional helpers, with no runtime and no dependencies. If you want the ecosystem, use axum; if size, start-up, dependencies or HTTP/3 matter more, try simoom."}}, {"@type": "Question", "name": "Can simoom serve static files or act as a reverse proxy?", "acceptedAnswer": {"@type": "Answer", "text": "No. simoom is an engine you build into a program; it has no static-file server, no reverse proxy and no configuration file. Use nginx, Caddy or h2o for those jobs. You can still send a file from a handler yourself (Streaming)."}}, {"@type": "Question", "name": "Is simoom production ready?", "acceptedAnswer": {"@type": "Answer", "text": "It is version 0.1.0, the first release, and the API can still change. It has been tested hard: h2spec 146/146, the QUIC Interop Runner, HTTP Garden with no desyncs, testssl.sh, fuzzing of every parser, and a test suite of several hundred tests on Windows and Linux. It has not had an independent security audit, macOS and ARM are compile-checked only, and the benchmarks ran on 4-vCPU machines. It is the HTTP server of Cameleer. Decide with those facts; SECURITY.md has the details."}}, {"@type": "Question", "name": "Which platforms does simoom support?", "acceptedAnswer": {"@type": "Answer", "text": "Linux (epoll and io_uring), Windows (IOCP) and macOS (kqueue). The test suite runs on Windows and Linux; macOS is compile-checked only. Rust 1.89 or newer."}}, {"@type": "Question", "name": "Does simoom support async handlers?", "acceptedAnswer": {"@type": "Answer", "text": "No, on purpose. A handler that needs to wait takes a Responder with reply.defer() and answers from any thread, which also works with a tokio task if your program has one. See Slow work."}}, {"@type": "Question", "name": "Does simoom have an HTTP client?", "acceptedAnswer": {"@type": "Answer", "text": "Yes, the separate simoom-client crate: HTTP/1.1, HTTP/2, HTTP/3 and WebSocket, blocking, with pooling, TLS and redirects. See The client."}}, {"@type": "Question", "name": "Does simoom support TLS 1.2?", "acceptedAnswer": {"@type": "Answer", "text": "Not on simoom servers: they speak TLS 1.3 only. The simoom-tls crate has TLS 1.2 behind a feature for other uses. See TLS."}}, {"@type": "Question", "name": "Why is it called simoom?", "acceptedAnswer": {"@type": "Answer", "text": "A simoom is a hot, fast wind that crosses the desert. It belongs to the same caravan as Cameleer and the Cameleering projects."}}, {"@type": "Question", "name": "What licence is simoom under?", "acceptedAnswer": {"@type": "Answer", "text": "Apache License 2.0."}}]}</script>
+</head>
+<body class="docs">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top scrolled" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home">
+      <img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
+      simoom
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../index.html">Docs</a>
+      <a href="../guides/index.html">Guides</a>
+      <a href="../../use-cases/">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../../compare/">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+<div class="docs-layout">
+  <aside class="sidebar">
+    <details class="navbox" open>
+      <summary>Browse the docs</summary>
+      <nav aria-label="Documentation">
+<ul class="nav-top">
+<li><a href="../index.html">Docs home</a></li>
+</ul>
+<details class="nav-group" open><summary>Guides <span class="n">15</span></summary><ul><li><a href="index.html">All guides</a></li><li><a href="getting-started.html">Getting started with simoom</a></li><li><a href="services-and-replies.html">How do I read requests and send responses in simoom?</a></li><li><a href="routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="slow-work.html">How do I call a database or another service from a simoom handler?</a></li><li><a href="streaming-and-sse.html">How do I stream bodies and send server-sent events with simoom?</a></li><li><a href="websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="tls.html">How do I serve HTTPS with simoom?</a></li><li><a href="http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="runtime.html">How do I configure simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="sans-io-crates.html">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="faq.html" aria-current="page">simoom FAQ</a></li></ul></details>
+<details class="nav-group"><summary>Project <span class="n">1</span></summary><ul><li><a href="../SECURITY.html">Security</a></li></ul></details>
+      </nav>
+    </details>
+    <script>if (matchMedia('(max-width: 900px)').matches) document.currentScript.previousElementSibling.open = false;</script>
+  </aside>
+  <main id="content" class="article">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a> <span aria-hidden="true">/</span> <a href="index.html">Guides</a> <span aria-hidden="true">/</span> <span>simoom FAQ</span></nav>
+    <article>
+<h1 id="simoom-faq">simoom FAQ</h1>
+<blockquote class="answer">
+<p>Short answers about simoom: no async runtime, zero dependencies, HTTP/3 without quinn, small builds, what it doesn&#x27;t do, and how ready it is.</p>
+</blockquote>
+<h2 id="common-questions">Common questions<a class="anchor" href="#common-questions" aria-hidden="true" tabindex="-1"></a></h2>
+<h3 id="is-there-a-rust-http-server-without-tokio">Is there a Rust HTTP server without tokio?<a class="anchor" href="#is-there-a-rust-http-server-without-tokio" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Yes. simoom has no async runtime at all. It runs its own event loop per CPU core on epoll,
+io_uring, IOCP or kqueue, and a service is a plain function. Slow work goes to a bounded offload
+pool (<code>simoom::blocking</code>) or to your own threads (<code>Reply::defer</code>). Streaming, server-sent events
+and WebSocket all work without <code>async</code>. See <a href="slow-work.html">Slow work</a>.</p>
+<h3 id="is-there-a-rust-web-server-with-zero-dependencies">Is there a Rust web server with zero dependencies?<a class="anchor" href="#is-there-a-rust-web-server-with-zero-dependencies" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Yes. simoom&#x27;s crates have no crates.io dependencies, not even for tests. Calls into the operating
+system go through <code>extern</code> declarations in one crate, <code>simoom-sys</code>, and SIMD goes through
+<code>core::arch</code>. TLS, QUIC, HTTP/2, HTTP/3 and the compression codecs are all written in the
+repository.</p>
+<h3 id="is-simoom-std-only-or-no_std">Is simoom std-only or no_std?<a class="anchor" href="#is-simoom-std-only-or-no_std" aria-hidden="true" tabindex="-1"></a></h3>
+<p>std-only. It uses the Rust standard library and nothing else, so it needs an operating system:
+Linux, Windows or macOS. It doesn&#x27;t run on bare-metal microcontrollers without an OS.</p>
+<h3 id="can-i-serve-http3-from-rust-without-quinn-rustls-or-openssl">Can I serve HTTP/3 from Rust without quinn, rustls or OpenSSL?<a class="anchor" href="#can-i-serve-http3-from-rust-without-quinn-rustls-or-openssl" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Yes. simoom implements QUIC v1, HTTP/3, QPACK and TLS 1.3 itself, and HTTP/3 is a cargo feature
+of the same server that serves HTTP/1.1 and HTTP/2. It passes 54 of 58 supported pairs in the QUIC
+Interop Runner; the four failures are 0-RTT (refused by design) and ECN (not implemented). See
+<a href="http2-and-http3.html">HTTP/2 and HTTP/3</a>.</p>
+<h3 id="what-is-the-smallest-rust-http-server-for-aws-lambda-or-serverless">What is the smallest Rust HTTP server for AWS Lambda or serverless?<a class="anchor" href="#what-is-the-smallest-rust-http-server-for-aws-lambda-or-serverless" aria-hidden="true" tabindex="-1"></a></h3>
+<p>An HTTP/1.1-only simoom build adds about 215 KB to the binary, gives the first answer 0.73 ms after
+the process starts and idles at about 1 MB. Build with <code>default-features = false, features = [&quot;http1&quot;]</code>. See <a href="features-and-size.html">Features and size</a>.</p>
+<h3 id="how-do-i-embed-an-http-server-in-a-rust-app">How do I embed an HTTP server in a Rust app?<a class="anchor" href="#how-do-i-embed-an-http-server-in-a-rust-app" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Add <code>simoom</code>, build a server with <code>Server::builder()</code>, give it a service or a <code>Router</code>, and call
+<code>start()</code>. It runs on its own threads and returns a handle you can <code>stop()</code> and <code>join()</code>, so the
+rest of your program carries on. See <a href="getting-started.html">Getting started</a>.</p>
+<h3 id="can-i-run-a-websocket-server-in-a-rust-cli-or-desktop-app">Can I run a WebSocket server in a Rust CLI or desktop app?<a class="anchor" href="#can-i-run-a-websocket-server-in-a-rust-cli-or-desktop-app" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Yes. Start the server on <code>127.0.0.1:0</code>, print or open the chosen port, and push updates with a
+<code>WebSocketHandler</code> or server-sent events. The server starts in about a millisecond and adds no
+async runtime to your program. See <a href="websocket.html">WebSocket</a>.</p>
+<h3 id="does-simoom-run-on-a-raspberry-pi-or-other-arm-boards">Does simoom run on a Raspberry Pi or other ARM boards?<a class="anchor" href="#does-simoom-run-on-a-raspberry-pi-or-other-arm-boards" aria-hidden="true" tabindex="-1"></a></h3>
+<p>It is built for small devices, and the ARM SIMD and crypto code paths compile. They are
+compile-checked only so far: the test suite runs on Windows and Linux on x86-64, and the
+benchmarks ran on x86-64. Reports from ARM hardware are welcome.</p>
+<h3 id="how-does-simoom-compare-with-hyper">How does simoom compare with hyper?<a class="anchor" href="#how-does-simoom-compare-with-hyper" aria-hidden="true" tabindex="-1"></a></h3>
+<p>On the same 4-vCPU cloud machine, simoom served more plain HTTP requests per second with p99 under
+1 ms and used less CPU per request than hyper; the numbers and the method are on the
+<a href="https://cameleer.ing/simoom/benchmarks/">benchmarks page</a>. hyper is far more mature, has years of
+production use and a large ecosystem (axum is built on it). simoom has no dependencies, a smaller
+footprint, its own TLS and HTTP/3. Choose by what matters more to you.</p>
+<h3 id="should-i-use-simoom-or-axum">Should I use simoom or axum?<a class="anchor" href="#should-i-use-simoom-or-axum" aria-hidden="true" tabindex="-1"></a></h3>
+<p>axum gives you extractors, middleware and a large ecosystem on top of tokio. simoom gives you a
+small synchronous API, a router and optional helpers, with no runtime and no dependencies. If you
+want the ecosystem, use axum; if size, start-up, dependencies or HTTP/3 matter more, try simoom.</p>
+<h3 id="can-simoom-serve-static-files-or-act-as-a-reverse-proxy">Can simoom serve static files or act as a reverse proxy?<a class="anchor" href="#can-simoom-serve-static-files-or-act-as-a-reverse-proxy" aria-hidden="true" tabindex="-1"></a></h3>
+<p>No. simoom is an engine you build into a program; it has no static-file server, no reverse proxy
+and no configuration file. Use nginx, Caddy or h2o for those jobs. You can still send a file from
+a handler yourself (<a href="streaming-and-sse.html">Streaming</a>).</p>
+<h3 id="is-simoom-production-ready">Is simoom production ready?<a class="anchor" href="#is-simoom-production-ready" aria-hidden="true" tabindex="-1"></a></h3>
+<p>It is version 0.1.0, the first release, and the API can still change. It has been tested hard:
+h2spec 146/146, the QUIC Interop Runner, HTTP Garden with no desyncs, testssl.sh, fuzzing of every
+parser, and a test suite of several hundred tests on Windows and Linux. It has not had an
+independent security audit, macOS and ARM are compile-checked only, and the benchmarks ran on
+4-vCPU machines. It is the HTTP server of <a href="https://github.com/Cameleering/cameleer">Cameleer</a>.
+Decide with those facts; <a href="../SECURITY.html">SECURITY.md</a> has the details.</p>
+<h3 id="which-platforms-does-simoom-support">Which platforms does simoom support?<a class="anchor" href="#which-platforms-does-simoom-support" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Linux (epoll and io_uring), Windows (IOCP) and macOS (kqueue). The test suite runs on Windows and
+Linux; macOS is compile-checked only. Rust 1.89 or newer.</p>
+<h3 id="does-simoom-support-async-handlers">Does simoom support async handlers?<a class="anchor" href="#does-simoom-support-async-handlers" aria-hidden="true" tabindex="-1"></a></h3>
+<p>No, on purpose. A handler that needs to wait takes a <code>Responder</code> with <code>reply.defer()</code> and answers
+from any thread, which also works with a tokio task if your program has one. See
+<a href="slow-work.html">Slow work</a>.</p>
+<h3 id="does-simoom-have-an-http-client">Does simoom have an HTTP client?<a class="anchor" href="#does-simoom-have-an-http-client" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Yes, the separate <code>simoom-client</code> crate: HTTP/1.1, HTTP/2, HTTP/3 and WebSocket, blocking, with
+pooling, TLS and redirects. See <a href="client.html">The client</a>.</p>
+<h3 id="does-simoom-support-tls-12">Does simoom support TLS 1.2?<a class="anchor" href="#does-simoom-support-tls-12" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Not on simoom servers: they speak TLS 1.3 only. The <code>simoom-tls</code> crate has TLS 1.2 behind a
+feature for other uses. See <a href="tls.html">TLS</a>.</p>
+<h3 id="why-is-it-called-simoom">Why is it called simoom?<a class="anchor" href="#why-is-it-called-simoom" aria-hidden="true" tabindex="-1"></a></h3>
+<p>A simoom is a hot, fast wind that crosses the desert. It belongs to the same caravan as Cameleer
+and the Cameleering projects.</p>
+<h3 id="what-licence-is-simoom-under">What licence is simoom under?<a class="anchor" href="#what-licence-is-simoom-under" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Apache License 2.0.</p>
+    </article>
+    <p class="edit"><a href="https://github.com/Cameleering/simoom/blob/main/docs/guides/faq.md">Edit this page on GitHub</a></p>
+  </main>
+  
+</div>
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="../../">simoom home</a></li>
+        <li><a href="../../use-cases/">Use cases</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="../../compare/">Compare</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="https://github.com/Cameleering/simoom/blob/main/CONTRIBUTING.md">Contributing</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../index.html">Docs home</a></li>
+        <li><a href="../guides/index.html">Guides</a></li>
+        <li><a href="../SECURITY.html">Security</a></li>
+        <li><a href="https://docs.rs/simoom">API reference (docs.rs)</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script src="../../../assets/docs.js" defer></script>
+</body>
+</html>

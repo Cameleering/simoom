@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Can I use simoom&#x27;s protocol crates in my own I/O loop? | simoom</title>
+<meta name="description" content="Yes: simoom&#x27;s HTTP/1.1, HTTP/2, QUIC, HTTP/3 and TLS crates are sans-io; they take bytes and time, return bytes and events, and never touch sockets.">
+<link rel="canonical" href="https://cameleer.ing/simoom/docs/guides/sans-io-crates.html">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="Can I use simoom&#x27;s protocol crates in my own I/O loop?">
+<meta property="og:description" content="Yes: simoom&#x27;s HTTP/1.1, HTTP/2, QUIC, HTTP/3 and TLS crates are sans-io; they take bytes and time, return bytes and events, and never touch sockets.">
+<meta property="og:url" content="https://cameleer.ing/simoom/docs/guides/sans-io-crates.html">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="alternate" type="text/markdown" href="sans-io-crates.md" title="Markdown source">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "Can I use simoom's protocol crates in my own I/O loop?", "description": "Yes: simoom's HTTP/1.1, HTTP/2, QUIC, HTTP/3 and TLS crates are sans-io; they take bytes and time, return bytes and events, and never touch sockets.", "url": "https://cameleer.ing/simoom/docs/guides/sans-io-crates.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 3, "name": "Can I use simoom's protocol crates in my own I/O loop?", "item": "https://cameleer.ing/simoom/docs/guides/sans-io-crates.html"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Why sans-io?", "acceptedAnswer": {"@type": "Answer", "text": "It lets the protocol logic be tested in memory, without a network or a clock. It also lets the same code serve several I/O models; simoom drives the crates from epoll, io_uring, IOCP and kqueue loops, and the client drives them from blocking sockets."}}, {"@type": "Question", "name": "Can I use simoom-tls on its own?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. It is a complete TLS 1.3 server and client over any byte stream, with a blocking feature that wraps a Read + Write stream. Like the rest of simoom, it has not been independently audited."}}, {"@type": "Question", "name": "Is the QUIC crate a general-purpose QUIC library?", "acceptedAnswer": {"@type": "Answer", "text": "It was written to carry HTTP/3, so its API follows that need. It has no 0-RTT and no ECN. For raw QUIC streams in production, quinn or s2n-quic are more established."}}, {"@type": "Question", "name": "Do I need the simoom crate to use them?", "acceptedAnswer": {"@type": "Answer", "text": "No. Each protocol crate stands alone; add only the ones you drive."}}]}</script>
+</head>
+<body class="docs">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top scrolled" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home">
+      <img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
+      simoom
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../index.html">Docs</a>
+      <a href="../guides/index.html">Guides</a>
+      <a href="../../use-cases/">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../../compare/">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+<div class="docs-layout">
+  <aside class="sidebar">
+    <details class="navbox" open>
+      <summary>Browse the docs</summary>
+      <nav aria-label="Documentation">
+<ul class="nav-top">
+<li><a href="../index.html">Docs home</a></li>
+</ul>
+<details class="nav-group" open><summary>Guides <span class="n">15</span></summary><ul><li><a href="index.html">All guides</a></li><li><a href="getting-started.html">Getting started with simoom</a></li><li><a href="services-and-replies.html">How do I read requests and send responses in simoom?</a></li><li><a href="routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="slow-work.html">How do I call a database or another service from a simoom handler?</a></li><li><a href="streaming-and-sse.html">How do I stream bodies and send server-sent events with simoom?</a></li><li><a href="websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="tls.html">How do I serve HTTPS with simoom?</a></li><li><a href="http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="runtime.html">How do I configure simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="sans-io-crates.html" aria-current="page">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="faq.html">simoom FAQ</a></li></ul></details>
+<details class="nav-group"><summary>Project <span class="n">1</span></summary><ul><li><a href="../SECURITY.html">Security</a></li></ul></details>
+      </nav>
+    </details>
+    <script>if (matchMedia('(max-width: 900px)').matches) document.currentScript.previousElementSibling.open = false;</script>
+  </aside>
+  <main id="content" class="article">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a> <span aria-hidden="true">/</span> <a href="index.html">Guides</a> <span aria-hidden="true">/</span> <span>Can I use simoom&#x27;s protocol crates in my own I/O loop?</span></nav>
+    <article>
+<h1 id="can-i-use-simooms-protocol-crates-in-my-own-io-loop">Can I use simoom&#x27;s protocol crates in my own I/O loop?</h1>
+<blockquote class="answer">
+<p>Yes: simoom&#x27;s HTTP/1.1, HTTP/2, QUIC, HTTP/3 and TLS crates are sans-io; they take bytes and time, return bytes and events, and never touch sockets.</p>
+</blockquote>
+<p>simoom&#x27;s protocols are separate crates that know nothing about sockets, threads or clocks. The
+<code>simoom</code> server is one way to drive them; your own event loop, a test harness, a simulator or an
+embedded runtime can be another.</p>
+<h2 id="the-crates">The crates<a class="anchor" href="#the-crates" aria-hidden="true" tabindex="-1"></a></h2>
+<div class="table"><table>
+<thead><tr><th>crate</th><th>what it does</th></tr></thead>
+<tbody>
+<tr><td><code>simoom-http1</code></td><td>strict HTTP/1.1 parser and serializer (RFC 9112): zero-copy request and response heads, body decoder, chunked encoder, the WebSocket frame codec</td></tr>
+<tr><td><code>simoom-hpack</code></td><td>HPACK header compression (RFC 7541)</td></tr>
+<tr><td><code>simoom-h2</code></td><td>HTTP/2 connection engine (RFC 9113) with flow control and flood accounting</td></tr>
+<tr><td><code>simoom-tls</code></td><td>TLS 1.3 server and client, X.509, the QUIC handshake interface (RFC 9001); TLS 1.2 behind <code>tls12</code></td></tr>
+<tr><td><code>simoom-quic</code></td><td>QUIC v1 transport (RFC 9000, 9002), v2 optional</td></tr>
+<tr><td><code>simoom-qpack</code></td><td>QPACK header compression (RFC 9204)</td></tr>
+<tr><td><code>simoom-h3</code></td><td>HTTP/3 (RFC 9114) on top of <code>simoom-quic</code> streams</td></tr>
+<tr><td><code>simoom-compress</code></td><td>DEFLATE, zlib, gzip, Brotli and zstd, streaming and bounded</td></tr>
+</tbody></table></div>
+<p>Each is published on crates.io at 0.1.0 and has no dependencies outside simoom&#x27;s own crates.
+The only <code>unsafe</code> code is in <code>simoom-sys</code>, which some of them use for SIMD scanning and hardware
+crypto.</p>
+<h2 id="the-pattern">The pattern<a class="anchor" href="#the-pattern" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Every crate works the same way:</p>
+<ol>
+<li>you read bytes from wherever they come from and hand them in, with the current time where
+timers matter;</li>
+<li>the crate returns events (a request head, data, a reset) and how many bytes it consumed;</li>
+<li>you take the bytes it wants to send and write them yourself, then tell it how many went out.</li>
+</ol>
+<p>Nothing is hidden: no background thread, no clock read, no allocation you can&#x27;t bound with a
+limit.</p>
+<h2 id="parsing-http11">Parsing HTTP/1.1<a class="anchor" href="#parsing-http11" aria-hidden="true" tabindex="-1"></a></h2>
+<p><code>parse_request</code> parses a request head into header storage you provide, without allocating. It
+returns <code>Partial</code> until the head is complete, and enforces limits on partial input too:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom_http1::{parse_request, Limits, Status, EMPTY_HEADER};
+
+fn parse() {
+    let input = b&quot;GET /hello?x=1 HTTP/1.1\r\nHost: example.com\r\nUser-Agent: demo\r\n\r\n&quot;;
+    let mut headers = [EMPTY_HEADER; 32];
+    match parse_request(input, &amp;mut headers, &amp;Limits::default()) {
+        Ok(Status::Complete(req)) =&gt; {
+            assert_eq!(req.method, b&quot;GET&quot;);
+            assert_eq!(req.target, b&quot;/hello?x=1&quot;);
+            assert_eq!(req.host, Some(&amp;b&quot;example.com&quot;[..]));
+            assert_eq!(req.head_len, input.len()); // the next request starts here
+        }
+        Ok(Status::Partial) =&gt; { /* read more bytes and call again */ }
+        Err(e) =&gt; eprintln!(&quot;refused: {e:?}&quot;), // answer 400 and close
+    }
+}</code></pre></div>
+<p>The parsed head also tells you how the body is framed (<code>req.framing</code>), whether the connection can
+be kept alive, and whether the client expects <code>100 Continue</code>. <code>BodyDecoder</code> then reads
+Content-Length, chunked or close-delimited bodies incrementally. <code>RequestParser</code> avoids parsing
+the same bytes again when a head arrives in many small pieces.</p>
+<h2 id="driving-http2">Driving HTTP/2<a class="anchor" href="#driving-http2" aria-hidden="true" tabindex="-1"></a></h2>
+<p>A <code>simoom_h2::Connection</code> takes received bytes and calls you back with events; its output buffer
+holds the bytes to send:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom_h2::{Config, Connection, Event};
+
+fn exchange() {
+    let mut server = Connection::server(Config::default());
+    let mut client = Connection::client(Config::default());
+    let id = client.send_request(b&quot;GET&quot;, b&quot;https&quot;, b&quot;example.com&quot;, b&quot;/&quot;, &amp;[], true).unwrap();
+
+    // move the client&#x27;s bytes to the server (your socket does this)
+    let c2s = client.output().to_vec();
+    client.advance_output(c2s.len());
+    let mut request = None;
+    let used = server.recv(&amp;c2s, 0, &amp;mut |ev| {
+        if let Event::Headers { stream, headers, .. } = ev {
+            request = Some((stream, headers.path().unwrap().to_vec()));
+        }
+    });
+    assert_eq!(used, c2s.len()); // keep unconsumed bytes for the next call
+    let (stream, _path) = request.unwrap();
+
+    server.send_response(stream, 200, &amp;[(b&quot;content-type&quot;, b&quot;text/plain&quot;)], false).unwrap();
+    server.send_data(stream, b&quot;hello&quot;, true).unwrap();
+    server.stream_finished(stream);
+    let s2c = server.output().to_vec();
+    server.advance_output(s2c.len());
+    // ... and back to the client
+}</code></pre></div>
+<p>Things the engine leaves to you, on purpose:</p>
+<ul>
+<li><strong>Flow control.</strong> Received data stays charged to the windows until you call
+<code>Connection::release</code>, which bounds what a stream can buffer. <code>send_data</code> accepts only what the
+windows allow and reports the rest as backpressure.</li>
+<li><strong>Handler accounting.</strong> The concurrency limit counts streams whose handler is still running.
+Call <code>stream_finished</code> when your handler is done; that is what defeats Rapid Reset and
+MadeYouReset.</li>
+</ul>
+<h2 id="quic-http3-and-tls">QUIC, HTTP/3 and TLS<a class="anchor" href="#quic-http3-and-tls" aria-hidden="true" tabindex="-1"></a></h2>
+<ul>
+<li><code>simoom_quic::Endpoint</code> takes datagrams, the time and the peer address, and returns datagrams to
+send, the next deadline and per-connection events.</li>
+<li><code>simoom_h3::Http3</code> owns the HTTP/3 state of one QUIC connection: feed it that connection&#x27;s
+events, then drain its events and answer requests with <code>send_headers</code> and <code>send_body</code>.</li>
+<li><code>simoom_tls::ServerConnection</code> and <code>ClientConnection</code> take TLS records and return plaintext and
+records to send; the <code>simoom-tls</code> crate documentation has a complete in-memory handshake.</li>
+</ul>
+<p>The API reference for each crate is on docs.rs: <a href="https://docs.rs/simoom-http1">simoom-http1</a>,
+<a href="https://docs.rs/simoom-h2">simoom-h2</a>, <a href="https://docs.rs/simoom-quic">simoom-quic</a>,
+<a href="https://docs.rs/simoom-h3">simoom-h3</a>, <a href="https://docs.rs/simoom-tls">simoom-tls</a>.</p>
+<h2 id="common-questions">Common questions<a class="anchor" href="#common-questions" aria-hidden="true" tabindex="-1"></a></h2>
+<h3 id="why-sans-io">Why sans-io?<a class="anchor" href="#why-sans-io" aria-hidden="true" tabindex="-1"></a></h3>
+<p>It lets the protocol logic be tested in memory, without a network or a clock. It also lets the same code serve several I/O models; simoom drives the crates from epoll,
+io_uring, IOCP and kqueue loops, and the client drives them from blocking sockets.</p>
+<h3 id="can-i-use-simoom-tls-on-its-own">Can I use simoom-tls on its own?<a class="anchor" href="#can-i-use-simoom-tls-on-its-own" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Yes. It is a complete TLS 1.3 server and client over any byte stream, with a <code>blocking</code> feature
+that wraps a <code>Read + Write</code> stream. Like the rest of simoom, it has not been independently audited.</p>
+<h3 id="is-the-quic-crate-a-general-purpose-quic-library">Is the QUIC crate a general-purpose QUIC library?<a class="anchor" href="#is-the-quic-crate-a-general-purpose-quic-library" aria-hidden="true" tabindex="-1"></a></h3>
+<p>It was written to carry HTTP/3, so its API follows that need. It has no 0-RTT and no ECN. For raw
+QUIC streams in production, quinn or s2n-quic are more established.</p>
+<h3 id="do-i-need-the-simoom-crate-to-use-them">Do I need the <code>simoom</code> crate to use them?<a class="anchor" href="#do-i-need-the-simoom-crate-to-use-them" aria-hidden="true" tabindex="-1"></a></h3>
+<p>No. Each protocol crate stands alone; add only the ones you drive.</p>
+    </article>
+    <p class="edit"><a href="https://github.com/Cameleering/simoom/blob/main/docs/guides/sans-io-crates.md">Edit this page on GitHub</a></p>
+  </main>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#the-crates">The crates</a></li><li><a href="#the-pattern">The pattern</a></li><li><a href="#parsing-http11">Parsing HTTP/1.1</a></li><li><a href="#driving-http2">Driving HTTP/2</a></li><li><a href="#quic-http3-and-tls">QUIC, HTTP/3 and TLS</a></li><li><a href="#common-questions">Common questions</a></li></ul></nav>
+</div>
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="../../">simoom home</a></li>
+        <li><a href="../../use-cases/">Use cases</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="../../compare/">Compare</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="https://github.com/Cameleering/simoom/blob/main/CONTRIBUTING.md">Contributing</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../index.html">Docs home</a></li>
+        <li><a href="../guides/index.html">Guides</a></li>
+        <li><a href="../SECURITY.html">Security</a></li>
+        <li><a href="https://docs.rs/simoom">API reference (docs.rs)</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script src="../../../assets/docs.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>may-minihttp alternative: simoom vs may-minihttp</title>
+<meta name="description" content="may-minihttp vs simoom on one droplet: who leads at 64, 256 and 1,024 connections, where may-minihttp holds up better, and what changed between rounds.">
+<link rel="canonical" href="https://cameleer.ing/simoom/compare/simoom-vs-may-minihttp/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="may-minihttp vs simoom: two Rust servers built for throughput">
+<meta property="og:description" content="Same-droplet results for may-minihttp 0.1.11 and simoom, the scenarios where may-minihttp is ahead, and why an earlier round read differently.">
+<meta property="og:url" content="https://cameleer.ing/simoom/compare/simoom-vs-may-minihttp/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<link rel="stylesheet" href="../../../assets/compare.css">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "TechArticle",
+ "headline": "may-minihttp alternative: simoom vs may-minihttp",
+ "description": "may-minihttp 0.1.11 and simoom measured on the same 4-vCPU droplet: plain HTTP throughput at p99 under 1 ms at 64, 256 and 1,024 connections, the scenarios where may-minihttp is ahead, and how the results changed between benchmark rounds.",
+ "url": "https://cameleer.ing/simoom/compare/simoom-vs-may-minihttp/",
+ "inLanguage": "en", "image": "https://cameleer.ing/simoom/og.jpg",
+ "author": {"@type": "Person", "name": "Sudheesh PM"},
+ "publisher": {"@type": "Organization", "name": "Cameleering", "url": "https://cameleer.ing/cameleering/"},
+ "about": [{"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom"}, {"@type": "SoftwareSourceCode", "name": "may_minihttp"}]}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+ {"@type": "ListItem", "position": 1, "name": "simoom", "item": "https://cameleer.ing/simoom/"},
+ {"@type": "ListItem", "position": 2, "name": "Compare", "item": "https://cameleer.ing/simoom/compare/"},
+ {"@type": "ListItem", "position": 3, "name": "may-minihttp vs simoom"}]}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
+ {"@type": "Question", "name": "What is a good may-minihttp alternative?", "acceptedAnswer": {"@type": "Answer", "text": "If you like may-minihttp for its throughput without tokio but need more than HTTP/1.1, simoom covers HTTP/1.1, HTTP/2, HTTP/3, its own TLS 1.3, WebSocket and a client with no third-party crates. On the same droplet on 2026-11-12 it led may-minihttp by 8% at 64 connections and 15% at 256. If you want a framework on tokio instead, look at axum or xitca-web."}},
+ {"@type": "Question", "name": "Is may-minihttp faster than simoom?", "acceptedAnswer": {"@type": "Answer", "text": "It depends on the round and the droplet. In the 2026-11-12 round, simoom led at 64, 256 and 1,024 connections in every round. In the earlier campaign of 2026-11-11, before simoom's fix for loops sharing a CPU with the network card's interrupts, may-minihttp led at 64 and 256 connections. may-minihttp also held up far better on a droplet with a degraded network path, and its executable is 4% smaller."}},
+ {"@type": "Question", "name": "What is the fastest Rust HTTP server?", "acceptedAnswer": {"@type": "Answer", "text": "There is no single answer: it changes with the machine, the network path, the number of connections and the test. On one 4-vCPU droplet on 2026-11-12, simoom served 172,638 plain requests per second with p99 under 1 ms at 256 connections, may-minihttp 150,673 and hyper 144,443. On a droplet with a degraded network path, may-minihttp was the most robust. Measure on your own hardware with your own traffic."}},
+ {"@type": "Question", "name": "Does may-minihttp support HTTP/2 or TLS?", "acceptedAnswer": {"@type": "Answer", "text": "may-minihttp is a minimal HTTP/1.1 server, best known from benchmarks. simoom adds HTTP/2, HTTP/3 over QUIC, TLS 1.3, WebSocket and server-sent events as cargo features, and an HTTP/1.1-only build is available when that is all you need."}}]}
+</script>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../../docs/">Docs</a>
+      <a class="keep" href="../../use-cases/">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../" aria-current="page">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="c-hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="../../">simoom</a> / <a href="../">Compare</a> / may-minihttp vs simoom</p>
+    <p class="kicker">Two servers built for throughput</p>
+    <h1>may-minihttp vs simoom</h1>
+    <p class="lede">may-minihttp is a minimal HTTP/1.1 server on the <code>may</code> stackful coroutine library, well known from benchmark tables. It was the strongest competitor in simoom's measurements and the one simoom trailed in an earlier round. Here are both rounds, and the scenarios where may-minihttp is still ahead.</p>
+    <div class="stats">
+      <div class="stat"><b>+8%</b><span>plain requests per second at 64 connections</span><small>170,648 vs 158,598</small></div>
+      <div class="stat"><b>+15%</b><span>at 256 connections</span><small>172,638 vs 150,673</small></div>
+      <div class="stat"><b>+15%</b><span>at 1,024 connections</span><small>138,644 vs 120,610</small></div>
+      <div class="stat"><b>114.7k</b><span>may-minihttp on a degraded network path</span><small>simoom and the others: 17–62k</small></div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="glance">
+  <div class="wrap">
+    <h2>may-minihttp and simoom at a glance</h2>
+    <p class="intro">Wins and losses in one table. may-minihttp 0.1.11 from its pinned <code>Cargo.lock</code>, on DigitalOcean c-4 droplets.</p>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th></th><th>may-minihttp</th><th>simoom</th></tr></thead>
+      <tbody>
+        <tr><td>Model</td><td>stackful coroutines (<code>may</code>)</td><td>one event loop per CPU core; plain functions, no async</td></tr>
+        <tr><td>Protocols</td><td>HTTP/1.1</td><td class="win">HTTP/1.1, HTTP/2, HTTP/3, TLS 1.3, WebSocket, server-sent events, a client</td></tr>
+        <tr><td>Plain HTTP, 64 / 256 / 1,024 connections, 2026-11-12 (req/s, p99 ≤ 1 ms)</td><td>158,598 / 150,673 / 120,610</td><td class="win">170,648 / 172,638 / 138,644</td></tr>
+        <tr><td>Plain HTTP, 64 / 256 connections, campaign 3, medians over three droplets</td><td class="win">158,584 / 163,876</td><td>142,797 / 115,418 (before the K12 fix)</td></tr>
+        <tr><td>A droplet with a degraded network path</td><td class="win">114.7k req/s</td><td>simoom and the others fell to 17–62k</td></tr>
+        <tr><td>Overload at 1.17x the network limit, answered within 1 ms (droplet srvA)</td><td class="win">4.5k</td><td>2.8k</td></tr>
+        <tr><td>CPU per request at 50k req/s (droplet srvA)</td><td class="win">27.20 µs</td><td>28.19 µs (−3.6%)</td></tr>
+        <tr><td>Stripped executable, HTTP/1.1 server</td><td class="win">515 KB</td><td>536 KB (+4%)</td></tr>
+        <tr><td>Peak memory during plain HTTP at 256 connections</td><td>28.2 MB</td><td class="win">2.5–3.4 MB</td></tr>
+        <tr><td>Cold start to first response</td><td>9.53 ms</td><td class="win">1.05–1.57 ms, depending on the build</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">First row: median of three rounds on one droplet. The others: campaign 3, 2026-11-11; the peak-memory and cold-start rows are from the campaign's footprint table, where some servers ran on different droplets, so read them as orders of magnitude rather than exact margins. About 181 KB of either executable is the Rust standard library's backtrace code.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="results">
+  <div class="wrap">
+    <h2>Plain HTTP throughput, 2026-11-12</h2>
+    <p class="intro">Requests per second while 99% of answers still arrive within 1 ms: a GET with a 13-byte reply, one request in flight per connection. Median of three rounds, both servers on the same droplet.</p>
+    <p class="legend"><span><i style="background:var(--signal)"></i>simoom (epoll)</span><span><i style="background:var(--java)"></i>may-minihttp 0.1.11</span></p>
+    <div class="bars">
+      <div class="bar-group"><h4>64 connections</h4>
+        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">170,648 req/s</span></div>
+        <div class="bar"><span>may-minihttp</span><span class="track"><i class="fill" style="width:92.9%"></i></span><span class="val">158,598 req/s</span></div>
+      </div>
+      <div class="bar-group"><h4>256 connections</h4>
+        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">172,638 req/s</span></div>
+        <div class="bar"><span>may-minihttp</span><span class="track"><i class="fill" style="width:87.3%"></i></span><span class="val">150,673 req/s</span></div>
+      </div>
+      <div class="bar-group"><h4>1,024 connections</h4>
+        <div class="bar us"><span>simoom</span><span class="track"><i class="fill" style="width:100%"></i></span><span class="val">138,644 req/s</span></div>
+        <div class="bar"><span>may-minihttp</span><span class="track"><i class="fill" style="width:87.0%"></i></span><span class="val">120,610 req/s</span></div>
+      </div>
+    </div>
+    <p class="note">simoom led at 64 and 256 connections in every round, and at 1,024 by 10% or more in every round. Single rounds: <a href="../../benchmarks/#plain">plain HTTP results</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="history">
+  <div class="wrap">
+    <h2>Why an earlier round read differently</h2>
+    <p class="intro">In campaign 3 (2026-11-11), may-minihttp led simoom at 64 and 256 connections. Both rounds stay published; the newer one supersedes the older for plain HTTP.</p>
+    <div class="two">
+      <div class="pane">
+        <h3>What was wrong</h3>
+        <ul>
+          <li>The droplet's network card has one receive queue, so one CPU spends much of its time on network interrupts.</li>
+          <li>simoom's loops were not kept off that CPU. The scheduler kept placing a loop there, and every connection that loop held waited for it: p99 went to hundreds of milliseconds while the other CPUs had room.</li>
+          <li>may-minihttp and hyper also ran on that CPU, but their other threads took the work over.</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>What changed</h3>
+        <ul>
+          <li>The loop threads now stay off the CPU with the most network-interrupt time (bug K12 in the repository).</li>
+          <li>Plain HTTP with epoll went from 117.0k / 133.8k / 87.6k to 170.6k / 172.6k / 138.6k at 64 / 256 / 1,024 connections on the same droplet.</li>
+          <li>The fix has not been rerun on a droplet with a degraded network path, where may-minihttp was the most robust server.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">On campaign 3's cleanest droplet (srvB), simoom's io_uring back end was already level with may-minihttp at 256 connections (166.9k against 163.9k). Analysis: <code>bench/results/2026-11-12-epoll/analysis.md</code> and <code>2026-11-11-campaign3/analysis.md</code>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="when">
+  <div class="wrap">
+    <h2>When to pick may-minihttp instead</h2>
+    <div class="two">
+      <div class="pane">
+        <h3>Pick may-minihttp when</h3>
+        <ul>
+          <li>HTTP/1.1 is all you serve, and you want the smallest, rawest server for a throughput test.</li>
+          <li>Your network path is unreliable: it held up best on the degraded droplet.</li>
+          <li>You are comfortable with stackful coroutines. Whether they can be made fully sound in Rust is an <a href="https://internals.rust-lang.org/t/what-is-the-current-safety-story-for-library-based-stackful-coroutines/14863">open discussion</a>; read it and decide for yourself.</li>
+        </ul>
+      </div>
+      <div class="pane good">
+        <h3>Pick simoom when</h3>
+        <ul>
+          <li>You need HTTP/2, HTTP/3, TLS, WebSocket or a client in the same program.</li>
+          <li>You want strict, bounded parsing: every limit has a default, h2spec 146/146, HTTP Garden with 0 desyncs.</li>
+          <li>You want blocking work handled for you: a bounded offload pool that answers <code>503</code> instead of queueing forever.</li>
+          <li>You want no third-party crates at all, and <code>unsafe</code> confined to one crate.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="how">
+  <div class="wrap">
+    <h2>How it was measured</h2>
+    <div class="two">
+      <div class="pane">
+        <h3>Setup</h3>
+        <ul>
+          <li>DigitalOcean <code>c-4</code> droplets (4 dedicated vCPUs, Xeon Platinum 8280, Bangalore), Ubuntu 24.04.</li>
+          <li>One server droplet and two load droplets; open-loop load at fixed rates.</li>
+          <li>may-minihttp 0.1.11 from its pinned <code>Cargo.lock</code>.</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>Rules</h3>
+        <ul>
+          <li>Headline: the highest steady rate whose p99 stays at or under 1 ms.</li>
+          <li>Only servers on the same droplet are compared; the analysis names the droplet for every campaign-3 figure.</li>
+          <li>Raw HDR logs, scripts and analyses are in <code>bench/results/</code>.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note"><a href="../../benchmarks/#method">Benchmark method</a> · <a href="../../benchmarks/#losses">the losses</a> · <a href="../../benchmarks/#size">binary size</a></p>
+  </div>
+</section>
+
+<section class="c-sec faq" id="faq">
+  <div class="wrap">
+    <h2>Common questions</h2>
+    <details><summary>What is a good may-minihttp alternative?</summary><p>If you like may-minihttp for its throughput without tokio but need more than HTTP/1.1, simoom covers HTTP/1.1, HTTP/2, HTTP/3, its own TLS 1.3, WebSocket and a client with no third-party crates. On the same droplet on 2026-11-12 it led may-minihttp by 8% at 64 connections and 15% at 256. If you want a framework on tokio instead, look at axum or xitca-web.</p></details>
+    <details><summary>Is may-minihttp faster than simoom?</summary><p>It depends on the round and the droplet. In the 2026-11-12 round, simoom led at 64, 256 and 1,024 connections in every round. In the earlier campaign of 2026-11-11, before simoom's fix for loops sharing a CPU with the network card's interrupts, may-minihttp led at 64 and 256 connections. may-minihttp also held up far better on a droplet with a degraded network path, and its executable is 4% smaller.</p></details>
+    <details><summary>What is the fastest Rust HTTP server?</summary><p>There is no single answer: it changes with the machine, the network path, the number of connections and the test. On one 4-vCPU droplet on 2026-11-12, simoom served 172,638 plain requests per second with p99 under 1 ms at 256 connections, may-minihttp 150,673 and hyper 144,443. On a droplet with a degraded network path, may-minihttp was the most robust. Measure on your own hardware with your own traffic.</p></details>
+    <details><summary>Does may-minihttp support HTTP/2 or TLS?</summary><p>may-minihttp is a minimal HTTP/1.1 server, best known from benchmarks. simoom adds HTTP/2, HTTP/3 over QUIC, TLS 1.3, WebSocket and server-sent events as cargo features, and an HTTP/1.1-only build is available when that is all you need.</p></details>
+  </div>
+</section>
+
+<section class="c-sec" id="start">
+  <div class="wrap">
+    <h2>Quick start</h2>
+    <p class="intro">For an HTTP/1.1-only build like may-minihttp's, turn simoom's default features off.</p>
+    <pre class="cmd"># Cargo.toml
+simoom = { version = "0.1", default-features = false, features = ["http1"] }</pre>
+    <div class="cta">
+      <a class="btn primary" href="../../docs/guides/getting-started.html">Getting started</a>
+      <a class="btn" href="../../docs/guides/features-and-size.html">Features and size</a>
+      <a class="btn" href="../simoom-vs-hyper-axum/">hyper and axum vs simoom</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. Other product names are trademarks of their owners.</p>
+    </div>
+    <div>
+      <h4>Use cases</h4>
+      <ul>
+        <li><a href="../../use-cases/">All use cases</a></li>
+        <li><a href="../../use-cases/serverless-cold-start/">Serverless functions</a></li>
+        <li><a href="../../use-cases/edge-iot-http-server/">Edge and IoT devices</a></li>
+        <li><a href="../../use-cases/http3-server/">HTTP/3 in Rust</a></li>
+        <li><a href="../">Compare</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../../docs/">Documentation</a></li>
+        <li><a href="../../docs/guides/getting-started.html">Getting started</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script>addEventListener('scroll',function(){document.getElementById('top').classList.toggle('scrolled',scrollY>8)},{passive:true})</script>
+</body>
+</html>

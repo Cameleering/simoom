@@ -1,0 +1,73 @@
+/* simoom pages on cameleer.ing: only what the shared site.css and compare.css don't have.
+   Tokens (--ink, --signal, --sand, --line, --grid, --muted, --mono) come from site.css. */
+
+/* home hero, after the main site's hero */
+.s-hero { position: relative; padding: 64px 0 80px; overflow: hidden; border-bottom: 1px solid var(--line); }
+.s-hero::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse 70% 80% at 75% 40%, #000 30%, transparent 75%);
+}
+.s-hero .wrap { display: grid; grid-template-columns: 1fr 1.02fr; gap: 56px; align-items: center; }
+.s-hero .kicker { font: 500 13px var(--mono); color: var(--signal); letter-spacing: .04em; text-transform: uppercase; margin: 0 0 16px; }
+.s-hero h1 { font-size: clamp(40px, 5.6vw, 72px); line-height: 1; letter-spacing: -.045em; font-weight: 800; margin: 0 0 24px; }
+.s-hero h1 em { font-style: normal; color: var(--signal); }
+.s-hero .lede { font-size: 20px; color: var(--muted); max-width: 30em; margin: 0 0 30px; }
+.s-hero .lede strong { color: var(--ink); font-weight: 600; }
+.s-hero .tag { font-size: 15px; color: var(--muted); margin: 18px 0 0; }
+.s-hero .tag b { color: var(--ink); }
+.facts { display: flex; flex-wrap: wrap; gap: 20px 36px; margin: 40px 0 0; padding: 0; }
+.facts div { margin: 0; }
+.facts dt { font-size: 30px; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.facts dd { margin: 6px 0 0; color: var(--muted); font-size: 14px; max-width: 12em; }
+
+/* code window */
+.win { background: #0f1424; color: #e8ecf6; border-radius: 14px; overflow: hidden; box-shadow: 0 24px 48px rgba(24,32,58,.18); }
+.win header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #263052; font: 500 13px var(--mono); color: #9aa4c0; }
+.win header i { width: 10px; height: 10px; border-radius: 50%; background: #2c3760; display: inline-block; }
+.win header span { margin-left: 8px; }
+.win pre { margin: 0; padding: 18px 20px; font-size: 13.5px; line-height: 1.65; overflow-x: auto; }
+.win .k { color: #8fb0ff; }
+.win .s { color: #f0c26b; }
+.win .c { color: #7c87a6; }
+.win footer { border-top: 1px solid #263052; padding: 10px 16px; font: 500 12.5px var(--mono); color: #9aa4c0; }
+.win footer b { color: #f0c26b; font-weight: 500; }
+
+/* story block */
+.story { display: grid; grid-template-columns: 1.1fr .9fr; gap: 48px; align-items: start; }
+.story p { font-size: 18px; margin: 0 0 18px; max-width: 34em; }
+.story p.big { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.inside { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--ink); }
+.inside li { display: grid; grid-template-columns: 9.5em 1fr; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 15.5px; }
+.inside li b { font-weight: 700; }
+.inside li span { color: var(--muted); }
+
+/* the crossing: before / after */
+.crossing { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 8px 0 0; }
+.crossing .x { border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: #fff; }
+.crossing .x h3 { margin: 0 0 12px; font-size: 15px; color: var(--muted); font-weight: 600; letter-spacing: 0; }
+.crossing .x .after { display: block; font-size: 30px; font-weight: 800; letter-spacing: -.03em; line-height: 1.05; color: var(--signal); }
+.crossing .x .before { display: block; margin-top: 6px; font-size: 14px; color: var(--muted); }
+
+/* losses */
+.losses { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-top: 1px solid var(--line); }
+.losses li { padding: 14px 0 14px 28px; border-bottom: 1px solid var(--line); position: relative; font-size: 16px; }
+.losses li::before { content: ""; position: absolute; left: 4px; top: 22px; width: 10px; height: 10px; border-radius: 2px; background: var(--sand); }
+.losses li b { font-weight: 700; }
+
+/* dark band, like the main site's agents band */
+.band { background: var(--ink); color: #fff; padding: 72px 0; }
+.band h2 { color: #fff; font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -.03em; line-height: 1.08; margin: 0 0 14px; max-width: 18em; }
+.band p { color: #c9cfdf; font-size: 18px; max-width: 40em; margin: 0 0 16px; }
+.band a { color: #fff; }
+.band .rule { display: inline-block; margin-top: 8px; font: 500 14px var(--mono); color: var(--sand); letter-spacing: .02em; }
+
+@media (max-width: 1000px) {
+  .s-hero .wrap, .story { grid-template-columns: 1fr; gap: 40px; }
+  .crossing { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .crossing { grid-template-columns: 1fr; }
+  .inside li { grid-template-columns: 1fr; gap: 2px; }
+}

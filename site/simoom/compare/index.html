@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust HTTP server comparison: simoom vs the rest | simoom</title>
+<meta name="description" content="simoom compared with hyper, axum, may-minihttp, h2o, nginx and the no-tokio options: same-machine numbers, the losses, and when to pick the other one.">
+<link rel="canonical" href="https://cameleer.ing/simoom/compare/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="Rust HTTP server comparison: simoom vs hyper, may-minihttp, h2o and nginx">
+<meta property="og:description" content="Same-machine measurements, the losses next to the wins, and an honest answer to when the alternative is the better choice.">
+<meta property="og:url" content="https://cameleer.ing/simoom/compare/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../llms.txt" title="LLM-readable summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../assets/site.css">
+<link rel="stylesheet" href="../../assets/compare.css">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "CollectionPage",
+ "name": "Rust HTTP server comparison: simoom vs the rest",
+ "description": "simoom compared with hyper, axum, may-minihttp, h2o, nginx and the Rust HTTP servers that need no tokio: same-machine numbers, the losses, and when to pick the other one.",
+ "url": "https://cameleer.ing/simoom/compare/",
+ "inLanguage": "en",
+ "isPartOf": {"@type": "WebSite", "name": "simoom", "url": "https://cameleer.ing/simoom/"},
+ "hasPart": [
+  {"@type": "TechArticle", "name": "hyper and axum vs simoom", "url": "https://cameleer.ing/simoom/compare/simoom-vs-hyper-axum/"},
+  {"@type": "TechArticle", "name": "may-minihttp vs simoom", "url": "https://cameleer.ing/simoom/compare/simoom-vs-may-minihttp/"},
+  {"@type": "TechArticle", "name": "h2o and nginx vs simoom", "url": "https://cameleer.ing/simoom/compare/simoom-vs-nginx-h2o/"},
+  {"@type": "TechArticle", "name": "Rust HTTP servers without tokio", "url": "https://cameleer.ing/simoom/alternatives/rust-http-server-without-tokio/"}]}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+ {"@type": "ListItem", "position": 1, "name": "simoom", "item": "https://cameleer.ing/simoom/"},
+ {"@type": "ListItem", "position": 2, "name": "Compare"}]}
+</script>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="simoom home"><img src="../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../docs/">Docs</a>
+      <a class="keep" href="../use-cases/">Use cases</a>
+      <a href="../benchmarks/">Benchmarks</a>
+      <a href="./" aria-current="page">Compare</a>
+      <a href="../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="c-hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="../">simoom</a> / Compare</p>
+    <p class="kicker">Same machine. Losses included.</p>
+    <h1>simoom compared with the HTTP servers you already know</h1>
+    <p class="lede">Every comparison here was measured with both servers on the same 4-vCPU cloud machine, with the load coming at a fixed rate from two other machines. Each page puts the wins and the losses in the same table, and says plainly when the other server is the better choice.</p>
+    <div class="stats">
+      <div class="stat"><b>172,638</b><span>plain requests per second with p99 under 1 ms, 256 connections</span><small>hyper 144,443 · may-minihttp 150,673</small></div>
+      <div class="stat"><b>+65%</b><span>requests per second over TLS 1.3 against h2o</span><small>160,441 vs 97,219</small></div>
+      <div class="stat"><b>+13%</b><span>HTTP/3 requests per second against h2o</span><small>106,947 vs 94,507</small></div>
+      <div class="stat"><b>6 losses</b><span>published next to the wins</span><small>overload, degraded network, and more</small></div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="pages">
+  <div class="wrap">
+    <h2>Comparisons</h2>
+    <p class="intro">Pick the one you are weighing simoom against.</p>
+    <div class="hub-list">
+      <a class="card" href="simoom-vs-hyper-axum/"><h3>hyper and axum vs simoom</h3><p>The default Rust HTTP library and the framework built on it, against an engine with no async runtime and no dependencies. Plain HTTP, CPU per request, cold start, and when tokio is the right call.</p><span class="res">+20% <small>plain HTTP at 256 connections vs hyper</small></span></a>
+      <a class="card" href="simoom-vs-may-minihttp/"><h3>may-minihttp vs simoom</h3><p>Two servers built for raw throughput. Where simoom leads since the 2026-11-12 round, where may-minihttp holds up better, and what changed between campaigns.</p><span class="res">+15% <small>plain HTTP at 256 connections</small></span></a>
+      <a class="card" href="simoom-vs-nginx-h2o/"><h3>h2o and nginx vs simoom</h3><p>Standalone C servers against a library: TLS handshakes, HTTP/3, large responses, idle memory and overload, plus how to run them together.</p><span class="res">+31% / +45% <small>full / resumed TLS handshakes vs h2o</small></span></a>
+      <a class="card" href="../alternatives/rust-http-server-without-tokio/"><h3>Rust HTTP servers without tokio</h3><p>std::net by hand, tiny_http, rouille, may-minihttp and simoom: the options when you don't want an async runtime, and when tokio is simply the better choice.</p><span class="res">5 <small>options, compared honestly</small></span></a>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="how">
+  <div class="wrap">
+    <h2>How these comparisons are made</h2>
+    <p class="intro">The rules are the same on every page, and they follow the <a href="../../cameleering/">Cameleering</a> practice: no claim without a number.</p>
+    <div class="two">
+      <div class="pane">
+        <h3>Measured</h3>
+        <ul>
+          <li>DigitalOcean <code>c-4</code> droplets: 4 dedicated vCPUs, Xeon Platinum 8280.</li>
+          <li>Load from two separate machines, open loop: requests keep arriving at a fixed rate, as real traffic does.</li>
+          <li>The headline figure is the highest steady rate at which 99% of answers arrive within 1 ms.</li>
+          <li>Only servers on the same droplet are compared: droplets of the same type differed by up to 7x for every server.</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>Published</h3>
+        <ul>
+          <li>Pinned competitor versions: hyper 1.12.0, may-minihttp 0.1.11, xitca-web 0.7.1, h2o at commit f35c735, nginx 1.24.0.</li>
+          <li>Raw HDR logs, scripts and analyses in the repository under <code>bench/results/</code>.</li>
+          <li>Every loss sits in the same table as the wins.</li>
+          <li>Servers not measured (axum, actix-web, tiny_http, rouille, Caddy) get no numbers here.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="cta" style="margin-top:28px">
+      <a class="btn primary" href="../benchmarks/">All benchmark results</a>
+      <a class="btn" href="../benchmarks/#losses">Where simoom is behind</a>
+      <a class="btn" href="../../compare/">Cameleer's comparisons</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. Other product names are trademarks of their owners.</p>
+    </div>
+    <div>
+      <h4>Use cases</h4>
+      <ul>
+        <li><a href="../use-cases/">All use cases</a></li>
+        <li><a href="../use-cases/serverless-cold-start/">Serverless functions</a></li>
+        <li><a href="../use-cases/edge-iot-http-server/">Edge and IoT devices</a></li>
+        <li><a href="../use-cases/http3-server/">HTTP/3 in Rust</a></li>
+        <li><a href="./">Compare</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../docs/">Documentation</a></li>
+        <li><a href="../docs/guides/getting-started.html">Getting started</a></li>
+        <li><a href="../benchmarks/">Benchmarks</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script>addEventListener('scroll',function(){document.getElementById('top').classList.toggle('scrolled',scrollY>8)},{passive:true})</script>
+</body>
+</html>

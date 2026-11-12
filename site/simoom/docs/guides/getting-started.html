@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting started with simoom | simoom</title>
+<meta name="description" content="Add simoom with cargo add simoom, write one function that answers a request, and call start(); a working HTTP server takes about ten lines.">
+<link rel="canonical" href="https://cameleer.ing/simoom/docs/guides/getting-started.html">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="Getting started with simoom">
+<meta property="og:description" content="Add simoom with cargo add simoom, write one function that answers a request, and call start(); a working HTTP server takes about ten lines.">
+<meta property="og:url" content="https://cameleer.ing/simoom/docs/guides/getting-started.html">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="alternate" type="text/markdown" href="getting-started.md" title="Markdown source">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "Getting started with simoom", "description": "Add simoom with cargo add simoom, write one function that answers a request, and call start(); a working HTTP server takes about ten lines.", "url": "https://cameleer.ing/simoom/docs/guides/getting-started.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 3, "name": "Getting started with simoom", "item": "https://cameleer.ing/simoom/docs/guides/getting-started.html"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Do I need tokio or another async runtime?", "acceptedAnswer": {"@type": "Answer", "text": "No. simoom has its own event loops and no async runtime. Services are plain functions. You can still use simoom inside a program that runs tokio for other work; they don't interact."}}, {"@type": "Question", "name": "Why does my handler signature need the explicit types?", "acceptedAnswer": {"@type": "Answer", "text": "Rust can't infer closure argument types for a generic trait bound, so a closure passed to service or Router::get needs &mut Request<'_> and Reply<'_> written out. A named fn with that signature works too."}}, {"@type": "Question", "name": "Which address should I listen on?", "acceptedAnswer": {"@type": "Answer", "text": "127.0.0.1:8080 accepts connections from the same machine only. 0.0.0.0:8080 accepts them on every IPv4 interface, and [::]:8080 on IPv6. You can call listen more than once."}}, {"@type": "Question", "name": "How do I run the bundled examples?", "acceptedAnswer": {"@type": "Answer", "text": "From a checkout of the repository: cargo run --release -p simoom --example hello -- 127.0.0.1:8080."}}]}</script>
+</head>
+<body class="docs">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top scrolled" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home">
+      <img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
+      simoom
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../index.html">Docs</a>
+      <a href="../guides/index.html">Guides</a>
+      <a href="../../use-cases/">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../../compare/">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+<div class="docs-layout">
+  <aside class="sidebar">
+    <details class="navbox" open>
+      <summary>Browse the docs</summary>
+      <nav aria-label="Documentation">
+<ul class="nav-top">
+<li><a href="../index.html">Docs home</a></li>
+</ul>
+<details class="nav-group" open><summary>Guides <span class="n">15</span></summary><ul><li><a href="index.html">All guides</a></li><li><a href="getting-started.html" aria-current="page">Getting started with simoom</a></li><li><a href="services-and-replies.html">How do I read requests and send responses in simoom?</a></li><li><a href="routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="slow-work.html">How do I call a database or another service from a simoom handler?</a></li><li><a href="streaming-and-sse.html">How do I stream bodies and send server-sent events with simoom?</a></li><li><a href="websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="tls.html">How do I serve HTTPS with simoom?</a></li><li><a href="http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="runtime.html">How do I configure simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="sans-io-crates.html">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="faq.html">simoom FAQ</a></li></ul></details>
+<details class="nav-group"><summary>Project <span class="n">1</span></summary><ul><li><a href="../SECURITY.html">Security</a></li></ul></details>
+      </nav>
+    </details>
+    <script>if (matchMedia('(max-width: 900px)').matches) document.currentScript.previousElementSibling.open = false;</script>
+  </aside>
+  <main id="content" class="article">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a> <span aria-hidden="true">/</span> <a href="index.html">Guides</a> <span aria-hidden="true">/</span> <span>Getting started with simoom</span></nav>
+    <article>
+<h1 id="getting-started-with-simoom">Getting started with simoom</h1>
+<blockquote class="answer">
+<p>Add simoom with <code>cargo add simoom</code>, write one function that answers a request, and call <code>start()</code>; a working HTTP server takes about ten lines.</p>
+</blockquote>
+<p>simoom is a library, not a program: you add it to your own Rust project and it serves HTTP from
+inside your process. This page installs it, runs a first server, and explains the one idea you
+need before writing more: what a service is and where it runs.</p>
+<h2 id="install">Install<a class="anchor" href="#install" aria-hidden="true" tabindex="-1"></a></h2>
+<p>simoom needs Rust 1.89 or newer and runs on Linux, Windows and macOS.</p>
+<div class="codeblock"><div class="code-head"><span>sh</span><button class="copy" type="button">Copy</button></div><pre><code class="language-sh">cargo add simoom</code></pre></div>
+<p>or in <code>Cargo.toml</code>:</p>
+<div class="codeblock"><div class="code-head"><span>toml</span><button class="copy" type="button">Copy</button></div><pre><code class="language-toml">[dependencies]
+simoom = &quot;0.1&quot;</code></pre></div>
+<p>The default features give you HTTP/1.1, HTTP/2 without TLS (h2c), WebSocket and the io_uring back
+end. For TLS and HTTP/3 turn on <code>full</code>:</p>
+<div class="codeblock"><div class="code-head"><span>toml</span><button class="copy" type="button">Copy</button></div><pre><code class="language-toml">simoom = { version = &quot;0.1&quot;, features = [&quot;full&quot;] }</code></pre></div>
+<p>There is nothing else to install: no C compiler, no OpenSSL headers, no async runtime.
+<a href="features-and-size.html">Features and size</a> lists every feature.</p>
+<h2 id="a-first-server">A first server<a class="anchor" href="#a-first-server" aria-hidden="true" tabindex="-1"></a></h2>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request, Server, StaticReply};
+use std::sync::Arc;
+
+fn main() {
+    let hello = Arc::new(StaticReply::new(200, &amp;[(&quot;content-type&quot;, &quot;text/plain&quot;)], b&quot;Hello, World!&quot;));
+    let server = Server::builder()
+        .listen(&quot;127.0.0.1:8080&quot;)
+        .service(move |_req: &amp;mut Request&lt;&#x27;_&gt;, reply: Reply&lt;&#x27;_&gt;| -&gt; Outcome { reply.fixed(&amp;hello) })
+        .start()
+        .expect(&quot;start the server&quot;);
+    println!(&quot;listening on {}&quot;, server.local_addr());
+    server.join();
+}</code></pre></div>
+<p>Run it with <code>cargo run --release</code> and try it:</p>
+<div class="codeblock"><div class="code-head"><span>sh</span><button class="copy" type="button">Copy</button></div><pre><code class="language-sh">curl -i http://127.0.0.1:8080/
+curl --http2-prior-knowledge http://127.0.0.1:8080/   # the same server speaks HTTP/2 (h2c)</code></pre></div>
+<p><code>StaticReply</code> serializes the response once, so every request is answered with one copy. It is the
+fastest way to send a fixed answer, but any response works, as the next example shows.</p>
+<h2 id="routes-and-parameters">Routes and parameters<a class="anchor" href="#routes-and-parameters" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Most programs answer more than one path. A <a href="routing.html"><code>Router</code></a> sends each request to a handler
+by method and path:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request, Router, Server};
+
+fn main() {
+    let router = Router::new()
+        .get(&quot;/&quot;, |_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| r.body_static(b&quot;Hello, World!&quot;))
+        .get(&quot;/hello/:name&quot;, |req: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome {
+            let name = req.param_str(&quot;name&quot;).unwrap_or(&quot;stranger&quot;);
+            r.header(&quot;content-type&quot;, &quot;text/plain&quot;).body(format!(&quot;Hello, {name}!&quot;))
+        });
+
+    let server = Server::builder().listen(&quot;127.0.0.1:8080&quot;).service(router).start().expect(&quot;start&quot;);
+    println!(&quot;listening on {}&quot;, server.local_addr());
+    server.join();
+}</code></pre></div>
+<p><code>curl http://127.0.0.1:8080/hello/Ada</code> prints <code>Hello, Ada!</code>. An unknown path gets <code>404</code>, and a
+known path with the wrong method gets <code>405</code> with an <code>allow</code> header.</p>
+<h2 id="what-a-service-is">What a service is<a class="anchor" href="#what-a-service-is" aria-hidden="true" tabindex="-1"></a></h2>
+<p>A <strong>service</strong> is anything that takes a <code>&amp;mut Request</code> and a <code>Reply</code> and returns an <code>Outcome</code>. A
+closure with that signature is a service, and so is a <code>Router</code>. The <code>Reply</code> is finished exactly
+once: with a body, with a deferred answer for later, with a stream, or with a WebSocket upgrade.
+<a href="services-and-replies.html">Services and replies</a> covers each.</p>
+<p>The one rule to remember: <strong>a service runs on the loop thread.</strong> simoom runs one event loop per
+CPU core, and each loop serves thousands of connections. While your function runs, that loop
+does nothing else. So a service must answer in microseconds and must not block: no database
+calls, no file reads, no <code>sleep</code>, no locks held for long.</p>
+<p>There is no <code>async</code> and no <code>.await</code>. Slow work goes somewhere else:</p>
+<ul>
+<li>to simoom&#x27;s bounded offload pool with <code>simoom::blocking</code> or <code>Reply::offload</code>;</li>
+<li>or to your own threads with <code>Reply::defer</code>, answering later from any thread.</li>
+</ul>
+<p><a href="slow-work.html">Slow work</a> shows all three. If a handler blocks anyway, a watchdog notices and
+moves that route to the offload pool, but that is a safety net, not a plan.</p>
+<h2 id="stopping-the-server">Stopping the server<a class="anchor" href="#stopping-the-server" aria-hidden="true" tabindex="-1"></a></h2>
+<p><code>start()</code> returns a <code>ServerHandle</code> once every loop is running. <code>join()</code> waits for the loops to
+exit; <code>stop(grace)</code> starts a graceful stop. Port <code>0</code> lets the OS pick a free port, which is handy
+in tests:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Reply, Request, Server};
+use std::time::Duration;
+
+fn run() -&gt; std::io::Result&lt;()&gt; {
+    let server = Server::builder()
+        .listen(&quot;127.0.0.1:0&quot;) // port 0: the OS picks a free port
+        .service(|_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| r.body_static(b&quot;ok&quot;))
+        .start()?;
+    let addr = server.local_addr();
+    // ... use the server ...
+    server.stop(Duration::from_secs(5));
+    server.join();
+    Ok(())
+}</code></pre></div>
+<p>Dropping the handle stops the server at once. <a href="runtime.html">Runtime</a> explains what a graceful
+stop does on each protocol.</p>
+<h2 id="where-to-go-next">Where to go next<a class="anchor" href="#where-to-go-next" aria-hidden="true" tabindex="-1"></a></h2>
+<ul>
+<li><a href="services-and-replies.html">Services and replies</a>: reading requests, every way to answer.</li>
+<li><a href="routing.html">Routing</a>: parameters, wildcards, 404 and 405.</li>
+<li><a href="slow-work.html">Slow work</a>: databases and other services without blocking the server.</li>
+<li><a href="tls.html">TLS</a> and <a href="http2-and-http3.html">HTTP/2 and HTTP/3</a>: HTTPS and the newer protocols.</li>
+<li><a href="features-and-size.html">Features and size</a>: the smallest build for a device or a function.</li>
+<li><a href="faq.html">FAQ</a>.</li>
+</ul>
+<h2 id="common-questions">Common questions<a class="anchor" href="#common-questions" aria-hidden="true" tabindex="-1"></a></h2>
+<h3 id="do-i-need-tokio-or-another-async-runtime">Do I need tokio or another async runtime?<a class="anchor" href="#do-i-need-tokio-or-another-async-runtime" aria-hidden="true" tabindex="-1"></a></h3>
+<p>No. simoom has its own event loops and no async runtime. Services are plain functions. You can
+still use simoom inside a program that runs tokio for other work; they don&#x27;t interact.</p>
+<h3 id="why-does-my-handler-signature-need-the-explicit-types">Why does my handler signature need the explicit types?<a class="anchor" href="#why-does-my-handler-signature-need-the-explicit-types" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Rust can&#x27;t infer closure argument types for a generic trait bound, so a closure passed to
+<code>service</code> or <code>Router::get</code> needs <code>&amp;mut Request&lt;&#x27;_&gt;</code> and <code>Reply&lt;&#x27;_&gt;</code> written out. A named <code>fn</code>
+with that signature works too.</p>
+<h3 id="which-address-should-i-listen-on">Which address should I listen on?<a class="anchor" href="#which-address-should-i-listen-on" aria-hidden="true" tabindex="-1"></a></h3>
+<p><code>127.0.0.1:8080</code> accepts connections from the same machine only. <code>0.0.0.0:8080</code> accepts them on
+every IPv4 interface, and <code>[::]:8080</code> on IPv6. You can call <code>listen</code> more than once.</p>
+<h3 id="how-do-i-run-the-bundled-examples">How do I run the bundled examples?<a class="anchor" href="#how-do-i-run-the-bundled-examples" aria-hidden="true" tabindex="-1"></a></h3>
+<p>From a checkout of the repository: <code>cargo run --release -p simoom --example hello -- 127.0.0.1:8080</code>.</p>
+    </article>
+    <p class="edit"><a href="https://github.com/Cameleering/simoom/blob/main/docs/guides/getting-started.md">Edit this page on GitHub</a></p>
+  </main>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#install">Install</a></li><li><a href="#a-first-server">A first server</a></li><li><a href="#routes-and-parameters">Routes and parameters</a></li><li><a href="#what-a-service-is">What a service is</a></li><li><a href="#stopping-the-server">Stopping the server</a></li><li><a href="#where-to-go-next">Where to go next</a></li><li><a href="#common-questions">Common questions</a></li></ul></nav>
+</div>
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="../../">simoom home</a></li>
+        <li><a href="../../use-cases/">Use cases</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="../../compare/">Compare</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="https://github.com/Cameleering/simoom/blob/main/CONTRIBUTING.md">Contributing</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../index.html">Docs home</a></li>
+        <li><a href="../guides/index.html">Guides</a></li>
+        <li><a href="../SECURITY.html">Security</a></li>
+        <li><a href="https://docs.rs/simoom">API reference (docs.rs)</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script src="../../../assets/docs.js" defer></script>
+</body>
+</html>

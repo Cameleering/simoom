@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How do I call a database or another service from a simoom handler? | simoom</title>
+<meta name="description" content="Never block the loop thread: wrap slow handlers in simoom::blocking, or use Reply::offload, or Reply::defer and answer later from your own threads.">
+<link rel="canonical" href="https://cameleer.ing/simoom/docs/guides/slow-work.html">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="How do I call a database or another service from a simoom handler?">
+<meta property="og:description" content="Never block the loop thread: wrap slow handlers in simoom::blocking, or use Reply::offload, or Reply::defer and answer later from your own threads.">
+<meta property="og:url" content="https://cameleer.ing/simoom/docs/guides/slow-work.html">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="alternate" type="text/markdown" href="slow-work.md" title="Markdown source">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I call a database or another service from a simoom handler?", "description": "Never block the loop thread: wrap slow handlers in simoom::blocking, or use Reply::offload, or Reply::defer and answer later from your own threads.", "url": "https://cameleer.ing/simoom/docs/guides/slow-work.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 3, "name": "How do I call a database or another service from a simoom handler?", "item": "https://cameleer.ing/simoom/docs/guides/slow-work.html"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Can I use async/await or tokio inside a handler?", "acceptedAnswer": {"@type": "Answer", "text": "Not directly: a service returns before the loop moves on. You can run tokio in your program and hand it the work: take a Responder with reply.defer(), move it into a spawned task, and call responder.send(...) when the future completes. Responder is a plain Send value."}}, {"@type": "Question", "name": "What happens when the offload pool is full?", "acceptedAnswer": {"@type": "Answer", "text": "New requests that need it get 503 Service Unavailable with Retry-After: 1 right away, and stats().overloaded counts them. Requests already admitted keep their latency."}}, {"@type": "Question", "name": "Is blocking the same as tokio::task::spawn_blocking?", "acceptedAnswer": {"@type": "Answer", "text": "Similar idea, different shape: blocking wraps a whole handler, the pool is bounded with admission control, and overload answers 503 instead of queueing without limit."}}, {"@type": "Question", "name": "How do I read a large request body in a slow handler?", "acceptedAnswer": {"@type": "Answer", "text": "On the pool, OwnedRequest::read_body() reads the whole body, and take_body() gives a std::io::Read stream. See Streaming and SSE."}}]}</script>
+</head>
+<body class="docs">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top scrolled" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home">
+      <img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
+      simoom
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../index.html">Docs</a>
+      <a href="../guides/index.html">Guides</a>
+      <a href="../../use-cases/">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../../compare/">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+<div class="docs-layout">
+  <aside class="sidebar">
+    <details class="navbox" open>
+      <summary>Browse the docs</summary>
+      <nav aria-label="Documentation">
+<ul class="nav-top">
+<li><a href="../index.html">Docs home</a></li>
+</ul>
+<details class="nav-group" open><summary>Guides <span class="n">15</span></summary><ul><li><a href="index.html">All guides</a></li><li><a href="getting-started.html">Getting started with simoom</a></li><li><a href="services-and-replies.html">How do I read requests and send responses in simoom?</a></li><li><a href="routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="slow-work.html" aria-current="page">How do I call a database or another service from a simoom handler?</a></li><li><a href="streaming-and-sse.html">How do I stream bodies and send server-sent events with simoom?</a></li><li><a href="websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="tls.html">How do I serve HTTPS with simoom?</a></li><li><a href="http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="runtime.html">How do I configure simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="sans-io-crates.html">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="faq.html">simoom FAQ</a></li></ul></details>
+<details class="nav-group"><summary>Project <span class="n">1</span></summary><ul><li><a href="../SECURITY.html">Security</a></li></ul></details>
+      </nav>
+    </details>
+    <script>if (matchMedia('(max-width: 900px)').matches) document.currentScript.previousElementSibling.open = false;</script>
+  </aside>
+  <main id="content" class="article">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a> <span aria-hidden="true">/</span> <a href="index.html">Guides</a> <span aria-hidden="true">/</span> <span>How do I call a database or another service from a simoom handler?</span></nav>
+    <article>
+<h1 id="how-do-i-call-a-database-or-another-service-from-a-simoom-handler">How do I call a database or another service from a simoom handler?</h1>
+<blockquote class="answer">
+<p>Never block the loop thread: wrap slow handlers in <code>simoom::blocking</code>, or use <code>Reply::offload</code>, or <code>Reply::defer</code> and answer later from your own threads.</p>
+</blockquote>
+<p>simoom serves thousands of connections on each loop thread. A handler that waits for a database,
+a file or another HTTP service stops every one of those connections while it waits. This page
+shows the three ways to move that work off the loop, and the safety net for when a handler
+blocks anyway.</p>
+<h2 id="which-way-to-choose">Which way to choose<a class="anchor" href="#which-way-to-choose" aria-hidden="true" tabindex="-1"></a></h2>
+<div class="table"><table>
+<thead><tr><th>your situation</th><th>use</th></tr></thead>
+<tbody>
+<tr><td>a handler that blocks (database, file, HTTP call) and you have no thread pool of your own</td><td><code>simoom::blocking(f)</code> as the route handler</td></tr>
+<tr><td>a handler that is usually fast but sometimes slow</td><td><code>reply.blocking(req, f)</code> or <code>reply.offload(req, f)</code> on the slow branch</td></tr>
+<tr><td>your program already has worker threads, queues or a runtime</td><td><code>reply.defer()</code> and answer through the <code>Responder</code> from any thread</td></tr>
+<tr><td>microseconds of CPU, no I/O</td><td>answer inline, as usual</td></tr>
+</tbody></table></div>
+<p><code>blocking</code> and <code>offload</code> run on simoom&#x27;s <strong>offload pool</strong>. <code>defer</code> doesn&#x27;t touch the pool at all.</p>
+<h2 id="the-offload-pool-with-blocking">The offload pool with <code>blocking</code><a class="anchor" href="#the-offload-pool-with-blocking" aria-hidden="true" tabindex="-1"></a></h2>
+<p><code>blocking</code> turns a function that takes an <code>OwnedRequest</code> and returns a <code>Response</code> into a service.
+The request is copied, the function runs on a worker thread, and its response goes back to the
+connection:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{blocking, OwnedRequest, Response, Router};
+use std::time::Duration;
+
+fn router() -&gt; Router {
+    Router::new().get(&quot;/report/:id&quot;, blocking(|req: OwnedRequest| {
+        let id = String::from_utf8_lossy(req.param(&quot;id&quot;).unwrap_or(b&quot;&quot;)).into_owned();
+        std::thread::sleep(Duration::from_millis(200)); // stands for a database query
+        Response::text(format!(&quot;report {id}&quot;))
+    }))
+}</code></pre></div>
+<p>The pool is bounded, so overload can&#x27;t pile up:</p>
+<ul>
+<li>Worker threads start on demand and exit after 10 seconds idle. The cap is
+<code>Limits::offload_threads</code>; the default <code>0</code> means 32 per CPU, between 512 and 1024.</li>
+<li>At most <code>Limits::offload_queue</code> jobs wait (default 4096).</li>
+<li>The pool measures how long jobs wait (CoDel). When waits keep growing past what the workers can
+absorb, new requests get a fast <strong><code>503</code> with <code>Retry-After</code></strong> instead of joining an endless
+queue. The target adapts to how long your jobs take, so 100 ms database calls are not refused
+just for being 100 ms long.</li>
+<li>A panic in the function becomes a <code>500</code>.</li>
+</ul>
+<h2 id="only-the-slow-branch-replyblocking-and-replyoffload">Only the slow branch: <code>Reply::blocking</code> and <code>Reply::offload</code><a class="anchor" href="#only-the-slow-branch-replyblocking-and-replyoffload" aria-hidden="true" tabindex="-1"></a></h2>
+<p>When a handler is fast most of the time, keep the fast path inline and offload only the slow one:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request, Response};
+
+fn handler(req: &amp;mut Request&lt;&#x27;_&gt;, reply: Reply&lt;&#x27;_&gt;) -&gt; Outcome {
+    if req.query_param(&quot;cached&quot;).is_some() {
+        return reply.body_static(b&quot;from cache&quot;); // fast: answer inline
+    }
+    reply.blocking(req, |req| {
+        // slow: runs on an offload worker
+        Response::text(format!(&quot;computed for {}&quot;, req.path_str()))
+    })
+}</code></pre></div>
+<p><code>Reply::offload</code> does the same but gives the worker the usual <code>Request</code> and <code>Reply</code>, so code
+written as an inline service runs unchanged on the pool:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request};
+
+fn handler(req: &amp;mut Request&lt;&#x27;_&gt;, reply: Reply&lt;&#x27;_&gt;) -&gt; Outcome {
+    reply.offload(req, |req, reply| {
+        // the same Request and Reply API, on a worker thread
+        let size = req.body().len();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        reply.status(202).header(&quot;content-type&quot;, &quot;text/plain&quot;).body(format!(&quot;accepted {size} bytes&quot;))
+    })
+}</code></pre></div>
+<h2 id="your-own-threads-replydefer">Your own threads: <code>Reply::defer</code><a class="anchor" href="#your-own-threads-replydefer" aria-hidden="true" tabindex="-1"></a></h2>
+<p>If your program already has workers (a job queue, a thread pool, an integration engine), copy the
+request with <code>to_owned_request()</code>, take a <code>Responder</code> with <code>reply.defer()</code>, and send both to your
+workers. The <code>Responder</code> can be sent to any thread and answers once:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request, Response, Server};
+use std::sync::mpsc;
+
+struct Job {
+    request: simoom::OwnedRequest,
+    responder: simoom::Responder,
+}
+
+fn run() -&gt; std::io::Result&lt;()&gt; {
+    let (tx, rx) = mpsc::channel::&lt;Job&gt;();
+    let tx = std::sync::Mutex::new(tx);
+
+    // your own worker thread (or pool)
+    std::thread::spawn(move || {
+        for job in rx {
+            if job.responder.is_cancelled() {
+                continue; // the client left or the deadline passed
+            }
+            let answer = format!(&quot;done: {}&quot;, job.request.path_str());
+            job.responder.send(Response::text(answer));
+        }
+    });
+
+    let server = Server::builder()
+        .listen(&quot;127.0.0.1:8080&quot;)
+        .service(move |req: &amp;mut Request&lt;&#x27;_&gt;, reply: Reply&lt;&#x27;_&gt;| -&gt; Outcome {
+            let job = Job { request: req.to_owned_request(), responder: reply.defer() };
+            if let Err(mpsc::SendError(job)) = tx.lock().unwrap().send(job) {
+                job.responder.send(Response::new(503).body(&quot;worker gone&quot;));
+            }
+            Outcome::Deferred
+        })
+        .start()?;
+    server.join();
+    Ok(())
+}</code></pre></div>
+<p>This is how <a href="https://github.com/Cameleering/cameleer">Cameleer</a> embeds simoom: its own route
+threads answer, and simoom&#x27;s pool isn&#x27;t involved. A few things to know:</p>
+<ul>
+<li><strong><code>Responder::send</code> returns <code>false</code></strong> when the connection is already gone; the response is
+dropped.</li>
+<li><strong>Dropping a <code>Responder</code></strong> without sending gives the client a <code>500</code>.</li>
+<li><strong><code>Responder::stream(head)</code></strong> starts a streamed response instead of a whole one.</li>
+<li><strong>Order on HTTP/1.1:</strong> while a response is deferred, that HTTP/1.1 connection reads no further
+requests, so responses stay in order. HTTP/2 and HTTP/3 streams carry on independently.</li>
+</ul>
+<h2 id="deadlines-and-cancellation">Deadlines and cancellation<a class="anchor" href="#deadlines-and-cancellation" aria-hidden="true" tabindex="-1"></a></h2>
+<p>By default a deferred or offloaded reply may take as long as it likes. Set
+<code>Limits::defer_timeout</code> to your service-level objective: when it expires before an answer has
+started, the client gets <strong><code>504 Gateway Timeout</code></strong> and the late answer is dropped.</p>
+<p>The worker can find out that its work is no longer wanted, because the client went away or the
+deadline passed. <code>Responder::is_cancelled()</code> is one atomic load, cheap to poll between steps.
+<code>Responder::on_cancel(f)</code> runs <code>f</code> once on cancellation, on the loop thread, so <code>f</code> must be quick:
+set a flag or wake a thread.</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::Responder;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+fn watch(responder: &amp;Responder) -&gt; Arc&lt;AtomicBool&gt; {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    responder.on_cancel(move || flag.store(true, Ordering::Relaxed));
+    stop
+}</code></pre></div>
+<h2 id="tuning-the-pool">Tuning the pool<a class="anchor" href="#tuning-the-pool" aria-hidden="true" tabindex="-1"></a></h2>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Limits, Server};
+use std::time::Duration;
+
+fn build() -&gt; simoom::Builder {
+    Server::builder().listen(&quot;0.0.0.0:8080&quot;).limits(Limits {
+        offload_threads: 64,                           // what your database allows
+        offload_queue: 1024,                           // jobs waiting before 503
+        defer_timeout: Some(Duration::from_secs(10)),  // 504 after this
+        inline_budget: Some(Duration::from_millis(2)), // watchdog budget per inline call
+        ..Limits::default()
+    })
+}</code></pre></div>
+<p>Set <code>offload_threads</code> to the concurrency your backends can take: if your database allows 64
+connections, more than 64 workers only queue inside the database driver instead of in simoom,
+where overload turns into a clean <code>503</code>.</p>
+<h2 id="the-watchdog-a-safety-net">The watchdog, a safety net<a class="anchor" href="#the-watchdog-a-safety-net" aria-hidden="true" tabindex="-1"></a></h2>
+<p>A handler that turns out slow (it blocks, or uses more than <code>Limits::inline_budget</code> of CPU, 1 ms
+by default) is a <strong>stall</strong>. After <code>Limits::stalls_before_offload</code> stalls (5) within
+<code>Limits::stall_window</code> (1 s), that route alone moves to the offload pool. Other routes stay
+inline. After <code>Limits::stall_recovery</code> fast calls (64) there, it comes back.</p>
+<p>The watchdog measures CPU time, not wall time, so a loop thread preempted on a busy machine isn&#x27;t
+mistaken for a slow handler. Each stall is logged once per route and counted in
+<code>stats().stalls</code>.</p>
+<p>The calls before the move still held their loop thread, so treat the watchdog as a seatbelt,
+not as a way to avoid choosing. It needs the <code>watchdog</code> feature (on by default); a minimal edge
+build can leave it out.</p>
+<h2 id="common-questions">Common questions<a class="anchor" href="#common-questions" aria-hidden="true" tabindex="-1"></a></h2>
+<h3 id="can-i-use-asyncawait-or-tokio-inside-a-handler">Can I use async/await or tokio inside a handler?<a class="anchor" href="#can-i-use-asyncawait-or-tokio-inside-a-handler" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Not directly: a service returns before the loop moves on. You can run tokio in your program and
+hand it the work: take a <code>Responder</code> with <code>reply.defer()</code>, move it into a spawned task, and call
+<code>responder.send(...)</code> when the future completes. <code>Responder</code> is a plain <code>Send</code> value.</p>
+<h3 id="what-happens-when-the-offload-pool-is-full">What happens when the offload pool is full?<a class="anchor" href="#what-happens-when-the-offload-pool-is-full" aria-hidden="true" tabindex="-1"></a></h3>
+<p>New requests that need it get <code>503 Service Unavailable</code> with <code>Retry-After: 1</code> right away, and
+<code>stats().overloaded</code> counts them. Requests already admitted keep their latency.</p>
+<h3 id="is-blocking-the-same-as-tokiotaskspawn_blocking">Is <code>blocking</code> the same as <code>tokio::task::spawn_blocking</code>?<a class="anchor" href="#is-blocking-the-same-as-tokiotaskspawn_blocking" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Similar idea, different shape: <code>blocking</code> wraps a whole handler, the pool is bounded with
+admission control, and overload answers <code>503</code> instead of queueing without limit.</p>
+<h3 id="how-do-i-read-a-large-request-body-in-a-slow-handler">How do I read a large request body in a slow handler?<a class="anchor" href="#how-do-i-read-a-large-request-body-in-a-slow-handler" aria-hidden="true" tabindex="-1"></a></h3>
+<p>On the pool, <code>OwnedRequest::read_body()</code> reads the whole body, and <code>take_body()</code> gives a
+<code>std::io::Read</code> stream. See <a href="streaming-and-sse.html">Streaming and SSE</a>.</p>
+    </article>
+    <p class="edit"><a href="https://github.com/Cameleering/simoom/blob/main/docs/guides/slow-work.md">Edit this page on GitHub</a></p>
+  </main>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#which-way-to-choose">Which way to choose</a></li><li><a href="#the-offload-pool-with-blocking">The offload pool with <code>blocking</code></a></li><li><a href="#only-the-slow-branch-replyblocking-and-replyoffload">Only the slow branch: <code>Reply::blocking</code> and <code>Reply::offload</code></a></li><li><a href="#your-own-threads-replydefer">Your own threads: <code>Reply::defer</code></a></li><li><a href="#deadlines-and-cancellation">Deadlines and cancellation</a></li><li><a href="#tuning-the-pool">Tuning the pool</a></li><li><a href="#the-watchdog-a-safety-net">The watchdog, a safety net</a></li><li><a href="#common-questions">Common questions</a></li></ul></nav>
+</div>
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="../../">simoom home</a></li>
+        <li><a href="../../use-cases/">Use cases</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="../../compare/">Compare</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="https://github.com/Cameleering/simoom/blob/main/CONTRIBUTING.md">Contributing</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../index.html">Docs home</a></li>
+        <li><a href="../guides/index.html">Guides</a></li>
+        <li><a href="../SECURITY.html">Security</a></li>
+        <li><a href="https://docs.rs/simoom">API reference (docs.rs)</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script src="../../../assets/docs.js" defer></script>
+</body>
+</html>

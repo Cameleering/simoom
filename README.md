@@ -130,8 +130,7 @@ benchmarked yet.)
 
 **In a serverless function.** A function that scales to zero pays for its start-up on every cold
 request. simoom gives the first answer 0.73 ms after the process starts, about 0.87 ms with TLS,
-and idles at about 1 MB, so the time and memory go to your code instead of the HTTP layer. In the
-same cloud test round, hyper took 1.23 ms to its first answer and simoom 0.91 ms.
+and idles at about 1 MB, so the time and memory go to your code instead of the HTTP layer.
 
 **Inside a CLI or desktop app.** A command-line tool needs a local callback for an OAuth login. A
 desktop app wants to show a live dashboard in the browser and push updates over WebSocket or
@@ -384,7 +383,7 @@ Every protocol is a cargo feature, and a build script fails when a size budget i
 | `tls` | TLS 1.3 listeners: X25519, P-256, RSA, AES-GCM |
 | `tls-extra` | P-384 and Ed25519 certificates, ChaCha20-Poly1305 |
 | `http3` | HTTP/3 over QUIC (needs `tls`) |
-| `full` | every protocol above, plus the TLS client |
+| `full` | HTTP/1.1, HTTP/2, HTTP/3, TLS with `tls-extra`, WebSocket, io_uring, the default safety nets and the TLS client; not compression, `websocket-h2`/`h3`, `ws-deflate`, `h2-keepalive` or the helpers below |
 | `compression`, `brotli`, `zstd` | response compression and request decoding |
 | `websocket-h2`, `websocket-h3`, `ws-deflate` | WebSocket over HTTP/2 and HTTP/3; permessage-deflate |
 | `h2-keepalive` | HTTP/2 PING keepalive |
@@ -416,7 +415,7 @@ against may-minihttp's 515 KB; about 181 KB of either is the standard library's 
 | [`simoom-h2`](crates/simoom-h2), [`simoom-hpack`](crates/simoom-hpack) | HTTP/2 (RFC 9113) with flood protection, HPACK (RFC 7541) |
 | [`simoom-quic`](crates/simoom-quic) | QUIC v1 transport (RFC 9000, 9002) |
 | [`simoom-h3`](crates/simoom-h3), [`simoom-qpack`](crates/simoom-qpack) | HTTP/3 (RFC 9114), QPACK (RFC 9204) |
-| [`simoom-tls`](crates/simoom-tls) | TLS 1.3 (TLS 1.2 optional), server and client, and the QUIC interface (RFC 9001) |
+| [`simoom-tls`](crates/simoom-tls) | TLS 1.3, server and client, and the QUIC interface (RFC 9001); the crate also has TLS 1.2 as its own `tls12` feature, which the `simoom` server does not expose |
 | [`simoom-compress`](crates/simoom-compress) | DEFLATE, zlib, gzip, Brotli and zstd, streaming and bounded |
 
 The protocol crates are sans-io: they take bytes and time and return bytes and events, and never

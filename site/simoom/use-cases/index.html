@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust HTTP server use cases: edge, serverless, apps | simoom</title>
+<meta name="description" content="Where an embeddable Rust HTTP server fits: edge devices, serverless cold starts, local app endpoints, integration engines, audited builds and HTTP/3.">
+<link rel="canonical" href="https://cameleer.ing/simoom/use-cases/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="What people build with simoom">
+<meta property="og:description" content="Six places a small, std-only HTTP/1.1, HTTP/2 and HTTP/3 engine beats a big stack: devices, functions, apps, integration engines, audited builds and HTTP/3 services.">
+<meta property="og:url" content="https://cameleer.ing/simoom/use-cases/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../llms.txt" title="LLM-readable summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../assets/site.css">
+<link rel="stylesheet" href="../../assets/compare.css">
+<style>
+.uc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.uc-grid .card { display: flex; flex-direction: column; text-decoration: none; }
+.uc-grid .card:hover { border-color: var(--ink); }
+.uc-grid .card h3 { margin: 0 0 8px; }
+.uc-grid .card p { margin: 0 0 12px; }
+.uc-grid .card .res { margin: 4px 0 12px; }
+.uc-grid .card .who { margin-top: auto; font: 500 12.5px var(--mono); color: var(--signal); }
+.uc-grid .card code { font-size: 13px; background: #f3f5fa; padding: 1px 5px; border-radius: 4px; }
+@media (max-width: 900px) { .uc-grid { grid-template-columns: 1fr; } }
+</style>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "CollectionPage",
+ "name": "simoom use cases",
+ "url": "https://cameleer.ing/simoom/use-cases/",
+ "description": "Where an embeddable Rust HTTP server fits: edge devices, serverless cold starts, local app endpoints, integration engines, audited builds and HTTP/3.",
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "simoom",
+  "url": "https://cameleer.ing/simoom/"
+ },
+ "hasPart": [
+  {
+   "@type": "TechArticle",
+   "headline": "An HTTP server for edge and IoT devices, in 215 KB",
+   "url": "https://cameleer.ing/simoom/use-cases/edge-iot-http-server/"
+  },
+  {
+   "@type": "TechArticle",
+   "headline": "An HTTP server for serverless functions and cold starts",
+   "url": "https://cameleer.ing/simoom/use-cases/serverless-cold-start/"
+  },
+  {
+   "@type": "TechArticle",
+   "headline": "A local HTTP and WebSocket endpoint for Rust CLIs and desktop apps",
+   "url": "https://cameleer.ing/simoom/use-cases/embedded-local-server/"
+  },
+  {
+   "@type": "TechArticle",
+   "headline": "The HTTP engine of an integration platform",
+   "url": "https://cameleer.ing/simoom/use-cases/integration-engine/"
+  },
+  {
+   "@type": "TechArticle",
+   "headline": "A zero-dependency HTTP server for supply-chain-sensitive teams",
+   "url": "https://cameleer.ing/simoom/use-cases/zero-dependency-supply-chain/"
+  },
+  {
+   "@type": "TechArticle",
+   "headline": "HTTP/3 from Rust, with its own QUIC and TLS",
+   "url": "https://cameleer.ing/simoom/use-cases/http3-server/"
+  }
+ ]
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "BreadcrumbList",
+ "itemListElement": [
+  {
+   "@type": "ListItem",
+   "position": 1,
+   "name": "simoom",
+   "item": "https://cameleer.ing/simoom/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 2,
+   "name": "Use cases"
+  }
+ ]
+}
+</script>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="simoom home"><img src="../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../docs/">Docs</a>
+      <a class="keep" href="./" aria-current="page">Use cases</a>
+      <a href="../benchmarks/">Benchmarks</a>
+      <a href="../compare/">Compare</a>
+      <a href="../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="c-hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="../">simoom</a> / Use cases</p>
+    <p class="kicker">Where a small door beats a big house</p>
+    <h1>What people build with simoom</h1>
+    <p class="lede">simoom is a library you build into a program, not a server you configure. That makes it a good fit where the HTTP layer has to be small, start fast, stay out of the way of the rest of the program, or be read line by line. Each page below describes the job, shows the code, gives the measured numbers and says plainly where simoom stops.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="pages">
+  <div class="wrap">
+    <h2>Six places simoom fits</h2>
+    <div class="uc-grid">
+      <a class="card" href="edge-iot-http-server/">
+        <h3>Edge and IoT devices</h3>
+        <p>A status API and live readings on a gateway with little RAM and a firmware image that has to stay small. TLS without a C toolchain.</p>
+        <span class="res">215 KB <small>for HTTP/1.1</small></span>
+        <span class="who">http1 · sse · features · limits</span>
+      </a>
+      <a class="card" href="serverless-cold-start/">
+        <h3>Serverless functions</h3>
+        <p>Scale to zero without paying for the HTTP layer on every cold start. Idle at about 1 MB.</p>
+        <span class="res">0.73 ms <small>to the first answer</small></span>
+        <span class="who">cold start · scale to zero · containers</span>
+      </a>
+      <a class="card" href="embedded-local-server/">
+        <h3>CLI and desktop apps</h3>
+        <p>An OAuth callback, a local dashboard, live updates over WebSocket or server-sent events, with no async runtime.</p>
+        <span class="res">0 <small>runtimes to set up</small></span>
+        <span class="who">defer · websocket · sse · windows</span>
+      </a>
+      <a class="card" href="integration-engine/">
+        <h3>Integration engines</h3>
+        <p>Webhooks and APIs all day, with slow calls sent off the loop and answered from the host's own threads. This is how Cameleer uses it.</p>
+        <span class="res">1.7–1.8x <small>Cameleer's old server</small></span>
+        <span class="who">defer · blocking · offload pool · Cameleer</span>
+      </a>
+      <a class="card" href="zero-dependency-supply-chain/">
+        <h3>Audited environments</h3>
+        <p>Every line from the TLS handshake to QUIC congestion control in one repository, under one licence. unsafe in one crate.</p>
+        <span class="res">0 <small>third-party crates</small></span>
+        <span class="who">std only · forbid(unsafe_code) · h2spec · HTTP Garden</span>
+      </a>
+      <a class="card" href="http3-server/">
+        <h3>HTTP/3 services</h3>
+        <p>QUIC on the same port number as TLS, without quinn, rustls or nginx in front. Faster than h2o on the same machine.</p>
+        <span class="res">54 of 58 <small>interop pairs</small></span>
+        <span class="who">http3 · quic · tls · alt-svc</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="not">
+  <div class="wrap">
+    <h2>Where simoom does not fit</h2>
+    <p class="intro">Some jobs need a product, not an engine. For these, pick something else.</p>
+    <div class="two">
+      <div class="pane">
+        <h3>Serving a website from files</h3>
+        <p>simoom has no static-file server, no reverse proxy and no configuration file. nginx, Caddy and h2o do those jobs well.</p>
+      </div>
+      <div class="pane">
+        <h3>A large web application framework</h3>
+        <p>simoom has a router and a few optional helpers (cookies, CORS, multipart, auth). If you want extractors, middleware stacks and a big ecosystem, axum and actix-web are the better choice. See <a href="../compare/">the comparisons</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. AWS Lambda, Raspberry Pi and other product names are trademarks of their owners.</p>
+    </div>
+    <div>
+      <h4>Use cases</h4>
+      <ul>
+        <li><a href="../use-cases/">All use cases</a></li>
+        <li><a href="../use-cases/serverless-cold-start/">Serverless functions</a></li>
+        <li><a href="../use-cases/edge-iot-http-server/">Edge and IoT devices</a></li>
+        <li><a href="../use-cases/http3-server/">HTTP/3 in Rust</a></li>
+        <li><a href="../compare/">Compare</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../docs/">Documentation</a></li>
+        <li><a href="../docs/guides/getting-started.html">Getting started</a></li>
+        <li><a href="../benchmarks/">Benchmarks</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script>addEventListener('scroll',function(){document.getElementById('top').classList.toggle('scrolled',scrollY>8)},{passive:true})</script>
+</body>
+</html>

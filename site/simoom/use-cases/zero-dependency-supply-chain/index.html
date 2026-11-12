@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zero-dependency Rust web server for audited builds | simoom</title>
+<meta name="description" content="A Rust HTTP server with no crates.io dependencies: TLS 1.3, QUIC and HTTP/2 in one repository, unsafe in one crate. What is tested, and what is not.">
+<link rel="canonical" href="https://cameleer.ing/simoom/use-cases/zero-dependency-supply-chain/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="A zero-dependency HTTP server for supply-chain-sensitive teams">
+<meta property="og:description" content="No third-party crates, not even for tests: every line from the TLS handshake to QUIC congestion control is in one repository, under one licence.">
+<meta property="og:url" content="https://cameleer.ing/simoom/use-cases/zero-dependency-supply-chain/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<link rel="stylesheet" href="../../../assets/compare.css">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "headline": "A zero-dependency HTTP server for supply-chain-sensitive teams",
+ "description": "simoom for audited and supply-chain-sensitive environments: zero crates.io dependencies, unsafe code confined to one crate, strict parsing and the third-party test results, with no independent audit yet.",
+ "url": "https://cameleer.ing/simoom/use-cases/zero-dependency-supply-chain/",
+ "inLanguage": "en",
+ "image": "https://cameleer.ing/simoom/og.jpg",
+ "author": {
+  "@type": "Person",
+  "name": "Sudheesh PM"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "Cameleering",
+  "url": "https://cameleer.ing/cameleering/"
+ },
+ "about": [
+  {
+   "@type": "SoftwareSourceCode",
+   "name": "simoom",
+   "url": "https://cameleer.ing/simoom/",
+   "codeRepository": "https://github.com/Cameleering/simoom",
+   "programmingLanguage": "Rust"
+  },
+  {
+   "@type": "Thing",
+   "name": "Software supply chain security"
+  },
+  {
+   "@type": "Thing",
+   "name": "Software audit"
+  },
+  {
+   "@type": "Thing",
+   "name": "Transport Layer Security"
+  }
+ ]
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "BreadcrumbList",
+ "itemListElement": [
+  {
+   "@type": "ListItem",
+   "position": 1,
+   "name": "simoom",
+   "item": "https://cameleer.ing/simoom/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 2,
+   "name": "Use cases",
+   "item": "https://cameleer.ing/simoom/use-cases/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 3,
+   "name": "Audited builds"
+  }
+ ]
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "Is there a Rust web server with zero dependencies?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes. simoom's workspace has no crates.io dependencies, not even dev-dependencies. HTTP/1.1, HTTP/2, HTTP/3, QUIC, TLS 1.3, compression and the event loops are all in its repository."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Does simoom use OpenSSL, ring or rustls?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. It has its own TLS 1.3 and cryptography written with only the Rust standard library, so there is no C code and no third-party crypto crate in the build."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Where is the unsafe code?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Only in simoom-sys, which holds the operating-system calls, SIMD scanning and crypto intrinsics. Every unsafe block there has a SAFETY comment. Every other crate forbids unsafe code."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Has simoom been independently audited?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Not yet. It passes h2spec, HTTP Garden, a request-smuggling test, the QUIC Interop Runner and testssl.sh, and its parsers are fuzzed, but all of that was done by the project itself."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Is the HTTP server safe against request smuggling?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Parsing is strict per RFC 9112 and 9113, ambiguous framing is refused and the connection is closed after a framing error. Behind nginx and haproxy, 165 test streams gave 0 desyncs, and HTTP Garden found 0 desyncs."
+   }
+  }
+ ]
+}
+</script>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../../docs/">Docs</a>
+      <a class="keep" href="../../use-cases/" aria-current="page">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../../compare/">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="c-hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="../../">simoom</a> / <a href="../">Use cases</a> / Audited builds</p>
+    <p class="kicker">Supply-chain-sensitive and audited environments</p>
+    <h1>An HTTP server with nothing to vet but itself</h1>
+    <p class="lede">A bank, a medical device maker or a defence supplier has to review every third-party dependency it ships and track each one for vulnerabilities. Every crate is a vendor. simoom has none: no crates.io dependencies at all, not even for tests. The TLS stack, QUIC, HTTP/2, HTTP/3, the compression codecs and the event loops are all in one repository, under one licence.</p>
+    <div class="stats">
+      <div class="stat"><b>0</b><span>crates.io dependencies, including dev-dependencies</span></div>
+      <div class="stat"><b>1</b><span>crate with unsafe code (simoom-sys), each block with a SAFETY comment</span></div>
+      <div class="stat"><b>0</b><span>desyncs in HTTP Garden and in the request-smuggling test</span></div>
+      <div class="stat"><b>146/146</b><span>h2spec 2.6.0, in 30 consecutive runs</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="tree">
+  <div class="wrap">
+    <h2>What "zero dependencies" means here</h2>
+    <p class="intro">The workspace's dependency tree is simoom's own crates and the Rust standard library. Calls into the operating system go through <code>extern</code> declarations in <code>simoom-sys</code>; SIMD goes through <code>core::arch</code> with runtime detection and a scalar fallback.</p>
+    <div class="two">
+      <div class="pane">
+        <h3>In the repository</h3>
+        <ul>
+          <li>TLS 1.3 and its cryptography: X25519, P-256, RSA, AES-GCM; P-384, Ed25519 and ChaCha20-Poly1305 as an option.</li>
+          <li>QUIC v1, HTTP/3 and QPACK; HTTP/2 and HPACK; HTTP/1.1.</li>
+          <li>DEFLATE, gzip, Brotli and zstd codecs.</li>
+          <li>Event loops for epoll, io_uring, IOCP and kqueue.</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>Rules the build enforces</h3>
+        <ul>
+          <li>Every crate except <code>simoom-sys</code> starts with <code>#![forbid(unsafe_code)]</code>.</li>
+          <li>Zero warnings from <code>cargo build --workspace --all-targets</code>.</li>
+          <li>Tests are hermetic: loopback only, never the internet.</li>
+          <li>Certificate verification can't be turned off.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">The only exception is the competitor programs under <code>bench/competitors/</code>: separate projects outside the workspace, with their own lock files, that exist only to be benchmarked against. The cryptography is planned to move into <strong>ksar</strong>, a shared crypto family for Cameleering projects; today it lives in <code>simoom-tls</code>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="tested">
+  <div class="wrap">
+    <h2>What has been tested</h2>
+    <p class="intro">Parsing follows RFC 9110, 9112, 9113, 9114 and 9204 strictly: a request whose framing is ambiguous is refused, and every limit has a default.</p>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>check</th><th>result</th></tr></thead>
+      <tbody>
+        <tr><td>h2spec 2.6.0</td><td><span class="win">146/146</span>, in 30 consecutive runs</td></tr>
+        <tr><td>HTTP Garden, as an origin next to nginx, Apache httpd, h2o, hyper, gunicorn and Go</td><td><span class="win">0 desyncs</span>, 0 dangerous discrepancies</td></tr>
+        <tr><td>Request-smuggling test behind nginx 1.24 and haproxy 2.8</td><td>165 streams, 0 desyncs; accepted 0 requests that both refused</td></tr>
+        <tr><td>QUIC Interop Runner against ngtcp2, quiche and quic-go clients</td><td>54 of 58 supported pairs (failures: 0-RTT, refused by design; ECN, not implemented)</td></tr>
+        <tr><td>testssl.sh 3.2.1</td><td>no vulnerabilities found</td></tr>
+        <tr><td>TLS interop: OpenSSL, curl with OpenSSL, Python ssl, gnutls-cli, Schannel</td><td>28/28, 31/31, 3/3</td></tr>
+        <tr><td>Fuzzing</td><td>std-only mutation fuzzing of every parser for 2 h 40 min; coverage-guided fuzzing of HTTP/1.1</td></tr>
+        <tr><td>Test suite</td><td>777 tests on Windows, 791 on Linux (WSL2), zero warnings</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">Versions, commands and details: <a href="../../docs/SECURITY.html">security</a>. Limits and defaults: <a href="../../docs/guides/limits-and-security.html">limits and security</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="not">
+  <div class="wrap">
+    <h2>What has not been done</h2>
+    <div class="two">
+      <div class="pane">
+        <h3>No independent audit yet</h3>
+        <p>All of the testing above was done by the project itself. The TLS stack and its cryptography have not had an independent security audit. If your policy requires audited TLS, rustls has had independent audits.</p>
+      </div>
+      <div class="pane">
+        <h3>A young project</h3>
+        <p>simoom is at version 0.1.0 and the API can still change. It has one maintainer. Vulnerabilities are reported privately through <a href="https://github.com/Cameleering/simoom/security/advisories/new">GitHub security advisories</a>; the process is in <a href="../../docs/SECURITY.html">security</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec faq" id="faq">
+  <div class="wrap">
+    <h2>Common questions</h2>
+    <details><summary>Is there a Rust web server with zero dependencies?</summary><p>Yes. simoom's workspace has no crates.io dependencies, not even dev-dependencies. HTTP/1.1, HTTP/2, HTTP/3, QUIC, TLS 1.3, compression and the event loops are all in its repository.</p></details>
+    <details><summary>Does simoom use OpenSSL, ring or rustls?</summary><p>No. It has its own TLS 1.3 and cryptography written with only the Rust standard library, so there is no C code and no third-party crypto crate in the build.</p></details>
+    <details><summary>Where is the unsafe code?</summary><p>Only in simoom-sys, which holds the operating-system calls, SIMD scanning and crypto intrinsics. Every unsafe block there has a SAFETY comment. Every other crate forbids unsafe code.</p></details>
+    <details><summary>Has simoom been independently audited?</summary><p>Not yet. It passes h2spec, HTTP Garden, a request-smuggling test, the QUIC Interop Runner and testssl.sh, and its parsers are fuzzed, but all of that was done by the project itself.</p></details>
+    <details><summary>Is the HTTP server safe against request smuggling?</summary><p>Parsing is strict per RFC 9112 and 9113, ambiguous framing is refused and the connection is closed after a framing error. Behind nginx and haproxy, 165 test streams gave 0 desyncs, and HTTP Garden found 0 desyncs.</p></details>
+  </div>
+</section>
+
+<section class="c-sec" id="start">
+  <div class="wrap">
+    <h2>Read it before you ship it</h2>
+    <p class="intro">The source, the security model and the test results are all public.</p>
+    <div class="cta">
+      <a class="btn primary" href="../../docs/SECURITY.html">Security model and results</a>
+      <a class="btn" href="https://github.com/Cameleering/simoom">Source on GitHub</a>
+      <a class="btn" href="../../docs/guides/sans-io-crates.html">The protocol crates</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. AWS Lambda, Raspberry Pi and other product names are trademarks of their owners.</p>
+    </div>
+    <div>
+      <h4>Use cases</h4>
+      <ul>
+        <li><a href="../../use-cases/">All use cases</a></li>
+        <li><a href="../../use-cases/serverless-cold-start/">Serverless functions</a></li>
+        <li><a href="../../use-cases/edge-iot-http-server/">Edge and IoT devices</a></li>
+        <li><a href="../../use-cases/http3-server/">HTTP/3 in Rust</a></li>
+        <li><a href="../../compare/">Compare</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../../docs/">Documentation</a></li>
+        <li><a href="../../docs/guides/getting-started.html">Getting started</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script>addEventListener('scroll',function(){document.getElementById('top').classList.toggle('scrolled',scrollY>8)},{passive:true})</script>
+</body>
+</html>

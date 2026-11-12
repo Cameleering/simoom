@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust web server for AWS Lambda cold starts | simoom</title>
+<meta name="description" content="A Rust HTTP server that answers 0.73 ms after the process starts and idles at about 1 MB, for scale-to-zero functions and containers. No tokio.">
+<link rel="canonical" href="https://cameleer.ing/simoom/use-cases/serverless-cold-start/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="An HTTP server for serverless functions and cold starts">
+<meta property="og:description" content="0.73 ms from process start to the first answer, 0.87 ms with TLS, about 1 MB idle: the HTTP layer stops being the cold start.">
+<meta property="og:url" content="https://cameleer.ing/simoom/use-cases/serverless-cold-start/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<link rel="stylesheet" href="../../../assets/compare.css">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "headline": "An HTTP server for serverless functions and cold starts",
+ "description": "Using simoom, a std-only Rust HTTP engine, in serverless functions and scale-to-zero containers: measured cold start, idle memory and build size.",
+ "url": "https://cameleer.ing/simoom/use-cases/serverless-cold-start/",
+ "inLanguage": "en",
+ "image": "https://cameleer.ing/simoom/og.jpg",
+ "author": {
+  "@type": "Person",
+  "name": "Sudheesh PM"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "Cameleering",
+  "url": "https://cameleer.ing/cameleering/"
+ },
+ "about": [
+  {
+   "@type": "SoftwareSourceCode",
+   "name": "simoom",
+   "url": "https://cameleer.ing/simoom/",
+   "codeRepository": "https://github.com/Cameleering/simoom",
+   "programmingLanguage": "Rust"
+  },
+  {
+   "@type": "Thing",
+   "name": "Serverless computing"
+  },
+  {
+   "@type": "Thing",
+   "name": "AWS Lambda"
+  },
+  {
+   "@type": "Thing",
+   "name": "Cold start"
+  }
+ ]
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "BreadcrumbList",
+ "itemListElement": [
+  {
+   "@type": "ListItem",
+   "position": 1,
+   "name": "simoom",
+   "item": "https://cameleer.ing/simoom/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 2,
+   "name": "Use cases",
+   "item": "https://cameleer.ing/simoom/use-cases/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 3,
+   "name": "Serverless"
+  }
+ ]
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "What is the smallest Rust web server for AWS Lambda or other serverless platforms?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "An HTTP/1.1-only simoom build adds about 215 KB to a binary, gives the first answer 0.73 ms after the process starts and idles at about 1 MB. Turn off the default features and keep http1."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Does simoom speak the AWS Lambda Runtime API?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. simoom serves HTTP on a socket, which suits container platforms such as Cloud Run directly. On Lambda it runs behind an adapter or in a container image. Cameleer, which uses simoom as its HTTP engine, is its own Lambda runtime."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How fast is the cold start with TLS?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "0.87 ms from process start to the first answer with a P-256 certificate, against 1.37 ms for Cameleer's old server on the same machine. With HTTP/3 enabled as well it was 1.91 ms."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Do I need tokio for a serverless HTTP handler in Rust?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. simoom has no async runtime. A service is a plain function; slow work goes to a bounded offload pool or to your own threads."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How much memory does an idle simoom server use?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "About 1 MB of PSS after one request: 1,018 KB plain and 1,360 KB with TLS, measured on WSL2."
+   }
+  }
+ ]
+}
+</script>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../../docs/">Docs</a>
+      <a class="keep" href="../../use-cases/" aria-current="page">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../../compare/">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="c-hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="../../">simoom</a> / <a href="../">Use cases</a> / Serverless</p>
+    <p class="kicker">Serverless and scale to zero</p>
+    <h1>An HTTP layer that isn't your cold start</h1>
+    <p class="lede">A function that scales to zero pays for its start-up on every cold request, and pays for its memory every second it runs. simoom gives the first answer 0.73 ms after the process starts and idles at about 1 MB, so the time and the memory go to your code.</p>
+    <div class="stats">
+      <div class="stat"><b>0.73 ms</b><span>from process start to the first answer, plain HTTP</span></div>
+      <div class="stat"><b>0.87 ms</b><span>the same with TLS 1.3 (P-256)</span></div>
+      <div class="stat"><b>~1 MB</b><span>idle memory (PSS) after the first request</span></div>
+      <div class="stat"><b>215 KB</b><span>added to the binary for HTTP/1.1 only</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="numbers">
+  <div class="wrap">
+    <h2>Start-up, measured</h2>
+    <p class="intro">Cold start is the time from spawning the process to the first successful answer on its port. Each comparison ran on one machine, with both servers returning the same 13-byte answer.</p>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>server</th><th class="num">cold start, plain</th><th class="num">cold start, TLS</th><th class="num">idle memory (PSS)</th></tr></thead>
+      <tbody>
+        <tr><td>simoom</td><td class="num"><span class="win">0.73 ms</span></td><td class="num"><span class="win">0.87 ms</span></td><td class="num">1,018 KB plain · 1,360 KB TLS</td></tr>
+        <tr><td>Cameleer's old server (cameleer-http)</td><td class="num">0.77 ms</td><td class="num">1.37 ms</td><td class="num">1,017 KB plain · 1,317 KB TLS</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">WSL2, 10 alternating rounds, 2026-11-11 (TLS memory after the K11 fix, 2026-11-12). With TLS and HTTP/3 together, simoom's start was 1.91 ms (P-256), because HTTP/3 servers start every loop at once. The platform's own sandbox start comes on top for every runtime. Details: <a href="../../benchmarks/#original">benchmarks</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="why">
+  <div class="wrap">
+    <h2>Why it starts fast</h2>
+    <div class="two">
+      <div class="pane">
+        <h3>Less to set up</h3>
+        <ul>
+          <li>No async runtime to build before the first request.</li>
+          <li>Lazy loops: start returns with one loop running; the others start in the background once that loop gets busy.</li>
+          <li>The descriptor table is grown once at start, not while threads run.</li>
+          <li>A P-256 key's signing table is built on the first signature, not at load.</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>Less to carry</h3>
+        <ul>
+          <li>An HTTP/1.1-only build adds 215 KB; the full server with HTTP/3 adds 935 KB.</li>
+          <li>Nothing from crates.io, so nothing extra to download, compile or ship.</li>
+          <li>One event loop per CPU core, so a small function with one vCPU runs one loop.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">The start-up work behind these numbers is described in <a href="../../docs/guides/runtime.html">runtime</a>. Build options: <a href="../../docs/guides/features-and-size.html">features and size</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="code">
+  <div class="wrap">
+    <h2>A function's HTTP server</h2>
+    <p class="intro">Container platforms such as Cloud Run send requests to a port; listen on it and answer. A graceful stop tells clients to finish when the platform retires the instance.</p>
+    <pre class="cmd">use simoom::{Backend, Reply, Request, Server};
+use std::time::Duration;
+
+let server = Server::builder()
+    .listen("0.0.0.0:8080")
+    .threads(2)               // 0 = one loop per core (the default)
+    .backend(Backend::IoUring) // Linux 6.1+, falls back to epoll
+    .service(|_: &amp;mut Request&lt;'_&gt;, r: Reply&lt;'_&gt;| r.body_static(b"ok"))
+    .start()
+    .unwrap();
+// ...
+server.stop(Duration::from_secs(5)); // tells clients to finish, then waits up to 5 s
+server.join();</pre>
+    <p class="note">simoom serves HTTP on a socket. On AWS Lambda that means a container image or an HTTP adapter in front of the port: simoom does not speak the Lambda Runtime API itself. Cameleer, which uses simoom, is its own Lambda runtime: see <a href="../../../use-cases/serverless-aws-lambda/">Cameleer on AWS Lambda</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec faq" id="faq">
+  <div class="wrap">
+    <h2>Common questions</h2>
+    <details><summary>What is the smallest Rust web server for AWS Lambda or other serverless platforms?</summary><p>An HTTP/1.1-only simoom build adds about 215 KB to a binary, gives the first answer 0.73 ms after the process starts and idles at about 1 MB. Turn off the default features and keep http1.</p></details>
+    <details><summary>Does simoom speak the AWS Lambda Runtime API?</summary><p>No. simoom serves HTTP on a socket, which suits container platforms such as Cloud Run directly. On Lambda it runs behind an adapter or in a container image. Cameleer, which uses simoom as its HTTP engine, is its own Lambda runtime.</p></details>
+    <details><summary>How fast is the cold start with TLS?</summary><p>0.87 ms from process start to the first answer with a P-256 certificate, against 1.37 ms for Cameleer's old server on the same machine. With HTTP/3 enabled as well it was 1.91 ms.</p></details>
+    <details><summary>Do I need tokio for a serverless HTTP handler in Rust?</summary><p>No. simoom has no async runtime. A service is a plain function; slow work goes to a bounded offload pool or to your own threads.</p></details>
+    <details><summary>How much memory does an idle simoom server use?</summary><p>About 1 MB of PSS after one request: 1,018 KB plain and 1,360 KB with TLS, measured on WSL2.</p></details>
+  </div>
+</section>
+
+<section class="c-sec" id="start">
+  <div class="wrap">
+    <h2>Measure it yourself</h2>
+    <p class="intro">Build the hello example in release mode and time the first answer on your platform.</p>
+    <pre class="cmd">cargo add simoom
+cargo run --release -p simoom --example hello -- 127.0.0.1:8080   # from a checkout of the repository</pre>
+    <div class="cta">
+      <a class="btn primary" href="../../docs/guides/getting-started.html">Getting started</a>
+      <a class="btn" href="../../benchmarks/">The benchmarks</a>
+      <a class="btn" href="../edge-iot-http-server/">Edge devices</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. AWS Lambda, Raspberry Pi and other product names are trademarks of their owners.</p>
+    </div>
+    <div>
+      <h4>Use cases</h4>
+      <ul>
+        <li><a href="../../use-cases/">All use cases</a></li>
+        <li><a href="../../use-cases/serverless-cold-start/">Serverless functions</a></li>
+        <li><a href="../../use-cases/edge-iot-http-server/">Edge and IoT devices</a></li>
+        <li><a href="../../use-cases/http3-server/">HTTP/3 in Rust</a></li>
+        <li><a href="../../compare/">Compare</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../../docs/">Documentation</a></li>
+        <li><a href="../../docs/guides/getting-started.html">Getting started</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script>addEventListener('scroll',function(){document.getElementById('top').classList.toggle('scrolled',scrollY>8)},{passive:true})</script>
+</body>
+</html>

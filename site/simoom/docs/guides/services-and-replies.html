@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How do I read requests and send responses in simoom? | simoom</title>
+<meta name="description" content="A service gets a borrowed Request and a Reply; read the request, then finish the reply once with a body, a stream, a deferred answer or an upgrade.">
+<link rel="canonical" href="https://cameleer.ing/simoom/docs/guides/services-and-replies.html">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="How do I read requests and send responses in simoom?">
+<meta property="og:description" content="A service gets a borrowed Request and a Reply; read the request, then finish the reply once with a body, a stream, a deferred answer or an upgrade.">
+<meta property="og:url" content="https://cameleer.ing/simoom/docs/guides/services-and-replies.html">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="alternate" type="text/markdown" href="services-and-replies.md" title="Markdown source">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I read requests and send responses in simoom?", "description": "A service gets a borrowed Request and a Reply; read the request, then finish the reply once with a body, a stream, a deferred answer or an upgrade.", "url": "https://cameleer.ing/simoom/docs/guides/services-and-replies.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 3, "name": "How do I read requests and send responses in simoom?", "item": "https://cameleer.ing/simoom/docs/guides/services-and-replies.html"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do I return JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Set the content type and send the text: r.header(\"content-type\", \"application/json\").body(json). simoom has no JSON library, since it has no dependencies; use the serializer you already have (for example serde_json in your own crate) and pass the resulting String."}}, {"@type": "Question", "name": "How do I read a path parameter or a query parameter?", "acceptedAnswer": {"@type": "Answer", "text": "req.param_str(\"id\") for a :id route segment, req.query_param(\"page\") for ?page=2. Both return the raw value; decode it with simoom::percent_decode when it can contain %XX escapes."}}, {"@type": "Question", "name": "Can a handler be async?", "acceptedAnswer": {"@type": "Answer", "text": "No. A service is a plain function that returns before the loop moves on. For work that waits, use Reply::defer and answer from any thread, or the offload pool; see Slow work."}}, {"@type": "Question", "name": "Why does my response come back as a 500?", "acceptedAnswer": {"@type": "Answer", "text": "Three causes: the reply was dropped without a finisher, a header name or value was invalid, or the status was outside 200 to 999. A panic in the handler gives a 500 too."}}]}</script>
+</head>
+<body class="docs">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top scrolled" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home">
+      <img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
+      simoom
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../index.html">Docs</a>
+      <a href="../guides/index.html">Guides</a>
+      <a href="../../use-cases/">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../../compare/">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+<div class="docs-layout">
+  <aside class="sidebar">
+    <details class="navbox" open>
+      <summary>Browse the docs</summary>
+      <nav aria-label="Documentation">
+<ul class="nav-top">
+<li><a href="../index.html">Docs home</a></li>
+</ul>
+<details class="nav-group" open><summary>Guides <span class="n">15</span></summary><ul><li><a href="index.html">All guides</a></li><li><a href="getting-started.html">Getting started with simoom</a></li><li><a href="services-and-replies.html" aria-current="page">How do I read requests and send responses in simoom?</a></li><li><a href="routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="slow-work.html">How do I call a database or another service from a simoom handler?</a></li><li><a href="streaming-and-sse.html">How do I stream bodies and send server-sent events with simoom?</a></li><li><a href="websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="tls.html">How do I serve HTTPS with simoom?</a></li><li><a href="http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="runtime.html">How do I configure simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="sans-io-crates.html">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="faq.html">simoom FAQ</a></li></ul></details>
+<details class="nav-group"><summary>Project <span class="n">1</span></summary><ul><li><a href="../SECURITY.html">Security</a></li></ul></details>
+      </nav>
+    </details>
+    <script>if (matchMedia('(max-width: 900px)').matches) document.currentScript.previousElementSibling.open = false;</script>
+  </aside>
+  <main id="content" class="article">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a> <span aria-hidden="true">/</span> <a href="index.html">Guides</a> <span aria-hidden="true">/</span> <span>How do I read requests and send responses in simoom?</span></nav>
+    <article>
+<h1 id="how-do-i-read-requests-and-send-responses-in-simoom">How do I read requests and send responses in simoom?</h1>
+<blockquote class="answer">
+<p>A service gets a borrowed <code>Request</code> and a <code>Reply</code>; read the request, then finish the reply once with a body, a stream, a deferred answer or an upgrade.</p>
+</blockquote>
+<p>Everything in simoom is built on one trait, <code>Service</code>. This page shows the three ways to write a
+service, what you can read from a <code>Request</code>, and every way to finish a <code>Reply</code>.</p>
+<h2 id="three-ways-to-write-a-service">Three ways to write a service<a class="anchor" href="#three-ways-to-write-a-service" aria-hidden="true" tabindex="-1"></a></h2>
+<p><strong>A closure.</strong> Any <code>Fn(&amp;mut Request&lt;&#x27;_&gt;, Reply&lt;&#x27;_&gt;) -&gt; Outcome + Send + Sync + &#x27;static</code> is a
+service. This is what most examples use.</p>
+<p><strong>A function.</strong> The same signature as a named <code>fn</code>:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request, Server};
+
+fn hello(req: &amp;mut Request&lt;&#x27;_&gt;, reply: Reply&lt;&#x27;_&gt;) -&gt; Outcome {
+    if req.method() != b&quot;GET&quot; {
+        return reply.status(405).header(&quot;allow&quot;, &quot;GET&quot;).empty();
+    }
+    reply.header(&quot;content-type&quot;, &quot;text/plain&quot;).body_static(b&quot;hello&quot;)
+}
+
+fn main() {
+    let server = Server::builder().listen(&quot;127.0.0.1:8080&quot;).service(hello).start().unwrap();
+    server.join();
+}</code></pre></div>
+<p><strong>A struct.</strong> Implement <code>Service</code> when the handler carries state. The service is shared by every
+loop thread, so its state must be <code>Send + Sync</code>: atomics, <code>Mutex</code>, <code>RwLock</code> or read-only data.</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request, Service};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+struct Counter {
+    hits: AtomicU64,
+}
+
+impl Service for Counter {
+    fn call(&amp;self, _req: &amp;mut Request&lt;&#x27;_&gt;, reply: Reply&lt;&#x27;_&gt;) -&gt; Outcome {
+        let n = self.hits.fetch_add(1, Ordering::Relaxed) + 1;
+        reply.body(format!(&quot;request number {n}&quot;))
+    }
+}
+
+fn build() -&gt; simoom::Builder {
+    simoom::Server::builder().listen(&quot;127.0.0.1:8080&quot;).service(Counter { hits: AtomicU64::new(0) })
+}</code></pre></div>
+<p>Closures can capture shared state too. Clone an <code>Arc</code> for each closure that needs it:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request, Router};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
+fn router() -&gt; Router {
+    let store: Arc&lt;RwLock&lt;HashMap&lt;String, String&gt;&gt;&gt; = Arc::default();
+    let reader = store.clone();
+    Router::new()
+        .put(&quot;/kv/:key&quot;, move |req: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome {
+            let key = req.param_str(&quot;key&quot;).unwrap_or(&quot;&quot;).to_string();
+            let value = String::from_utf8_lossy(req.body()).into_owned();
+            store.write().unwrap().insert(key, value);
+            r.status(204).empty()
+        })
+        .get(&quot;/kv/:key&quot;, move |req: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome {
+            match reader.read().unwrap().get(req.param_str(&quot;key&quot;).unwrap_or(&quot;&quot;)) {
+                Some(v) =&gt; r.body(v.clone()),
+                None =&gt; r.status(404).body_static(b&quot;not found&quot;),
+            }
+        })
+}</code></pre></div>
+<p>A lock held for a few microseconds is fine on the loop thread. A lock that waits on slow work is
+not; see <a href="slow-work.html">Slow work</a>.</p>
+<h2 id="reading-the-request">Reading the request<a class="anchor" href="#reading-the-request" aria-hidden="true" tabindex="-1"></a></h2>
+<p>A <code>Request</code> borrows from the connection&#x27;s receive buffer, so reading it costs nothing. Most
+accessors return bytes (<code>&amp;[u8]</code>), because HTTP allows bytes that aren&#x27;t UTF-8; the <code>_str</code>
+variants return text.</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request};
+
+fn inspect(req: &amp;mut Request&lt;&#x27;_&gt;, reply: Reply&lt;&#x27;_&gt;) -&gt; Outcome {
+    let method = String::from_utf8_lossy(req.method()).into_owned();
+    let path = req.path_str();
+    let page = req.query_param(&quot;page&quot;).and_then(|v| std::str::from_utf8(v).ok()).unwrap_or(&quot;1&quot;);
+    let agent = req.header(&quot;user-agent&quot;).map(String::from_utf8_lossy).unwrap_or_default();
+    let peer = req.peer_addr().map(|a| a.to_string()).unwrap_or_default();
+    let body_len = req.body().len();
+    reply.body(format!(&quot;{method} {path} page={page} agent={agent} peer={peer} body={body_len} bytes ({:?})&quot;, req.version()))
+}</code></pre></div>
+<div class="table"><table>
+<thead><tr><th>method</th><th>returns</th></tr></thead>
+<tbody>
+<tr><td><code>method()</code>, <code>target()</code>, <code>path()</code>, <code>path_str()</code></td><td>the method, the full target, the path before <code>?</code> (not percent-decoded)</td></tr>
+<tr><td><code>query()</code>, <code>query_param(name)</code></td><td>the raw query string, one raw parameter</td></tr>
+<tr><td><code>header(name)</code>, <code>headers()</code></td><td>the first header with that name (case-insensitive), all headers in order</td></tr>
+<tr><td><code>host()</code></td><td><code>Host</code> on HTTP/1.1, <code>:authority</code> on HTTP/2 and HTTP/3</td></tr>
+<tr><td><code>version()</code></td><td><code>Version::Http10</code>, <code>Http11</code>, <code>H2</code> or <code>H3</code></td></tr>
+<tr><td><code>body()</code>, <code>is_streamed()</code>, <code>take_body()</code></td><td>the buffered body, or the streaming body source (<a href="streaming-and-sse.html">Streaming</a>)</td></tr>
+<tr><td><code>trailers()</code>, <code>trailer(name)</code></td><td>trailer fields of a buffered body</td></tr>
+<tr><td><code>param(name)</code>, <code>param_str(name)</code></td><td>a value captured by the <a href="routing.html">router</a></td></tr>
+<tr><td><code>peer_addr()</code>, <code>local_addr()</code>, <code>listener()</code></td><td>the client&#x27;s address, the address it connected to, which listener accepted it</td></tr>
+<tr><td><code>is_secure()</code>, <code>tls()</code></td><td>TLS or not, and the TLS session details (<a href="tls.html">TLS</a>)</td></tr>
+<tr><td><code>is_websocket_upgrade()</code></td><td>a valid WebSocket handshake (<a href="websocket.html">WebSocket</a>)</td></tr>
+<tr><td><code>to_owned_request()</code></td><td>an <code>OwnedRequest</code> copy that can move to another thread</td></tr>
+</tbody></table></div>
+<p>Bodies up to <code>Limits::body_buffer</code> (64 KiB by default) arrive whole before your service is
+called, so <code>req.body()</code> has them. Larger bodies stream; <code>req.body()</code> is then empty and
+<code>req.is_streamed()</code> is true. Percent-decoding is up to you: <code>simoom::percent_decode</code> does it.</p>
+<h2 id="finishing-the-reply">Finishing the reply<a class="anchor" href="#finishing-the-reply" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Set the status (default 200) and headers, then finish the reply with exactly one of these:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::{Outcome, Reply, Request, Response, StaticReply};
+use std::sync::Arc;
+
+fn finishers() {
+    let _a = |_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome { r.body(String::from(&quot;owned text&quot;)) };
+    let _b = |_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome { r.body(vec![1u8, 2, 3]) };
+    let _c = |_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome { r.body_static(b&quot;no copy&quot;) };
+    let _d = |req: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome { r.body_copy(req.body()) };
+    let _e = |_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome { r.status(204).empty() };
+    let _f = |_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome {
+        r.send(Response::new(201).header(&quot;content-type&quot;, &quot;application/json&quot;).body(r#&quot;{&quot;ok&quot;:true}&quot;#))
+    };
+    let not_found = Arc::new(StaticReply::new(404, &amp;[(&quot;content-type&quot;, &quot;text/plain&quot;)], b&quot;not found&quot;));
+    let _g = move |_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| -&gt; Outcome { r.fixed(&amp;not_found) };
+}</code></pre></div>
+<div class="table"><table>
+<thead><tr><th>finisher</th><th>use it for</th></tr></thead>
+<tbody>
+<tr><td><code>body(x)</code></td><td>a <code>String</code>, <code>Vec&lt;u8&gt;</code> or static bytes, moved without a copy</td></tr>
+<tr><td><code>body_static(b&quot;...&quot;)</code></td><td>constant bytes; large ones go out without a copy on plain HTTP/1.1</td></tr>
+<tr><td><code>body_copy(&amp;[u8])</code></td><td>bytes you only borrow</td></tr>
+<tr><td><code>empty()</code></td><td>no body (<code>content-length: 0</code>)</td></tr>
+<tr><td><code>send(Response)</code></td><td>an owned <code>Response</code> built elsewhere; its status and headers replace the reply&#x27;s</td></tr>
+<tr><td><code>fixed(&amp;StaticReply)</code></td><td>a response serialized once at start-up, the fastest path</td></tr>
+<tr><td><code>defer()</code></td><td>a <code>Responder</code> to answer later from any thread (<a href="slow-work.html">Slow work</a>)</td></tr>
+<tr><td><code>blocking(req, f)</code>, <code>offload(req, f)</code></td><td>run the work on the offload pool (<a href="slow-work.html">Slow work</a>)</td></tr>
+<tr><td><code>stream()</code>, <code>sse()</code></td><td>a <code>BodySink</code> for a streamed body (<a href="streaming-and-sse.html">Streaming</a>)</td></tr>
+<tr><td><code>websocket(handler)</code></td><td>accept a WebSocket upgrade (<a href="websocket.html">WebSocket</a>)</td></tr>
+</tbody></table></div>
+<p>The type system keeps you honest: each finisher takes the reply by value, so you can&#x27;t answer
+twice. If a reply is dropped without being finished, the client gets a <code>500</code>.</p>
+<p>Some details the server handles for you:</p>
+<ul>
+<li><strong>Framing headers</strong> (<code>content-length</code>, <code>transfer-encoding</code>) are written by the server; setting
+them is ignored. <code>connection: close</code> closes the connection after the response.</li>
+<li><strong>Header names</strong> go out in lower case. An invalid name or value (CR, LF, NUL) turns the
+response into a <code>500</code> instead of reaching the wire.</li>
+<li><strong><code>HEAD</code></strong> requests get the headers of the <code>GET</code> response without the body.</li>
+<li><strong>Trailers</strong> after the body: <code>.trailer(&quot;grpc-status&quot;, &quot;0&quot;)</code> on the reply, or
+<code>Response::trailer</code>. HTTP/1.1 then uses chunked framing.</li>
+</ul>
+<h2 id="the-outcome-value">The Outcome value<a class="anchor" href="#the-outcome-value" aria-hidden="true" tabindex="-1"></a></h2>
+<p><code>Outcome</code> is informational: <code>Outcome::Done</code> when the reply was sent (or a stream or upgrade
+started), <code>Outcome::Deferred</code> when the answer comes later. Finishers return the right one, so you
+normally just return what they return. After <code>reply.defer()</code> you return <code>Outcome::Deferred</code>
+yourself.</p>
+<h2 id="panics">Panics<a class="anchor" href="#panics" aria-hidden="true" tabindex="-1"></a></h2>
+<p>A panic in a service is caught. The client gets a <code>500</code>, its connection closes, the panic is
+counted in <code>ServerHandle::stats().panics</code>, and the loop goes on serving everyone else.</p>
+<h2 id="optional-helpers">Optional helpers<a class="anchor" href="#optional-helpers" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Small helpers live behind their own cargo features, so you only compile what you use:</p>
+<div class="table"><table>
+<thead><tr><th>feature</th><th>module</th><th>what it does</th></tr></thead>
+<tbody>
+<tr><td><code>cors</code></td><td><code>simoom::cors</code></td><td>answers preflights and adds CORS headers around a service</td></tr>
+<tr><td><code>auth</code></td><td><code>simoom::auth</code></td><td>Basic, Digest and Bearer authentication around a service</td></tr>
+<tr><td><code>cookies</code></td><td><code>simoom::cookie</code></td><td>reads <code>Cookie</code>, writes <code>Set-Cookie</code></td></tr>
+<tr><td><code>multipart</code></td><td><code>simoom::multipart</code></td><td>parses <code>multipart/form-data</code> bodies</td></tr>
+<tr><td><code>conditional</code></td><td><code>simoom::conditional</code></td><td>ETag, <code>If-None-Match</code>, <code>Last-Modified</code> and range requests</td></tr>
+<tr><td><code>compression</code></td><td><code>simoom::Compression</code></td><td>gzip and deflate responses (<code>brotli</code>, <code>zstd</code> add those)</td></tr>
+</tbody></table></div>
+<p>A helper wraps your service. With the <code>cors</code> feature:</p>
+<div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::cors::Cors;
+use simoom::{Reply, Request, Server};
+
+fn build() -&gt; simoom::Builder {
+    let api = |_: &amp;mut Request&lt;&#x27;_&gt;, r: Reply&lt;&#x27;_&gt;| r.body_static(b&quot;{}&quot;);
+    Server::builder().listen(&quot;127.0.0.1:8080&quot;).service(Cors::new().allow_any_origin().wrap(api))
+}</code></pre></div>
+<p>The <a href="https://docs.rs/simoom">API reference</a> documents each helper.</p>
+<h2 id="common-questions">Common questions<a class="anchor" href="#common-questions" aria-hidden="true" tabindex="-1"></a></h2>
+<h3 id="how-do-i-return-json">How do I return JSON?<a class="anchor" href="#how-do-i-return-json" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Set the content type and send the text: <code>r.header(&quot;content-type&quot;, &quot;application/json&quot;).body(json)</code>.
+simoom has no JSON library, since it has no dependencies; use the serializer you already have
+(for example serde_json in your own crate) and pass the resulting <code>String</code>.</p>
+<h3 id="how-do-i-read-a-path-parameter-or-a-query-parameter">How do I read a path parameter or a query parameter?<a class="anchor" href="#how-do-i-read-a-path-parameter-or-a-query-parameter" aria-hidden="true" tabindex="-1"></a></h3>
+<p><code>req.param_str(&quot;id&quot;)</code> for a <code>:id</code> route segment, <code>req.query_param(&quot;page&quot;)</code> for <code>?page=2</code>. Both
+return the raw value; decode it with <code>simoom::percent_decode</code> when it can contain <code>%XX</code> escapes.</p>
+<h3 id="can-a-handler-be-async">Can a handler be async?<a class="anchor" href="#can-a-handler-be-async" aria-hidden="true" tabindex="-1"></a></h3>
+<p>No. A service is a plain function that returns before the loop moves on. For work that waits,
+use <code>Reply::defer</code> and answer from any thread, or the offload pool; see <a href="slow-work.html">Slow work</a>.</p>
+<h3 id="why-does-my-response-come-back-as-a-500">Why does my response come back as a 500?<a class="anchor" href="#why-does-my-response-come-back-as-a-500" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Three causes: the reply was dropped without a finisher, a header name or value was invalid, or
+the status was outside 200 to 999. A panic in the handler gives a 500 too.</p>
+    </article>
+    <p class="edit"><a href="https://github.com/Cameleering/simoom/blob/main/docs/guides/services-and-replies.md">Edit this page on GitHub</a></p>
+  </main>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#three-ways-to-write-a-service">Three ways to write a service</a></li><li><a href="#reading-the-request">Reading the request</a></li><li><a href="#finishing-the-reply">Finishing the reply</a></li><li><a href="#the-outcome-value">The Outcome value</a></li><li><a href="#panics">Panics</a></li><li><a href="#optional-helpers">Optional helpers</a></li><li><a href="#common-questions">Common questions</a></li></ul></nav>
+</div>
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="../../">simoom home</a></li>
+        <li><a href="../../use-cases/">Use cases</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="../../compare/">Compare</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="https://github.com/Cameleering/simoom/blob/main/CONTRIBUTING.md">Contributing</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../index.html">Docs home</a></li>
+        <li><a href="../guides/index.html">Guides</a></li>
+        <li><a href="../SECURITY.html">Security</a></li>
+        <li><a href="https://docs.rs/simoom">API reference (docs.rs)</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script src="../../../assets/docs.js" defer></script>
+</body>
+</html>

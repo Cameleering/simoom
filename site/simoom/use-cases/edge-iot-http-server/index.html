@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust HTTP server for embedded Linux and IoT | simoom</title>
+<meta name="description" content="A Rust HTTP server for gateways and devices: 215 KB for HTTP/1.1, about half a kilobyte per idle connection, TLS without a C toolchain. std only.">
+<link rel="canonical" href="https://cameleer.ing/simoom/use-cases/edge-iot-http-server/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="An HTTP server for edge and IoT devices, in 215 KB">
+<meta property="og:description" content="Status APIs and live readings on small Linux devices: an HTTP/1.1-only build adds 215 KB, idles at about 1 MB and needs no C compiler for TLS.">
+<meta property="og:url" content="https://cameleer.ing/simoom/use-cases/edge-iot-http-server/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../../llms.txt" title="LLM-readable summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../../assets/site.css">
+<link rel="stylesheet" href="../../../assets/compare.css">
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "headline": "An HTTP server for edge and IoT devices, in 215 KB",
+ "description": "Using simoom, a std-only Rust HTTP engine, on edge gateways and IoT devices: small builds, low memory per connection, TLS without C dependencies, with its limits on ARM.",
+ "url": "https://cameleer.ing/simoom/use-cases/edge-iot-http-server/",
+ "inLanguage": "en",
+ "image": "https://cameleer.ing/simoom/og.jpg",
+ "author": {
+  "@type": "Person",
+  "name": "Sudheesh PM"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "Cameleering",
+  "url": "https://cameleer.ing/cameleering/"
+ },
+ "about": [
+  {
+   "@type": "SoftwareSourceCode",
+   "name": "simoom",
+   "url": "https://cameleer.ing/simoom/",
+   "codeRepository": "https://github.com/Cameleering/simoom",
+   "programmingLanguage": "Rust"
+  },
+  {
+   "@type": "Thing",
+   "name": "Internet of things"
+  },
+  {
+   "@type": "Thing",
+   "name": "Edge computing"
+  },
+  {
+   "@type": "Thing",
+   "name": "Embedded Linux"
+  }
+ ]
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "BreadcrumbList",
+ "itemListElement": [
+  {
+   "@type": "ListItem",
+   "position": 1,
+   "name": "simoom",
+   "item": "https://cameleer.ing/simoom/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 2,
+   "name": "Use cases",
+   "item": "https://cameleer.ing/simoom/use-cases/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 3,
+   "name": "Edge and IoT"
+  }
+ ]
+}
+</script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "Can simoom run on a Raspberry Pi?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "It is built for small Linux devices, and its ARM code paths compile. They are compile-checked only so far: the tests run on x86-64 and the benchmarks ran on x86-64. Reports from ARM hardware are welcome."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Does it work without an operating system (no_std)?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. simoom is std-only, not no_std. It uses the Rust standard library and needs Linux, Windows or macOS. It fits embedded Linux, not bare-metal microcontrollers."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How small can the HTTP server be?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "An HTTP/1.1-only build adds 214,568 bytes to a stripped x86-64 Linux binary. Turn off the default features and keep only http1."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Do I need OpenSSL or a C compiler for TLS on the device?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. simoom has its own TLS 1.3 written in Rust with only the standard library, so a cross-compile needs the Rust toolchain and nothing else."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How much memory does it use?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "About 1 MB of PSS when idle, and 520 to 533 bytes per idle connection with 100,000 open, level with nginx on the same machine."
+   }
+  }
+ ]
+}
+</script>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../../docs/">Docs</a>
+      <a class="keep" href="../../use-cases/" aria-current="page">Use cases</a>
+      <a href="../../benchmarks/">Benchmarks</a>
+      <a href="../../compare/">Compare</a>
+      <a href="../../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="c-hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="../../">simoom</a> / <a href="../">Use cases</a> / Edge and IoT</p>
+    <p class="kicker">Edge devices and IoT gateways</p>
+    <h1>An HTTP server that fits on the device</h1>
+    <p class="lede">A gateway on a factory floor has a small CPU, little RAM and a firmware image that has to stay small. It still needs to take readings over HTTP, show a status page and push live values to a browser. simoom gives it that door without an async runtime, a C toolchain or a dependency tree to cross-compile.</p>
+    <div class="stats">
+      <div class="stat"><b>215 KB</b><span>added to the binary by an HTTP/1.1-only build (stripped, x86-64 Linux)</span></div>
+      <div class="stat"><b>~1 MB</b><span>idle memory (PSS) of a running server</span></div>
+      <div class="stat"><b>520–533 B</b><span>memory per idle connection with 100,000 open</span></div>
+      <div class="stat"><b>0</b><span>C libraries to cross-compile, even with TLS</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="build">
+  <div class="wrap">
+    <h2>Build only what the device needs</h2>
+    <p class="intro">Every protocol is a cargo feature. A device that speaks plain HTTP/1.1 to a local network turns everything else off; one that talks to the cloud adds TLS. A script in the repository fails the build when a size budget is exceeded.</p>
+    <pre class="cmd"># Cargo.toml: HTTP/1.1 only
+simoom = { version = "0.1", default-features = false, features = ["http1"] }</pre>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>build</th><th class="num">added to the binary</th><th class="num">budget</th></tr></thead>
+      <tbody>
+        <tr><td>HTTP/1.1 only</td><td class="num"><span class="win">214,568 B</span></td><td class="num">256,000 B</td></tr>
+        <tr><td>HTTP/1.1, HTTP/2, TLS, io_uring</td><td class="num">583,680 B</td><td class="num">614,400 B</td></tr>
+        <tr><td>everything, HTTP/3 included</td><td class="num">935,064 B</td><td class="num">1,048,576 B</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">Bytes added to <code>examples/hello.rs</code> over an empty <code>fn main</code>, stripped, x86-64 Linux, <code>dist</code> profile (<code>scripts/size.sh</code>). As a whole executable the HTTP/1.1-only server is 536 KB, against may-minihttp's 515 KB; about 181 KB of either is the standard library's backtrace code. Budgets are targets the build enforces, not measurements. Details: <a href="../../docs/guides/features-and-size.html">features and size</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="memory">
+  <div class="wrap">
+    <h2>Memory that stays flat</h2>
+    <p class="intro">A device keeps connections open for a long time: dashboards, sensors that poll, a technician's browser left open. simoom holds an idle connection in about half a kilobyte, because it runs one event loop per CPU core instead of a thread per connection.</p>
+    <div class="two">
+      <div class="pane">
+        <h3>Measured</h3>
+        <ul>
+          <li>Idle server: 1,018 KB of PSS (plain), 1,360 KB with TLS.</li>
+          <li>100,000 idle connections: 520–533 bytes each, level with nginx (532 B) on the same droplet.</li>
+          <li>1,000 idle connections: 2.7 MB in total, against 7.7 MB for Cameleer's old thread-per-connection server on the same machine.</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>Bounded by default</h3>
+        <ul>
+          <li>Every limit has a default: head and body size, timeouts, minimum body rate, write deadline, connections per IP.</li>
+          <li>Guards against slow clients such as slowloris, and against reconnect storms.</li>
+          <li>Memory is returned after bursts (the <code>idle-trim</code> feature).</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">Sources: <a href="../../benchmarks/#original">against the original server</a> and <a href="../../benchmarks/">the benchmarks</a>. Limits: <a href="../../docs/guides/limits-and-security.html">limits and security</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="code">
+  <div class="wrap">
+    <h2>A status API and live readings</h2>
+    <p class="intro">A router answers fast requests on the loop thread. Server-sent events push readings to a browser from any thread, with no async code.</p>
+    <pre class="cmd">use simoom::{Outcome, Reply, Request, Router};
+use std::time::Duration;
+
+let router = Router::new()
+    .get("/health", |_: &amp;mut Request&lt;'_&gt;, r: Reply&lt;'_&gt;| r.body_static(b"ok"))
+    .get("/events", |_: &amp;mut Request&lt;'_&gt;, r: Reply&lt;'_&gt;| -&gt; Outcome {
+        let mut sink = r.sse();
+        std::thread::spawn(move || {
+            for i in 0..3 {
+                if sink.send_event(&amp;format!("tick {i}")).is_err() { return; }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            sink.finish();
+        });
+        Outcome::Done
+    });</pre>
+    <p class="note">More in <a href="../../docs/guides/routing.html">routing</a> and <a href="../../docs/guides/streaming-and-sse.html">streaming and server-sent events</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="limits">
+  <div class="wrap">
+    <h2>What has not been measured yet</h2>
+    <div class="two">
+      <div class="pane">
+        <h3>ARM</h3>
+        <p>The ARM SIMD and crypto code paths compile, but they are compile-checked only. The test suite runs on x86-64 Windows and Linux, and every benchmark ran on x86-64. Reports from Raspberry Pi and other ARM boards are welcome.</p>
+      </div>
+      <div class="pane">
+        <h3>Not a microcontroller library</h3>
+        <p>simoom is std-only, not <code>no_std</code>: it needs an operating system (Linux, Windows or macOS). It fits embedded Linux, not bare-metal firmware.</p>
+      </div>
+    </div>
+    <p class="note">Need the integration side too (MQTT, store and forward, syslog)? Cameleer, which uses simoom as its HTTP engine, has <a href="../../../use-cases/mqtt-iot-edge-gateway/">MQTT edge gateway routes</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec faq" id="faq">
+  <div class="wrap">
+    <h2>Common questions</h2>
+    <details><summary>Can simoom run on a Raspberry Pi?</summary><p>It is built for small Linux devices, and its ARM code paths compile. They are compile-checked only so far: the tests run on x86-64 and the benchmarks ran on x86-64. Reports from ARM hardware are welcome.</p></details>
+    <details><summary>Does it work without an operating system (no_std)?</summary><p>No. simoom is std-only, not no_std. It uses the Rust standard library and needs Linux, Windows or macOS. It fits embedded Linux, not bare-metal microcontrollers.</p></details>
+    <details><summary>How small can the HTTP server be?</summary><p>An HTTP/1.1-only build adds 214,568 bytes to a stripped x86-64 Linux binary. Turn off the default features and keep only http1.</p></details>
+    <details><summary>Do I need OpenSSL or a C compiler for TLS on the device?</summary><p>No. simoom has its own TLS 1.3 written in Rust with only the standard library, so a cross-compile needs the Rust toolchain and nothing else.</p></details>
+    <details><summary>How much memory does it use?</summary><p>About 1 MB of PSS when idle, and 520 to 533 bytes per idle connection with 100,000 open, level with nginx on the same machine.</p></details>
+  </div>
+</section>
+
+<section class="c-sec" id="start">
+  <div class="wrap">
+    <h2>Try it on your device</h2>
+    <p class="intro">Build the HTTP/1.1-only server for your target and check its size and memory there.</p>
+    <pre class="cmd">cargo add simoom --no-default-features --features http1
+cargo build --release
+ls -l target/release/</pre>
+    <div class="cta">
+      <a class="btn primary" href="../../docs/guides/getting-started.html">Getting started</a>
+      <a class="btn" href="../../docs/guides/features-and-size.html">Features and size</a>
+      <a class="btn" href="../serverless-cold-start/">Serverless functions</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. AWS Lambda, Raspberry Pi and other product names are trademarks of their owners.</p>
+    </div>
+    <div>
+      <h4>Use cases</h4>
+      <ul>
+        <li><a href="../../use-cases/">All use cases</a></li>
+        <li><a href="../../use-cases/serverless-cold-start/">Serverless functions</a></li>
+        <li><a href="../../use-cases/edge-iot-http-server/">Edge and IoT devices</a></li>
+        <li><a href="../../use-cases/http3-server/">HTTP/3 in Rust</a></li>
+        <li><a href="../../compare/">Compare</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../../docs/">Documentation</a></li>
+        <li><a href="../../docs/guides/getting-started.html">Getting started</a></li>
+        <li><a href="../../benchmarks/">Benchmarks</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="../../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script>addEventListener('scroll',function(){document.getElementById('top').classList.toggle('scrolled',scrollY>8)},{passive:true})</script>
+</body>
+</html>

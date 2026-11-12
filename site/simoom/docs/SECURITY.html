@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security | simoom</title>
+<meta name="description" content="This page covers simoom&#x27;s security model, its limits and defaults, what was tested and with">
+<link rel="canonical" href="https://cameleer.ing/simoom/docs/SECURITY.html">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="Security">
+<meta property="og:description" content="This page covers simoom&#x27;s security model, its limits and defaults, what was tested and with">
+<meta property="og:url" content="https://cameleer.ing/simoom/docs/SECURITY.html">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../llms.txt" title="LLM-readable summary">
+<link rel="alternate" type="text/markdown" href="SECURITY.md" title="Markdown source">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../assets/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "Security", "description": "This page covers simoom's security model, its limits and defaults, what was tested and with", "url": "https://cameleer.ing/simoom/docs/SECURITY.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-12"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 2, "name": "Security", "item": "https://cameleer.ing/simoom/docs/SECURITY.html"}]}</script>
+</head>
+<body class="docs">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top scrolled" id="top">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="simoom home">
+      <img src="../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
+      simoom
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="index.html">Docs</a>
+      <a href="guides/index.html">Guides</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../benchmarks/">Benchmarks</a>
+      <a href="../compare/">Compare</a>
+      <a href="../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+<div class="docs-layout">
+  <aside class="sidebar">
+    <details class="navbox" open>
+      <summary>Browse the docs</summary>
+      <nav aria-label="Documentation">
+<ul class="nav-top">
+<li><a href="index.html">Docs home</a></li>
+</ul>
+<details class="nav-group"><summary>Guides <span class="n">15</span></summary><ul><li><a href="guides/index.html">All guides</a></li><li><a href="guides/getting-started.html">Getting started with simoom</a></li><li><a href="guides/services-and-replies.html">How do I read requests and send responses in simoom?</a></li><li><a href="guides/routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="guides/slow-work.html">How do I call a database or another service from a simoom handler?</a></li><li><a href="guides/streaming-and-sse.html">How do I stream bodies and send server-sent events with simoom?</a></li><li><a href="guides/websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="guides/tls.html">How do I serve HTTPS with simoom?</a></li><li><a href="guides/http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="guides/limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="guides/runtime.html">How do I configure simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="guides/client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="guides/features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="guides/sans-io-crates.html">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="guides/coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="guides/faq.html">simoom FAQ</a></li></ul></details>
+<details class="nav-group" open><summary>Project <span class="n">1</span></summary><ul><li><a href="SECURITY.html" aria-current="page">Security</a></li></ul></details>
+      </nav>
+    </details>
+    <script>if (matchMedia('(max-width: 900px)').matches) document.currentScript.previousElementSibling.open = false;</script>
+  </aside>
+  <main id="content" class="article">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="index.html">Docs</a> <span aria-hidden="true">/</span> <span>Security</span></nav>
+    <article>
+<h1 id="security">Security</h1>
+<p>This page covers simoom&#x27;s security model, its limits and defaults, what was tested and with
+what results, the known gaps, and how to report a vulnerability.</p>
+<p><em>Last hardening pass: 2026-11-07, against head <code>33ee716</code> plus the fixes listed below. Third-party
+suites: 2026-11-09, against head <code>bf24f89</code> plus bugs 16 to 22 below.</em></p>
+<h2 id="reporting-a-vulnerability">Reporting a vulnerability<a class="anchor" href="#reporting-a-vulnerability" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Please report vulnerabilities privately through <strong>GitHub security advisories</strong>:
+<a href="https://github.com/Cameleering/simoom/security/advisories/new">https://github.com/Cameleering/simoom/security/advisories/new</a>. Don&#x27;t open a public issue,
+pull request or discussion for a suspected vulnerability.</p>
+<ul>
+<li>Include the version or commit, the feature set (<code>http1</code>, <code>http2</code>, <code>tls</code>, <code>http3</code>...), the
+operating system and back end, and a reproducer: bytes on the wire are ideal.</li>
+<li>We aim to acknowledge a report within 3 working days and to agree a fix and disclosure date
+with you within 14 days. The default embargo is 90 days or the release of a fix, whichever
+comes first.</li>
+<li>Fixes ship as a patch release with a GitHub advisory (and a RustSec advisory once the crates
+are on crates.io). Reporters are credited unless they ask not to be.</li>
+<li>Hardening ideas that aren&#x27;t vulnerabilities (a stricter default, a new limit) are welcome as
+normal issues.</li>
+</ul>
+<h2 id="security-model">Security model<a class="anchor" href="#security-model" aria-hidden="true" tabindex="-1"></a></h2>
+<p>simoom is an embeddable HTTP/1.1, HTTP/2 and HTTP/3 <strong>origin server</strong> engine. It isn&#x27;t a
+reverse proxy, a forward proxy, a tunnel or a static-file server. The service (the embedding
+application) is trusted. Everything that arrives from the network is untrusted, including the
+bytes forwarded by a front proxy.</p>
+<p>What simoom guarantees to the service:</p>
+<ul>
+<li><strong>Memory safety.</strong> Every crate except <code>simoom-sys</code> is <code>#![forbid(unsafe_code)]</code>. <code>simoom-sys</code>
+holds the operating-system calls, SIMD scanning and crypto intrinsics, and every <code>unsafe</code>
+block there has a <code>SAFETY:</code> comment. There are no external crates, so there is no third-party
+code in the dependency tree.</li>
+<li><strong>Strict parsing</strong> per RFC 9110, 9112, 9113, 7541, 9114 and 9204. Any message whose framing
+is ambiguous is refused, and the connection is closed after a framing error, so request
+boundaries can&#x27;t be shifted (no request smuggling).</li>
+<li><strong>Bounded resources.</strong> Every per-connection and per-stream structure has a limit, and
+exceeding it gives a specific status code or a connection close plus a counter in
+<code>ServerHandle::stats()</code>.</li>
+<li><strong>Constant-time crypto.</strong> TLS 1.3 only, with hardware AES-GCM or a bitsliced fallback, and
+<code>ct_eq</code> for every secret comparison. Certificate verification can&#x27;t be turned off, and 0-RTT
+is off.</li>
+</ul>
+<h3 id="http11-framing-decisions">HTTP/1.1 framing decisions<a class="anchor" href="#http11-framing-decisions" aria-hidden="true" tabindex="-1"></a></h3>
+<ul>
+<li>A request with both <code>Transfer-Encoding</code> and <code>Content-Length</code> is refused (400), as is any
+<code>Transfer-Encoding</code> other than a single final <code>chunked</code>. So are duplicate or differing
+<code>Content-Length</code> values and a <code>Content-Length</code> with a sign, a list, spaces or hex.</li>
+<li>Bare CR, bare LF line endings, obs-fold, NUL and other control bytes, whitespace before a
+colon, and invalid chunk sizes are refused. Chunk extensions are parsed to the grammar,
+including BWS before <code>;</code>.</li>
+<li><code>Expect: 100-continue</code> follows RFC 9110 §10.1.1, and any other expectation gets 417. An
+<code>Upgrade: h2c</code> that carries a body is ignored (served as HTTP/1.1).</li>
+<li><strong>CONNECT</strong> is answered by the service, and then the connection is closed. simoom is not a
+tunnel, and a front proxy that sees a 2xx switches to tunnelling, so nothing after a CONNECT
+head is ever parsed as another request (fixed in this pass).</li>
+<li><strong>Absolute-form targets</strong> (<code>GET http://host/path</code>): the authority comes from the target and
+<code>Host</code> is ignored (RFC 9112 §3.2.2). <code>Request::host()</code> returns the target&#x27;s authority and
+<code>Request::target()</code>/<code>path()</code> return the path and query. A target with userinfo
+(<code>http://user@host/</code>) is refused (RFC 9110 §4.2.4). Both were fixed in this pass.</li>
+<li>For internal traffic, the recommended upstream protocol is HTTP/2 (h2c with prior knowledge),
+which avoids HTTP/1.1 framing ambiguity altogether.</li>
+</ul>
+<h2 id="limits-and-defaults">Limits and defaults<a class="anchor" href="#limits-and-defaults" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Every limit is a field of <code>simoom::Limits</code> (plan §7.1), and <code>crates/simoom/tests/limits.rs</code>
+checks the defaults.</p>
+<div class="table"><table>
+<thead><tr><th>limit</th><th>default</th><th>when exceeded</th></tr></thead>
+<tbody>
+<tr><td><code>max_request_line</code></td><td>8 KiB</td><td>414</td></tr>
+<tr><td><code>max_head</code></td><td>16 KiB</td><td>431</td></tr>
+<tr><td><code>max_headers</code></td><td>100</td><td>431</td></tr>
+<tr><td><code>max_header_line</code></td><td>8 KiB</td><td>431</td></tr>
+<tr><td><code>max_body</code></td><td>10 MiB (checked against <code>Content-Length</code> before any body byte is read)</td><td>413</td></tr>
+<tr><td><code>body_buffer</code></td><td>64 KiB (larger bodies stream with backpressure)</td><td>—</td></tr>
+<tr><td><code>head_timeout</code></td><td>10 s for the whole head (slowloris); also the TLS handshake deadline</td><td>close</td></tr>
+<tr><td><code>keep_alive_timeout</code></td><td>15 s</td><td>close</td></tr>
+<tr><td><code>min_body_rate</code> / <code>body_rate_grace</code></td><td>1 KiB/s after 5 s (slow POST)</td><td>close</td></tr>
+<tr><td><code>write_timeout</code></td><td>30 s without write progress (slow read)</td><td>close</td></tr>
+<tr><td><code>max_requests_per_connection</code></td><td>unlimited</td><td><code>connection: close</code></td></tr>
+<tr><td><code>max_connections</code> / <code>max_connections_per_loop</code></td><td>1 Mi / 1 Mi</td><td>accept and close, <code>rejected</code></td></tr>
+<tr><td><code>max_connections_per_ip</code></td><td>off (0); new in this pass</td><td>accept and close, <code>rejected</code></td></tr>
+<tr><td><code>max_concurrent_streams</code> (HTTP/2, HTTP/3)</td><td>100 streams with handler work running</td><td>REFUSED_STREAM</td></tr>
+<tr><td><code>max_header_list</code> (HTTP/2, HTTP/3)</td><td>16 KiB, CONTINUATION included</td><td>431; an encoded block over twice the limit gives GOAWAY</td></tr>
+<tr><td><code>header_table_size</code> (HPACK, QPACK)</td><td>4096</td><td>COMPRESSION_ERROR</td></tr>
+<tr><td><code>stream_buffer</code></td><td>64 KiB of streamed response output pending</td><td>writers wait (<code>WouldBlock</code>)</td></tr>
+<tr><td><code>max_ws_message</code></td><td>1 MiB</td><td>close 1009</td></tr>
+<tr><td><code>inline_budget</code></td><td>1 ms; a call over it on the wall clock makes its route suspect, and the route&#x27;s next calls are timed with the thread&#x27;s CPU clock: a stall is a call over the budget in CPU time, or one that blocked</td><td>stall counted, logged once per route</td></tr>
+<tr><td><code>stalls_before_offload</code> / <code>stall_window</code></td><td>5 stalls within 1 s</td><td>the route (alone) moves to the offload pool</td></tr>
+<tr><td><code>stall_recovery</code></td><td>64 consecutive fast calls on the pool (twice as many after each further move)</td><td>the route comes back inline</td></tr>
+<tr><td><code>shed_lag</code></td><td>off; measured 2026-11-09: 1 ms shed falsely at 50% load and no value from 0.5 to 5 ms improved goodput or p99 under 120-150% overload, so it stays opt-in</td><td>fast <code>503</code> with <code>retry-after</code> for new requests and streams</td></tr>
+<tr><td><code>h2_frame_budgets</code> (HTTP/2)</td><td>the budgets below (<code>simoom::FrameBudgets</code>)</td><td>GOAWAY(ENHANCE_YOUR_CALM)</td></tr>
+<tr><td><code>offload_queue</code></td><td>4096 jobs (CoDel 5 ms / 100 ms)</td><td>503</td></tr>
+</tbody></table></div>
+<p>HTTP/2 frame budgets (<code>Limits::h2_frame_budgets</code>, per 10 s sliding window per connection; GOAWAY
+ENHANCE_YOUR_CALM beyond them):</p>
+<ul>
+<li>RST_STREAM received 200 and caused 200 (Rapid Reset, MadeYouReset);</li>
+<li>PING 100;</li>
+<li>SETTINGS 100;</li>
+<li>empty frames 200;</li>
+<li>PRIORITY;</li>
+<li>WINDOW_UPDATE frames under 1 KiB;</li>
+<li>at most <code>max_continuation_frames</code> CONTINUATION frames per block.</li>
+</ul>
+<p>Each is configurable (<code>u32::MAX</code> turns one off).</p>
+<p>TLS: TLS 1.3 only. Groups X25519 and P-256. Suites AES-128-GCM, AES-256-GCM and
+ChaCha20-Poly1305. More than 32 records in a row that carry no application data (empty
+records, warning alerts, KeyUpdates) is fatal. Rejected 0-RTT data is skipped only up to
+64 KiB.</p>
+<p>QUIC:</p>
+<ul>
+<li>Retry is used once the handshaking connections pass a threshold, and connections are capped
+in total.</li>
+<li>The 3x amplification limit is enforced.</li>
+<li>The connection-ID retirement queue and the out-of-order CRYPTO and STREAM buffers are all
+bounded.</li>
+<li>Packet numbers are skipped at random to detect optimistic ACKs.</li>
+</ul>
+<h2 id="what-was-tested-2026-11-07">What was tested (2026-11-07)<a class="anchor" href="#what-was-tested-2026-11-07" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Third-party code was limited to tools already on the machine and Ubuntu 24.04 archive
+packages. The archive packages were extracted without root from <code>apt-get download</code>: nginx
+1.24.0, haproxy 2.8.30, nghttp2-client 1.59.0 (<code>nghttp</code>, <code>h2load</code>) and gnutls-bin 3.8.3.</p>
+<div class="table"><table>
+<thead><tr><th>check</th><th>tool / version</th><th>result</th></tr></thead>
+<tbody>
+<tr><td>HTTP/2 conformance, h2spec&#x27;s server list written from the RFCs (generic, RFC 9113 §3.5, 4, 5, 6, 8, RFC 7541)</td><td><code>crates/simoom/tests/h2_live.rs</code></td><td><strong>120/120 h2c, 120/120 h2 over TLS</strong>: in process (part of <code>cargo test</code>) and against a live <code>conformance_server</code></td></tr>
+<tr><td>HTTP/2 interop and load</td><td>nghttp, h2load (nghttp2 1.59.0)</td><td><strong>14/14</strong> (h2c prior knowledge, <code>Upgrade: h2c</code>, h2 ALPN, 1 MB bodies, 100 concurrent streams, <code>-m 1000</code> over a 100-stream limit, 100k requests over h2c, 50k over h2, 1 MB × 200, HTTP/1.1), 0 failed requests</td></tr>
+<tr><td>Request-smuggling differential, simoom behind a proxy</td><td><code>scripts/desync/desync.py</code>, nginx 1.24.0 and haproxy 2.8.30</td><td><strong>165 streams, 0 desyncs</strong> after the fixes below</td></tr>
+<tr><td>Accept/reject compared with nginx and haproxy as origins</td><td>same</td><td>simoom accepted 49, all three refused 75, simoom stricter than one of them in 41, <strong>simoom accepted 0 that both refused</strong></td></tr>
+<tr><td>TLS interop</td><td>openssl s_client 3.0.13 (WSL) and 3.5.9 (Windows)</td><td><strong>28/28 each</strong></td></tr>
+<tr><td>TLS interop</td><td>curl 8.5.0, python3 3.12 <code>ssl</code> (OpenSSL 3.0.13), gnutls-cli 3.8.3</td><td><strong>31/31</strong></td></tr>
+<tr><td>TLS interop</td><td>curl 8.23.0 Schannel (Windows)</td><td><strong>3/3</strong></td></tr>
+<tr><td>TLS hand-written checks</td><td><code>crates/simoom-tls/tests/hardening.rs</code>, <code>crates/simoom/tests/tls_hardening.rs</code>, unit tests in <code>tls/conn.rs</code></td><td>all pass</td></tr>
+<tr><td>QUIC adversarial peers</td><td><code>crates/simoom-quic/tests/adversarial.rs</code></td><td><strong>30/30</strong></td></tr>
+<tr><td>Limits audit</td><td><code>crates/simoom/tests/limits.rs</code></td><td>11/11; every <code>Limits</code> field is tested in the facade</td></tr>
+<tr><td>Mutation fuzzing (std-only, seeded)</td><td><code>tests/fuzz.rs</code> of http1, h2/hpack, h3, qpack, quic, tls; release, 4 threads each</td><td><strong>2 h 40 min</strong>, 10 rounds × 6 harnesses, a fresh seed per round: h2 2×10⁸, h3 1.5×10⁸, http1 5×10⁸, qpack 3×10⁸, quic 2×10⁹ iterations, tls ×4000 base. Findings: 1 engine bug (QUIC ACK-only spin) and 1 harness bug (http1 test held every input in memory), both fixed; http1 then re-run 3 × 5×10⁷ clean</td></tr>
+<tr><td>Coverage-guided fuzzing (std-only SanitizerCoverage)</td><td><code>simoom_sys::sancov</code> + <code>coverage_guided</code> in <code>simoom-http1/tests/fuzz.rs</code> (Linux)</td><td>see &quot;Coverage-guided fuzzing&quot; below</td></tr>
+</tbody></table></div>
+<p>nghttp notes, both by design:</p>
+<ul>
+<li>A 1 MB POST without <code>Content-Length</code> streams through a <code>BodySource</code>. A service that answers
+without reading it gets an early 200 and an RST_STREAM(NO_ERROR), as RFC 9113 §8.1 allows.</li>
+<li><code>nghttp -w 1 -W 1</code> (2-byte windows) trips the small WINDOW_UPDATE budget (data dribble,
+CVE-2019-9511), so the connection gets GOAWAY ENHANCE_YOUR_CALM.</li>
+</ul>
+<p>TLS interop covered:</p>
+<ul>
+<li>the TLS 1.3 handshake with chain verification;</li>
+<li><code>-tls1_2</code> and <code>-tls1_1</code> refused with a <code>protocol_version</code> alert;</li>
+<li>bad SNI (default certificate), no SNI, no ALPN, ALPN h2 and http/1.1, and an unknown ALPN
+(<code>no_application_protocol</code>);</li>
+<li>X25519 and P-256 work. P-384, P-521, X448 and ffdhe get a clean <code>handshake_failure</code>, and
+X448 then X25519 goes through HelloRetryRequest. On OpenSSL 3.5, the X25519MLKEM768 hybrid
+falls back to X25519;</li>
+<li>all three suites;</li>
+<li>client certificates: good, rogue (<code>unknown_ca</code>), and missing (<code>certificate_required</code>);</li>
+<li>KeyUpdate both ways, PSK resumption, and 0-RTT offered and rejected.</li>
+</ul>
+<h3 id="coverage-guided-fuzzing">Coverage-guided fuzzing<a class="anchor" href="#coverage-guided-fuzzing" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Plan §7.3 option F2 is implemented and works on stable Rust on Linux. The callbacks are in
+<code>simoom-sys/src/sancov.rs</code>, behind the test-only feature <code>sancov</code>; there are no dependencies.
+LLVM&#x27;s <code>sancov-module</code> pass, run through <code>-C passes</code>, calls <code>__sanitizer_cov_trace_pc_guard</code>.
+<code>coverage_guided</code> keeps a corpus of inputs that reach new edges, using AFL-style hit-count
+buckets. Its mutator is the harness&#x27;s own byte mutations plus corpus splicing. Every input is
+checked for split invariance and against the reference RFC 9112 parser.</p>
+<ul>
+<li>First run: 171k executions per minute, 1,140 of 3,036 instrumented edges in 60 s.</li>
+<li>Longer runs: 3 seeds × 10 min, recorded under &quot;Results&quot; below.</li>
+<li>Windows: the MSVC back end refuses the instrumented COMDATs (&quot;Associative COMDAT symbol does
+not exist&quot;), so it runs only on Linux.</li>
+<li>Not done yet: corpus minimisation, the HTTP/2, QUIC and TLS targets (they need only a driver
+like the http1 one), and persisting the corpus between runs.</li>
+</ul>
+<div class="codeblock"><div class="code-head"><span>text</span><button class="copy" type="button">Copy</button></div><pre><code class="language-text">RUSTFLAGS=&quot;-C passes=sancov-module -C llvm-args=-sanitizer-coverage-level=3 \
+  -C llvm-args=-sanitizer-coverage-trace-pc-guard&quot; SIMOOM_FUZZ_SECS=600 \
+  cargo test --release -p simoom-http1 --features sancov --test fuzz coverage_guided -- --nocapture</code></pre></div>
+<h3 id="results">Results<a class="anchor" href="#results" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Three 10-minute runs (seeds 11, 22, 33; WSL2 Ubuntu 24.04, release, one thread): 1.37M, 1.67M
+and 1.81M executions, corpora of 1,858 to 1,895 inputs, <strong>1,220 to 1,232 of 3,036 instrumented
+edges</strong> (the remainder is mostly response parsing, WebSocket and the serializer, which this
+driver doesn&#x27;t exercise). No split-invariance or differential failure, no panic. Coverage
+plateaus after about 5 minutes, so longer runs need new targets more than more time.</p>
+<h2 id="third-party-suites-2026-11-09">Third-party suites (2026-11-09)<a class="anchor" href="#third-party-suites-2026-11-09" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Approved by the owner on 2026-11-08 (&quot;Yes, allow them&quot;). Every suite ran in WSL2 (Ubuntu 24.04)
+or in Docker (Docker Desktop 29.9.2 through the WSL integration), from scratch directories
+under <code>~/simoom-sec-tools/</code> outside the repository, at pinned versions. None is a dependency of
+any simoom crate. The simoom servers were built from the working tree in pinned images:
+<code>rust:1.99.1-slim-trixie@sha256:7eab7ce1…3cd5</code> for the build, <code>debian:trixie-slim@sha256:a72b4433…b6b2</code>
+(HTTP Garden) and the runner&#x27;s endpoint image (QUIC) for the run.</p>
+<div class="table"><table>
+<thead><tr><th>suite</th><th>version</th><th>target</th><th>result</th></tr></thead>
+<tbody>
+<tr><td>h2spec</td><td>2.6.0 (release tarball, sha256 <code>157ee0de…9318</code>)</td><td><code>conformance_server</code>, h2c on the shared HTTP/1.1 + h2c port</td><td><strong>146/146 in 30 consecutive runs</strong> on the final tree (was 145/146: §3.5/2, fixed as bug 16; then generic §3.8/1 flaked about 1 run in 5, fixed as bug 22; §3.8/1 alone then passed 50/50). TLS mode can&#x27;t run: h2spec offers only TLS 1.2 and simoom is TLS 1.3-only</td></tr>
+<tr><td>testssl.sh</td><td>v3.2.1 (commit <code>b6a951d4</code>)</td><td><code>conformance_server --tls-addr</code></td><td>TLS 1.3 only, no vulnerabilities found. Notes only: the certificate is from a private test CA, and it has no CRL or OCSP URI</td></tr>
+<tr><td>HTTP Garden</td><td>commit <code>b417e806c1b15e8ea0b9312f81a91fbdcbc7a83e</code></td><td><code>conformance_server --garden</code> as an origin, next to nginx, apache_httpd, h2o, hyper, gunicorn and go_stdlib; transducers haproxy, nginx_proxy, apache_httpd_proxy, h2o_proxy</td><td><strong>0 desyncs, 0 dangerous discrepancies</strong>: see below</td></tr>
+<tr><td>QUIC Interop Runner</td><td>commit <code>19016767e70789d70416442a1118ad82b5b5fc2e</code></td><td><code>interop_server</code> (server role) against the ngtcp2, quiche and quic-go clients</td><td>see the matrix below; engine bugs found and fixed: 17, 18, 20 and 21, and compatible version negotiation added (19)</td></tr>
+</tbody></table></div>
+<h3 id="h2spec">h2spec<a class="anchor" href="#h2spec" aria-hidden="true" tabindex="-1"></a></h3>
+<p>h2spec §3.5/2 sends <code>INVALID CONNECTION PREFACE\r\n\r\n</code> and expects a connection close
+(GOAWAY allowed). On the shared HTTP/1.1 + h2c port simoom read it as an HTTP/1 request and
+answered <code>400</code>, which h2spec reads as a malformed frame. Now (bug 16), on an h2c-enabled
+listener, the first bytes of a connection go to the HTTP/2 codec, which answers SETTINGS and
+GOAWAY(PROTOCOL_ERROR) and closes (RFC 9113 §3.4), when either:</p>
+<ul>
+<li>they start with the preface&#x27;s request line <code>PRI * HTTP/2.0</code> but the rest of the preface is
+wrong; or</li>
+<li>the first request line fails with an invalid version and its last word has no <code>HT</code> prefix and
+no <code>/</code>: nothing in it is HTTP/1 in any form.</li>
+</ul>
+<p>HTTP/1 clients with a damaged version (<code>HTTP/1.x</code>, <code>HT?P/1.1</code>, <code>XTTP/1.1</code>, HTTP/0.9&#x27;s <code>GET /</code>)
+still get a 400, and later requests on a connection are never treated as a preface. The HTTP
+Garden&#x27;s mutator found the first, too broad version of the rule (any line without <code>HTTP/</code>), which
+answered <code>HT\xbcP/1.1</code> with GOAWAY, and the narrower rule replaced it.</p>
+<p>Repeated runs then showed generic §3.8/1 (&quot;Sends a GOAWAY frame&quot;, GOAWAY then PING) failing
+with &quot;connection reset by peer&quot; in about 1 run in 5: the server closed as soon as it read the
+peer&#x27;s GOAWAY, and when the PING came in a later read it hit a closed socket. Fixed as bug 22
+(the server answers a GOAWAY with its own graceful shutdown); results after it are in the
+matrix section below.</p>
+<h3 id="http-garden">HTTP Garden<a class="anchor" href="#http-garden" aria-hidden="true" tabindex="-1"></a></h3>
+<p>simoom joined the Garden as an origin (<code>conformance_server --garden</code> answers with the Garden&#x27;s
+echo format: base64 JSON of the method, version, target, headers and body; image
+<code>images/simoom/Dockerfile</code> in the Garden checkout). Its probed quirk is <code>allows-http-2: true</code>.
+The Garden removed its fuzzing driver upstream (commit <code>5e260b6</code>), so a small driver
+(<code>tools/simoom_fuzz.py</code>, adapted from the removed <code>fuzz.py</code>) runs the Garden&#x27;s own mutator
+(<code>mutations.py</code>) and classifier (<code>diff.categorize_discrepancy</code>), fans every mutated stream out to
+all origins, and replays every kept result through each transducer.</p>
+<ul>
+<li><strong>Differential fuzzing:</strong> two complete runs of 40 minutes (seed 2: 16,354 mutated streams, 42
+kept results; seed 3: 14,993 streams, 53 results), after a shorter first run that a WSL
+restart cut off (13 results). Every kept result was then replayed 3 times through each
+transducer, comparing the proxy&#x27;s own view of what it forwarded with simoom&#x27;s reading
+(<code>tools/simoom_recheck.py</code>): <strong>709 forwarded streams (321 and 388), 0 flagged</strong>. Results that involve simoom, triaged
+by hand:
+<ul>
+<li><strong>simoom stricter</strong> (simoom refuses or closes, another origin accepts): bare LF in the head
+or in chunked framing, whitespace or a high byte in <code>Host</code>, <code>Host</code> with a bad port, a
+duplicate <code>Transfer-Encoding: chunked</code>, <code>Content-Length</code> with <code>Transfer-Encoding</code>, a non-ASCII
+byte in the target, <code>Connection: close</code> plus <code>keep-alive</code> with a body and no length. Benign:
+simoom answers 400 and closes, so a proxy&#x27;s next request goes on a new connection.</li>
+<li><strong>simoom accepts with the same boundaries but a different header set</strong> (13 in run 2, 20 in
+run 3): apache,
+gunicorn and nginx drop or rewrite headers with <code>_</code> or odd names (CGI environments), nginx adds
+empty <code>content-length</code>/<code>content-type</code>, apache&#x27;s CGI echo loses chunked bodies split across
+reads. Every one of these is a difference between the other origins and simoom&#x27;s reading,
+which matches the majority. Benign.</li>
+<li><strong>Stream discrepancies after a transducer</strong> (run 3: a payload split into pieces, sent
+through apache_httpd_proxy or nginx_proxy): another origin returned nothing within the
+Garden&#x27;s 50 ms origin timeout while simoom answered, or the proxy forwarded nothing on a
+retry. None reproduced in the replay above. Timing, benign.</li>
+<li><strong>Garbage first lines</strong> (<code>os t: whatever</code>) get GOAWAY instead of 400 because of bug 16; the
+Garden counts that as no response, which it treats as agreeing with a rejection. Benign.</li>
+<li><strong>No result where simoom read a different number of requests, a different body, or a
+different method or target than a proxy forwarded.</strong></li>
+</ul></li>
+<li><strong>Curated smuggling vectors</strong> (<code>tools/simoom_curated.py</code>, 39 streams: CL.TE, TE.CL, TE
+obfuscations, duplicate or listed <code>Content-Length</code>, chunk-size overflow and <code>0x</code>, chunk
+extensions with LF or quoted CRLF, trailers that smuggle <code>Content-Length</code>, bare CR and LF, NUL,
+HTTP/1.0 with TE, <code>GET</code> with a body, <code>Expect</code>, <code>CONNECT</code>, <code>Upgrade: h2c</code> with a body,
+absolute-form, pipelining). Each was sent through haproxy, nginx_proxy, apache_httpd_proxy and
+h2o_proxy, and the proxy&#x27;s own view of what it forwarded was compared with simoom&#x27;s reading of
+the forwarded bytes: <strong>0 of 156 proxy paths flagged</strong>. simoom refused 28 of the 39 directly.</li>
+</ul>
+<h3 id="quic-interop-runner">QUIC Interop Runner<a class="anchor" href="#quic-interop-runner" aria-hidden="true" tabindex="-1"></a></h3>
+<p><code>crates/simoom/examples/interop_server.rs</code> follows the runner&#x27;s endpoint contract: <code>TESTCASE</code>
+selects the case (unknown cases exit 127), files come from <code>/www</code>, the key and chain from
+<code>/certs/priv.key</code> and <code>/certs/cert.pem</code>, port 443 on <code>[::]</code> (IPv4 and IPv6). <code>http3</code> goes through
+the <code>simoom</code> facade (<code>Server::listen_quic</code>, the production HTTP/3 path); every other case speaks
+<code>hq-interop</code> over a <code>simoom_quic::Endpoint</code> on a std UDP socket. The image builds it on the
+runner&#x27;s endpoint image (<code>martenseemann/quic-network-simulator-endpoint@sha256:3b2b9e6f…71a</code>).
+Clients, pinned by digest: ngtcp2 <code>ghcr.io/ngtcp2/ngtcp2-interop@sha256:4333a236…37e0</code>, quiche
+<code>cloudflare/quiche-qns@sha256:d8480e44…3f63df</code>, quic-go
+<code>martenseemann/quic-go-interop@sha256:fc8fc56c…4ea4e</code>; simulator
+<code>martenseemann/quic-network-simulator@sha256:c23d82a5…b6c9</code>. The runner itself ran in a
+container with Python 3.12.12 and tshark 4.6.9, one runner call per case, a case retried only
+when tshark crashed.</p>
+<p>Final full run (on the final tree, after bugs 17 to 21; ✓ passed, ✕ failed, – the client doesn&#x27;t support the case
+or the server exits 127):</p>
+<div class="table"><table>
+<thead><tr><th>case</th><th>ngtcp2</th><th>quiche</th><th>quic-go</th></tr></thead>
+<tbody>
+<tr><td>handshake</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>transfer</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>longrtt</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>chacha20</td><td>✓</td><td>–</td><td>✓</td></tr>
+<tr><td>multiplexing</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>retry</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>resumption</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>zerortt</td><td>✕ (0-RTT refused by design)</td><td>✕ (same)</td><td>✕ (same)</td></tr>
+<tr><td>http3</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>blackhole</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>keyupdate</td><td>✓</td><td>–</td><td>✓</td></tr>
+<tr><td>ecn</td><td>✕ (no ECN)</td><td>–</td><td>–</td></tr>
+<tr><td>amplificationlimit</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>handshakeloss</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>transferloss</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>handshakecorruption</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>transfercorruption</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>ipv6</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>v2</td><td>✓</td><td>–</td><td>–</td></tr>
+<tr><td>rebind-port</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>rebind-addr</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>connectionmigration</td><td>– (no preferred address)</td><td>–</td><td>–</td></tr>
+</tbody></table></div>
+<p><strong>Totals:</strong> 54 of the 58 supported pairs pass. The 4 failures are <code>zerortt</code> against every client
+(0-RTT is refused by design, so the client&#x27;s 0-RTT data is never accepted) and <code>ecn</code> against
+ngtcp2 (not implemented). The runner crashed in tshark on a few cases (it reads its pcaps
+through pyshark); those were run again and passed.</p>
+<p>How it got there (earlier full runs on the same day):</p>
+<ul>
+<li>The first run had <code>blackhole</code> failing (bug 17: the send buffer stuck after a blackout),
+<code>rebind-port</code> and <code>rebind-addr</code> failing against quic-go (bug 18: no PATH_CHALLENGE in the first
+packet on the new path) and <code>v2</code> failing against ngtcp2 (bug 19).</li>
+<li>quiche <code>multiplexing</code> failed with &quot;Too many open files&quot; in the quiche client: it keeps one
+file open per request and Docker Desktop&#x27;s default soft limit is 1024 descriptors. An
+environment limit, not a simoom bug: the runner&#x27;s compose file now gives the endpoints a
+<code>nofile</code> limit of 65536, and it passes 3 out of 3.</li>
+<li><code>handshakeloss</code> and <code>handshakecorruption</code> failed now and then (quic-go: &quot;handshake did not
+complete in time&quot;; quiche: one of the 50 connections timed out). The traces showed the server
+resending a lost flight only on its own PTO, which heavy handshake loss had stretched to
+seconds. Bug 20 resends it as soon as the client&#x27;s ClientHello comes again.</li>
+<li><code>blackhole</code> against quic-go once ran past the runner&#x27;s time limit before bug 20 and the final
+image; it passes in the final run and in the reruns below.</li>
+</ul>
+<p>Reruns of the cases that had been intermittent, on the final image, 3 times each: quic-go
+<code>handshakeloss</code> 3/3, quic-go <code>handshakecorruption</code> 3/3, quic-go <code>blackhole</code> 3/3, quiche
+<code>handshakeloss</code> 3/3; quiche <code>multiplexing</code> 3/3 with the raised descriptor limit; ngtcp2
+<code>handshakeloss</code> 3/3 (on the image before bug 21).</p>
+<h2 id="bugs-found-and-fixed-in-this-pass">Bugs found and fixed in this pass<a class="anchor" href="#bugs-found-and-fixed-in-this-pass" aria-hidden="true" tabindex="-1"></a></h2>
+<div class="table"><table>
+<thead><tr><th>#</th><th>area</th><th>bug</th><th>fix</th><th>regression test</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>HTTP/1.1</td><td>After a 2xx to <code>CONNECT</code>, simoom kept parsing the connection as HTTP. A front proxy (haproxy) switches to tunnelling, so tunnelled bytes would run as requests the proxy never saw (desync).</td><td><code>crates/simoom/src/h1.rs</code>: close after the CONNECT response</td><td><code>tests/desync.rs</code> <code>connect_closes_the_connection_after_its_response</code></td></tr>
+<tr><td>2</td><td>HTTP/1.1</td><td>Absolute-form targets: the service got the raw URI as the path and the <code>Host</code> header as the host, so a request addressed to <code>y</code> looked like one for <code>x</code> (RFC 9112 §3.2.2 says the target wins)</td><td><code>h1.rs</code> <code>split_absolute</code>: authority from the target, target becomes path and query</td><td><code>absolute_form_uses_the_target_authority</code></td></tr>
+<tr><td>3</td><td>HTTP/1.1</td><td>Userinfo in absolute-form (<code>http://trusted@evil/</code>) was accepted (RFC 9110 §4.2.4: treat as an error)</td><td><code>crates/simoom-http1/src/parse.rs</code> <code>valid_absolute</code>, and the reference parser</td><td><code>absolute_form_with_userinfo_is_refused</code>; <code>simoom-http1/tests/request.rs</code> <code>target_rules</code></td></tr>
+<tr><td>4</td><td>HTTP/2</td><td>A header block larger than <code>max_header_list</code> but otherwise sane closed the whole connection with GOAWAY, instead of answering that stream with 431 (plan §7.1)</td><td><code>crates/simoom-h2/src/conn.rs</code> <code>block_cap</code> (twice the list limit; beyond that, still GOAWAY)</td><td><code>simoom-h2/tests/dos.rs</code> <code>header_block_over_the_list_limit_gets_431_not_goaway</code>; <code>tests/limits.rs</code> <code>header_list_limit_is_advertised_and_enforced</code></td></tr>
+<tr><td>5</td><td>limits</td><td>No per-IP connection cap (plan §7.1, optional)</td><td><code>Limits::max_connections_per_ip</code> (<code>limits.rs</code>, <code>server.rs</code> <code>IpSlot</code>, <code>conn.rs</code>)</td><td><code>tests/limits.rs</code> <code>per_ip_connection_cap</code></td></tr>
+<tr><td>6</td><td>QUIC</td><td>ACK-only packet spin: with no RTT sample and a pending PMTU probe, <code>poll_transmit</code> sent ACK-only packets forever, without limit (found by fuzzing, seed 7000098)</td><td><code>crates/simoom-quic/src/connection.rs</code> (<code>space_has_data</code> follows the probe writer; ACK-only packets only when an ACK is due)</td><td><code>connection::tests::unbuildable_mtu_probe_does_not_spin_ack_only_packets</code></td></tr>
+<tr><td>7</td><td>QUIC</td><td>Out-of-order STREAM fragments had no bound (one allocation per byte of window)</td><td><code>src/stream.rs</code>: merge adjacent chunks; more than 1024 gaps gives PROTOCOL_VIOLATION</td><td><code>fragmented_stream_data_cannot_explode_memory</code>, <code>too_many_out_of_order_gaps_is_an_error</code></td></tr>
+<tr><td>8</td><td>QUIC</td><td>No defence against optimistic ACKs</td><td><code>connection.rs</code>, <code>recovery.rs</code>: random skipped packet numbers; an ACK of one is PROTOCOL_VIOLATION</td><td><code>optimistic_ack_of_skipped_packet_numbers_is_detected</code></td></tr>
+<tr><td>9</td><td>QUIC</td><td>Tiny out-of-order CRYPTO chunks held far more memory than the buffer size</td><td><code>connection.rs</code>: per-chunk overhead charged</td><td><code>tiny_out_of_order_crypto_chunks_are_bounded</code></td></tr>
+<tr><td>10</td><td>QUIC</td><td>The RETIRE_CONNECTION_ID queue grew without limit under <code>retire_prior_to</code> churn</td><td><code>connection.rs</code> <code>queue_retire</code>: deduplicated, capped, then CONNECTION_ID_LIMIT_ERROR</td><td><code>retire_prior_to_churn_cannot_queue_unbounded_retirements</code></td></tr>
+<tr><td>11</td><td>QUIC</td><td>Retry never triggered under a spoofed flood of bad ClientHellos, because failed handshakes stopped counting</td><td><code>src/endpoint.rs</code></td><td><code>initial_flood_from_spoofed_addresses_is_answered_with_retry_and_bounded</code></td></tr>
+<tr><td>12</td><td>TLS</td><td>A client whose certificate was refused saw <code>bad_record_mac</code> instead of the alert (the server wrote the alert under the wrong key)</td><td><code>crates/simoom-tls/src/tls/conn.rs</code></td><td><code>simoom-tls/tests/hardening.rs</code> <code>client_certificate_with_a_bad_chain_is_refused_with_a_readable_alert</code></td></tr>
+<tr><td>13</td><td>TLS</td><td>No bound on records that deliver nothing (empty records, warning alerts, KeyUpdate floods)</td><td><code>tls/conn.rs</code> <code>idle_record</code> (32 in a row)</td><td><code>empty_record_flood_is_bounded</code>, <code>warning_alert_flood_is_bounded</code>, <code>key_update_flood_is_bounded</code></td></tr>
+<tr><td>14</td><td>TLS</td><td>The client ignored the downgrade sentinels (it refused with <code>protocol_version</code> rather than <code>illegal_parameter</code>)</td><td><code>tls/client.rs</code></td><td><code>client_rejects_the_downgrade_sentinels</code></td></tr>
+<tr><td>15</td><td>fuzz harness</td><td><code>simd_and_scalar_agree_on_fuzz_inputs</code> collected every input, so a long run aborted out of memory</td><td><code>simoom-http1/tests/fuzz.rs</code>: compare in batches</td><td>(the harness itself)</td></tr>
+<tr><td>16</td><td>HTTP/2</td><td>An invalid connection preface on the shared HTTP/1.1 + h2c port got an HTTP/1 <code>400</code> instead of GOAWAY(PROTOCOL_ERROR) and a close (RFC 9113 §3.4; h2spec §3.5/2)</td><td><code>crates/simoom-http1/src/h2c.rs</code> <code>Preface::Invalid</code>; <code>crates/simoom/src/h1.rs</code> (first request only, <code>looks_like_http</code>)</td><td><code>simoom/tests/http2.rs</code> <code>invalid_preface_gets_goaway_protocol_error_and_close</code>; <code>simoom-http1/tests/response.rs</code> <code>h2_preface_detection</code></td></tr>
+<tr><td>17</td><td>QUIC</td><td>A stalled transfer after packet loss: an acknowledgement of bytes already released (the original packet and its retransmission both acknowledged) was recorded below the send buffer&#x27;s base, stayed first in the acknowledged set forever, and blocked every later release, so the 1 MiB send buffer stayed full and the stream never sent again (found by the interop runner&#x27;s <code>blackhole</code> case)</td><td><code>crates/simoom-quic/src/stream.rs</code> <code>on_stream_acked</code>: record only the part above <code>base</code></td><td><code>simoom-quic/tests/transport.rs</code> <code>transfer_survives_repeated_blackouts</code>; <code>stream::tests::send_side_credit_and_limits</code></td></tr>
+<tr><td>18</td><td>QUIC</td><td>After a NAT rebinding the PATH_CHALLENGE waited for congestion window: the bytes in flight on the old path filled the reset window, so the first packet on the new path was ACK-only (interop <code>rebind-port</code>, <code>rebind-addr</code>)</td><td><code>crates/simoom-quic/src/connection.rs</code>: the challenge is written first and is not held back by congestion control</td><td><code>connection::tests::first_packet_on_a_new_path_carries_the_challenge_when_cwnd_is_full</code></td></tr>
+<tr><td>19</td><td>QUIC</td><td>No compatible version negotiation (RFC 9368): a client that started in v1 and offered v2 stayed in v1 (interop <code>v2</code>)</td><td><code>crates/simoom-quic/src/vn.rs</code> (new), <code>params.rs</code> (<code>version_information</code>), <code>connection.rs</code>: a server with more than one version starts TLS after the whole ClientHello, picks its preferred version from the client&#x27;s list and switches its Initial keys; a client follows a server Initial in another compatible version</td><td><code>simoom-quic/tests/tls.rs</code> <code>compatible_version_negotiation_v1_to_v2</code> (with Retry and with loss); <code>vn::tests</code>; <code>params::tests</code></td></tr>
+<tr><td>20</td><td>QUIC</td><td>Under heavy handshake loss the server waited for its own PTO, backed off to seconds by RTT samples it can&#x27;t correct in the handshake spaces, before resending a lost flight; clients gave up (interop <code>handshakeloss</code>, <code>handshakecorruption</code>, intermittent)</td><td><code>connection.rs</code> <code>on_crypto</code>, <code>resend_handshake_flight</code>: a repeated ClientHello means the client&#x27;s PTO fired, so the server queues its unacknowledged Initial and Handshake data again at once (still under the anti-amplification limit and congestion control)</td><td><code>connection::tests::duplicate_client_hello_resends_the_server_flight</code></td></tr>
+<tr><td>21</td><td>QUIC</td><td>The cap on out-of-order STREAM fragments (1024) applied per stream, so a peer could hold streams × 1024 fragments per connection</td><td><code>crates/simoom-quic/src/stream.rs</code>: <code>recv_gaps</code> counts holes over all streams; a reset or stopped stream gives its holes back</td><td><code>stream::tests::out_of_order_gap_cap_is_per_connection</code>, <code>too_many_out_of_order_gaps_is_an_error</code></td></tr>
+<tr><td>22</td><td>HTTP/2</td><td>After the peer&#x27;s GOAWAY with no streams open the server closed at once, so a frame the peer sent after its GOAWAY (h2spec generic 3.8/1 sends a PING) hit a closed socket and the peer saw a TCP reset instead of the PING ACK (h2spec flaked about 1 run in 5)</td><td><code>crates/simoom-h2/src/conn.rs</code>: a server answers the peer&#x27;s GOAWAY with its own graceful shutdown (GOAWAY, PING round trip or timeout, final GOAWAY) and closes after it</td><td><code>simoom-h2/tests/conformance.rs</code> <code>s6_8_ping_after_goaway_is_answered</code>, <code>s6_8_goaway</code></td></tr>
+</tbody></table></div>
+<p>Smuggling divergences reviewed and judged benign:</p>
+<ul>
+<li><strong>Requests simoom refuses but nginx or haproxy accept (41 streams).</strong> Each is a refusal on a
+stricter rule: bare LF, obs-fold, a <code>Transfer-Encoding</code> list, <code>HTTP/1.0</code> with
+<code>Transfer-Encoding</code>, a high byte in a field, a lowercase method, and so on. Behind a proxy that
+forwards such a request, simoom answers 400 and closes. The proxy then sends the next request
+on a new connection, so the boundaries still agree.</li>
+<li><strong>BWS before a chunk extension (<code>5 ;ext</code>).</strong> It is valid per RFC 9112 §7.1.1, and all three
+accept it the same way.</li>
+<li><strong><code>Upgrade: h2c</code> with a body.</strong> simoom serves it as HTTP/1.1, the same as the proxies.</li>
+<li><strong><code>OPTIONS *</code> and absolute-form.</strong> simoom accepts these, as RFC 9112 requires. haproxy refuses
+absolute-form whose authority differs from <code>Host</code>. That is its own policy, and safe either way
+since bug 2 was fixed.</li>
+<li><strong>0.CL with <code>Expect: 100-continue</code>.</strong> All three treat the body as a body: one request each.</li>
+</ul>
+<h2 id="known-gaps">Known gaps<a class="anchor" href="#known-gaps" aria-hidden="true" tabindex="-1"></a></h2>
+<ul>
+<li><strong>QUIC:</strong> no ECN (packets are not marked ECT and ACK frames carry no ECN counts: interop
+<code>ecn</code> fails), no preferred address and so no server-side active migration (<code>connectionmigration</code>
+unsupported), and 0-RTT is refused by design (<code>zerortt</code> fails). Handshake-space RTT samples
+can&#x27;t be corrected by the peer&#x27;s ACK delay (RFC 9002 §5.3), so heavy handshake loss inflates
+the RTT estimate and the PTO; bug 20 resends the flight when the client&#x27;s ClientHello comes
+again, but a lost server flight with a client that probes only with PING still waits for the
+server&#x27;s PTO.</li>
+<li>No external audit yet (plan §7.5). No Miri, ASan or TSan runs were part of this pass.</li>
+<li>HTTP/2 over TLS has not been run through h2spec (h2spec offers only TLS 1.2); the in-repo
+h2spec list (<code>h2_live.rs</code>) covers it.</li>
+<li>HTTP Garden ran only its HTTP/1.1 paths against simoom; its HTTP/2 fan-out (<code>h2fanout</code>) was not
+run.</li>
+<li>TLS groups are X25519 and P-256 only (no P-384, no ML-KEM hybrid), and there is no TLS 1.2.
+Clients that offer only those get <code>handshake_failure</code>, by design.</li>
+<li>Compatible version negotiation (RFC 9368) covers v1 and v2 only. After a switch to v2 the
+server keeps processing the client&#x27;s v1 Initial packets until the Initial keys are discarded
+(fixed 2026-11-09, BUGS.md item 21).</li>
+<li>The coverage-guided fuzzer runs on Linux only, covers only the HTTP/1 target, and has no corpus
+minimisation.</li>
+</ul>
+<h2 id="reproducing">Reproducing<a class="anchor" href="#reproducing" aria-hidden="true" tabindex="-1"></a></h2>
+<div class="codeblock"><div class="code-head"><span>text</span><button class="copy" type="button">Copy</button></div><pre><code class="language-text"># hermetic: everything above that runs in cargo test
+cargo test --workspace --features simoom/full
+
+# live HTTP/2 conformance against a running server
+cargo run --release -p simoom --features full --example conformance_server -- \
+    --addr 127.0.0.1:18080 --tls-addr 127.0.0.1:18443 --out /tmp/cs
+SIMOOM_H2_LIVE_H2C=127.0.0.1:18080 SIMOOM_H2_LIVE_H2=127.0.0.1:18443 SIMOOM_H2_LIVE_CA=/tmp/cs/ca.pem \
+    cargo test --release -p simoom --features full --test h2_live -- --ignored --nocapture
+
+# request smuggling differential (WSL / Linux; nginx and haproxy from the Ubuntu archive)
+python3 scripts/desync/desync.py --server target/release/examples/conformance_server \
+    --nginx /usr/sbin/nginx --haproxy /usr/sbin/haproxy
+
+# long fuzzing, per harness
+SIMOOM_FUZZ_ITERS=20000000 SIMOOM_FUZZ_SEED=7 cargo test --release -p simoom-h2 --test fuzz
+
+# third-party suites (WSL, outside the repository; versions in the table above)
+h2spec -h 127.0.0.1 -p 18080 -o 3                    # against conformance_server --addr
+conformance_server --garden --addr 0.0.0.0:80        # the HTTP Garden origin (in its Docker image)
+TESTCASE=transfer interop_server --addr [::]:443 --www /www --certs /certs   # QUIC Interop Runner endpoint
+python3 run.py -s simoom -c ngtcp2,quiche,quic-go    # in the runner checkout, simoom added to implementations_quic.json</code></pre></div>
+<p>Notes for the QUIC Interop Runner on Docker 28 or later: the runner&#x27;s two bridge networks need
+<code>com.docker.network.bridge.gateway_mode_ipv4: nat-unprotected</code> (and <code>_ipv6</code>), otherwise Docker&#x27;s
+direct-routing protection (raw-table <code>PREROUTING</code> drops) discards the bridged frames between the
+client and the simulator and every test fails, the runner&#x27;s reference pairs included. The runner
+needs Python 3.12 (pyshark fails on 3.14) and tshark 4.5 or later.</p>
+    </article>
+    <p class="edit"><a href="https://github.com/Cameleering/simoom/blob/main/docs/SECURITY.md">Edit this page on GitHub</a></p>
+  </main>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#reporting-a-vulnerability">Reporting a vulnerability</a></li><li><a href="#security-model">Security model</a></li><li><a href="#limits-and-defaults">Limits and defaults</a></li><li><a href="#what-was-tested-2026-11-07">What was tested (2026-11-07)</a></li><li><a href="#third-party-suites-2026-11-09">Third-party suites (2026-11-09)</a></li><li><a href="#bugs-found-and-fixed-in-this-pass">Bugs found and fixed in this pass</a></li><li><a href="#known-gaps">Known gaps</a></li><li><a href="#reproducing">Reproducing</a></li></ul></nav>
+</div>
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="../">simoom home</a></li>
+        <li><a href="../use-cases/">Use cases</a></li>
+        <li><a href="../benchmarks/">Benchmarks</a></li>
+        <li><a href="../compare/">Compare</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="https://github.com/Cameleering/simoom/blob/main/CONTRIBUTING.md">Contributing</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="index.html">Docs home</a></li>
+        <li><a href="guides/index.html">Guides</a></li>
+        <li><a href="SECURITY.html">Security</a></li>
+        <li><a href="https://docs.rs/simoom">API reference (docs.rs)</a></li>
+        <li><a href="../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/docs.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust HTTP Server Benchmark: simoom vs hyper, h2o, nginx</title>
+<meta name="description" content="simoom's measured results: p99-bounded throughput against hyper, may-minihttp, h2o and nginx on the same machine, TLS, HTTP/3, start-up, size, and the losses.">
+<link rel="canonical" href="https://cameleer.ing/simoom/benchmarks/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="simoom benchmarks: every number, its method and its losses">
+<meta property="og:description" content="Same-droplet results against hyper, may-minihttp, xitca, h2o, nginx and haproxy, the crossing from Cameleer's old server, binary sizes, and where simoom is behind.">
+<meta property="og:url" content="https://cameleer.ing/simoom/benchmarks/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../llms.txt" title="LLM-readable summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../assets/site.css">
+<link rel="stylesheet" href="../../assets/compare.css">
+<link rel="stylesheet" href="../assets/simoom.css">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "TechArticle",
+ "headline": "simoom benchmarks: every number, its method and its losses",
+ "description": "Measured results for simoom, the std-only Rust HTTP server engine: p99-bounded throughput against hyper, may-minihttp, xitca, h2o, nginx and haproxy on the same DigitalOcean droplet, TLS 1.3 handshakes, HTTP/3, CPU per request, memory, start-up against Cameleer's previous server, binary size, conformance, and the scenarios where simoom is behind.",
+ "url": "https://cameleer.ing/simoom/benchmarks/",
+ "inLanguage": "en", "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-12",
+ "author": {"@type": "Person", "name": "Sudheesh PM"},
+ "publisher": {"@type": "Organization", "name": "Cameleering", "url": "https://cameleer.ing/cameleering/"},
+ "about": [{"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, {"@type": "Thing", "name": "Web server benchmark"}]}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+ {"@type": "ListItem", "position": 1, "name": "simoom", "item": "https://cameleer.ing/simoom/"},
+ {"@type": "ListItem", "position": 2, "name": "Benchmarks"}]}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
+ {"@type": "Question", "name": "What is the fastest Rust HTTP server?", "acceptedAnswer": {"@type": "Answer", "text": "It depends on the scenario and the machine. In simoom's runs on one 4-vCPU DigitalOcean droplet, simoom led plain HTTP at 64 and 256 connections and over TLS, io_uring simoom led at 1,024 connections, and may-minihttp held up better on a degraded network path. Numbers from different machines should not be compared: droplets of the same type differed by up to 7x."}},
+ {"@type": "Question", "name": "Why p99 under 1 ms instead of maximum requests per second?", "acceptedAnswer": {"@type": "Answer", "text": "A server that answers more requests but makes some of them wait seconds is not faster for the people waiting. The headline figure is the highest steady rate at which 99% of answers arrive within 1 ms, with the load sent at a fixed rate so a slow server cannot slow the load down and hide its latency."}},
+ {"@type": "Question", "name": "Why are only servers on the same droplet compared?", "acceptedAnswer": {"@type": "Answer", "text": "Droplets of the same type differed by up to 7x for every server, and one had a degraded network path for all of them. A comparison across droplets would measure the machines, not the servers."}},
+ {"@type": "Question", "name": "Can I rerun the benchmarks?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The scripts are in bench/cloud in the repository, the competitor programs in bench/competitors, and the raw HDR logs, tables and analyses in bench/results. scripts/size.sh reproduces the size table."}},
+ {"@type": "Question", "name": "Has anyone else measured simoom?", "acceptedAnswer": {"@type": "Answer", "text": "Not yet. Every figure here was measured by the project. If you measure it differently and get a different number, open an issue with your method."}}]}
+</script>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="simoom home"><img src="../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="../docs/">Docs</a>
+      <a class="keep" href="../use-cases/">Use cases</a>
+      <a href="./" aria-current="page">Benchmarks</a>
+      <a href="../compare/">Compare</a>
+      <a href="../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="c-hero">
+  <div class="wrap">
+    <p class="crumbs"><a href="../">simoom</a> / Benchmarks</p>
+    <p class="kicker">Benchmarks · measured 2026-11-09 to 2026-11-12</p>
+    <h1>Every number, its method, and its losses</h1>
+    <p class="lede">simoom is a Cameleering project, so its claims follow one rule: no claim without a number. Each figure below names its machine, its date and its baseline. Servers are compared only when they ran on the same machine, and the scenarios simoom loses are in the same tables as the ones it wins.</p>
+    <div class="stats">
+      <div class="stat"><b>172,638</b><span>plain requests/s with p99 under 1 ms, 256 connections; hyper 144,443 on the same droplet</span></div>
+      <div class="stat"><b>+65%</b><span>over TLS 1.3 against h2o: 160,441 against 97,219 requests/s</span></div>
+      <div class="stat"><b>0.73 ms</b><span>process start to first answer; Cameleer's old server 0.77 ms</span></div>
+      <div class="stat"><b>215 KB</b><span>added to a binary for HTTP/1.1; 935 KB for everything with HTTP/3</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="c-sec" id="method">
+  <div class="wrap">
+    <h2>How it was measured</h2>
+    <div class="two">
+      <div class="pane">
+        <h3>Machines and load</h3>
+        <ul>
+          <li><strong>Server:</strong> DigitalOcean <code>c-4</code> droplets, 4 dedicated vCPUs (Xeon Platinum 8280), Bangalore region, Ubuntu 24.04. Their NIC has one receive queue.</li>
+          <li><strong>Load:</strong> two separate load droplets, open loop: requests are sent at a fixed rate whatever the server does, so a slow server can't slow the load down and hide its own latency (no coordinated omission).</li>
+          <li><strong>Same droplet only:</strong> droplets of the same type differed by up to 7x for every server, so a comparison always uses one droplet.</li>
+        </ul>
+      </div>
+      <div class="pane">
+        <h3>What is counted</h3>
+        <ul>
+          <li><strong>Headline figure:</strong> the highest steady rate at which 99% of answers arrive within 1 ms (the "SLO throughput"), verified by longer runs after the search.</li>
+          <li><strong>S1:</strong> a GET with a 13-byte answer, one request in flight per connection, at 64, 256 and 1,024 connections.</li>
+          <li><strong>Versions:</strong> hyper 1.12.0, may_minihttp 0.1.11, xitca-web 0.7.1, h2o 2.3.0-DEV, nginx 1.24.0, haproxy 2.8.30.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">Raw HDR logs, scripts and analyses are in the repository: <a href="https://github.com/Cameleering/simoom/tree/main/bench/results">bench/results</a>, scripts in <a href="https://github.com/Cameleering/simoom/tree/main/bench/cloud">bench/cloud</a>, competitor programs in <a href="https://github.com/Cameleering/simoom/tree/main/bench/competitors">bench/competitors</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="plain">
+  <div class="wrap">
+    <h2>Plain HTTP against hyper and may-minihttp</h2>
+    <p class="intro">S1, requests per second with p99 under 1 ms, median of three rounds on one droplet, 2026-11-12.</p>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>server</th><th class="num">64 connections</th><th class="num">256 connections</th><th class="num">1,024 connections</th></tr></thead>
+      <tbody>
+        <tr><td>simoom (epoll)</td><td class="num"><span class="win">170,648</span></td><td class="num"><span class="win">172,638</span></td><td class="num">138,644</td></tr>
+        <tr><td>simoom (io_uring)</td><td class="num">152,714</td><td class="num">172,331</td><td class="num"><span class="win">148,429</span></td></tr>
+        <tr><td>may-minihttp 0.1.11</td><td class="num">158,598</td><td class="num">150,673</td><td class="num">120,610</td></tr>
+        <tr><td>hyper 1.12.0</td><td class="num">122,240</td><td class="num">144,443</td><td class="num">115,102</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">This round replaces the plain-HTTP rows of campaign 3 (2026-11-11), where simoom trailed may-minihttp at 64 and 256 connections and hyper at 1,024. The cause was a simoom loop placed on the CPU that handles the network card's receive interrupts; the loops now keep off it (issue K12). The before-and-after runs: <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-12-epoll/analysis.md">analysis of 2026-11-12</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="tls">
+  <div class="wrap">
+    <h2>TLS 1.3 against h2o</h2>
+    <p class="intro">simoom brings its own TLS 1.3. Campaign 3, 2026-11-11, simoom on its io_uring back end, each row on one droplet.</p>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>scenario</th><th class="num">simoom</th><th class="num">best other on the droplet</th><th class="num">result</th></tr></thead>
+      <tbody>
+        <tr><td>full TLS 1.3 handshakes per second</td><td class="num"><span class="win">10,083</span></td><td class="num">h2o 7,711</td><td class="num">+31%</td></tr>
+        <tr><td>resumed TLS 1.3 handshakes per second</td><td class="num"><span class="win">11,213</span></td><td class="num">h2o 7,758</td><td class="num">+45%</td></tr>
+        <tr><td>S1 over TLS, 256 connections, p99 under 1 ms</td><td class="num"><span class="win">160,441</span></td><td class="num">h2o 97,219</td><td class="num">+65%</td></tr>
+        <tr><td>1 MB responses over TLS</td><td class="num">1.94 Gbit/s</td><td class="num">nginx 1.94 Gbit/s</td><td class="num">tie, at the network limit</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">The 2026-11-12 round repeated the handshakes alone, closed loop with 192 connections over four runs: 8.7k full and 9.8k resumed with epoll, 8.9k–9.4k and 9.9k–10.6k with io_uring.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="http3">
+  <div class="wrap">
+    <h2>HTTP/3 and HTTP/2</h2>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>scenario (campaign 3, 2026-11-11)</th><th class="num">simoom</th><th class="num">best other on the droplet</th><th class="num">result</th></tr></thead>
+      <tbody>
+        <tr><td>HTTP/3 S1, p99 under 1 ms</td><td class="num"><span class="win">106,947</span></td><td class="num">h2o 94,507</td><td class="num">+13%</td></tr>
+        <tr><td>HTTP/3 1 MB download</td><td class="num">1.90 Gbit/s</td><td class="num">h2o 1.90 Gbit/s</td><td class="num">tie, at the network limit</td></tr>
+        <tr><td>HTTP/2 without TLS, 100 streams, p99 under 5 ms</td><td class="num">152.5k</td><td class="num">h2o 152.6k</td><td class="num">tie, at the network limit</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<section class="c-sec" id="campaign">
+  <div class="wrap">
+    <h2>CPU, memory and other scenarios</h2>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>scenario (campaign 3, 2026-11-11)</th><th class="num">simoom</th><th class="num">best other on the droplet</th></tr></thead>
+      <tbody>
+        <tr><td>CPU per request at a fixed 50k req/s</td><td class="num"><span class="win">25.05 µs</span></td><td class="num">hyper 28.10 µs (simoom 11% less)</td></tr>
+        <tr><td>1 KB JSON echo, p99 under 1 ms</td><td class="num">153,526</td><td class="num">hyper 152,822 (tie)</td></tr>
+        <tr><td>peak memory during S1 at 256 connections</td><td class="num"><span class="win">2.5 MB</span></td><td class="num">xitca 4.1 MB</td></tr>
+        <tr><td>memory per idle connection, 10k / 100k open</td><td class="num">594 / 533 B</td><td class="num">nginx 522 / 532 B</td></tr>
+        <tr><td>1 MB responses, plain</td><td class="num">1.95 Gbit/s</td><td class="num">nginx 1.95 Gbit/s (tie, at the network limit)</td></tr>
+        <tr><td>a handler that blocks for 100 ms, 500 clients</td><td class="num">4,925 req/s, 0 errors</td><td class="num">Cameleer's old server 4,925</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">Full tables: <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-11-campaign3/summary.md">summary</a>, <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-11-campaign3/compare.md">comparison with campaign 2</a> and <a href="https://github.com/Cameleering/simoom/blob/main/bench/results/2026-11-11-campaign3/analysis.md">analysis</a>, which names the droplet of every figure. The default build holds 520 B per idle connection at 100k.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="original">
+  <div class="wrap">
+    <h2>Against the server it replaced</h2>
+    <p class="intro">The Cameleering test that matters most: the original. simoom replaces Cameleer's thread-per-connection server (<code>cameleer-http</code>). Both return the same 13-byte answer on the same machine (WSL2).</p>
+    <div class="two">
+      <div>
+        <h3 style="margin-top:0">Start-up and idle memory (2026-11-11)</h3>
+        <div class="c-table-wrap"><table class="c-table">
+          <thead><tr><th>build</th><th class="num">to first answer</th><th class="num">idle memory</th></tr></thead>
+          <tbody>
+            <tr><td>simoom, plain</td><td class="num"><span class="win">0.73 ms</span></td><td class="num">1,018 KB</td></tr>
+            <tr><td>cameleer-http, plain</td><td class="num">0.77 ms</td><td class="num">1,017 KB</td></tr>
+            <tr><td>simoom, TLS (P-256)</td><td class="num"><span class="win">0.87 ms</span></td><td class="num">1,360 KB</td></tr>
+            <tr><td>cameleer-http, TLS</td><td class="num">1.37 ms</td><td class="num">1,317 KB</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">10 alternating rounds; TLS memory after the fix of 2026-11-12 (issue K11).</p>
+      </div>
+      <div>
+        <h3 style="margin-top:0">Under load (2026-11-09)</h3>
+        <div class="c-table-wrap"><table class="c-table">
+          <thead><tr><th>measure</th><th class="num">simoom</th><th class="num">cameleer-http</th></tr></thead>
+          <tbody>
+            <tr><td>requests per second</td><td class="num"><span class="win">293k–311k</span></td><td class="num">172k–173k</td></tr>
+            <tr><td>p99 latency</td><td class="num"><span class="win">0.32–0.44 ms</span></td><td class="num">0.87–0.91 ms</td></tr>
+            <tr><td>CPU per request</td><td class="num"><span class="win">about 13 µs</span></td><td class="num">about 23 µs</td></tr>
+            <tr><td>1,000 idle connections</td><td class="num"><span class="win">2.7 MB</span></td><td class="num">7.7 MB</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">Server on 4 CPUs, 64 connections, closed-loop load from 8 other CPUs.</p>
+      </div>
+    </div>
+    <p class="note">The owner's requirement was start-up and memory within 5% of <code>cameleer-http</code>. Idle memory with TLS is 3.3% higher; everything else is level or better. This result is the simoom row of the <a href="../../cameleering/ledger/#simoom">Cameleering ledger</a>.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="size">
+  <div class="wrap">
+    <h2>What a build adds to your binary</h2>
+    <p class="intro">Bytes added to <code>examples/hello.rs</code> over an empty <code>fn main</code>, stripped, x86-64 Linux, <code>dist</code> profile. The budgets are targets the build enforces: <code>scripts/size.sh</code> fails when one is exceeded.</p>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>build</th><th class="num">size</th><th class="num">budget</th></tr></thead>
+      <tbody>
+        <tr><td>HTTP/1.1 only</td><td class="num">214,568 B</td><td class="num">256,000 B</td></tr>
+        <tr><td>HTTP/1.1, HTTP/2, TLS, io_uring</td><td class="num">583,680 B</td><td class="num">614,400 B</td></tr>
+        <tr><td>everything: HTTP/1.1, HTTP/2, HTTP/3, TLS, WebSocket, io_uring</td><td class="num">935,064 B</td><td class="num">1,048,576 B</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">As a whole executable, the HTTP/1.1-only server is 536 KB stripped against may-minihttp's 515 KB; about 181 KB of either is the standard library's backtrace code. The HTTP/1.1 and full rows are from 2026-11-11, the TLS row from 2026-11-12.</p>
+  </div>
+</section>
+
+<section class="c-sec" id="losses">
+  <div class="wrap">
+    <h2>Where simoom is behind</h2>
+    <p class="intro">Losses are part of the result.</p>
+    <ul class="losses">
+      <li><b>Heavy overload.</b> At 195k req/s offered, 1.17 times what the droplet's network card carries, simoom answers the most requests in total (160.3k against nginx's 145.5k), but nginx answers far more of them within 1 ms (52.4k against 6.4k). nginx's figure changed 20-fold between droplets, so it is recorded as a limit of the test at that rate (issue K13).</li>
+      <li><b>A degraded network path.</b> On a droplet with a slow network path, may-minihttp kept 114.7k req/s while simoom and the other servers fell to 17–62k. The interrupt-placement fix (K12) has not been rerun on such a droplet.</li>
+      <li><b>A new connection for every request.</b> On one droplet simoom handled 19.3k connections per second against xitca's 24.3k (−21%). On another, simoom led with 22.1k against hyper's 19.3k.</li>
+      <li><b>Slow attackers.</b> With 10,000 slowloris and 1,000 slow-read attackers, simoom's p99 for real requests was 8% above haproxy's (784 µs against 724 µs).</li>
+      <li><b>Idle memory with TLS</b> is 3.3% above Cameleer's old server (1,360 KB against 1,317 KB).</li>
+      <li><b>Executable size:</b> the HTTP/1.1-only executable is 4% larger than may-minihttp's.</li>
+      <li><b>Coverage:</b> every cloud figure comes from 4-vCPU droplets with a single-queue network card. Larger machines and multi-queue NICs have not been measured.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="c-sec" id="conformance">
+  <div class="wrap">
+    <h2>Conformance and interop</h2>
+    <div class="c-table-wrap"><table class="c-table">
+      <thead><tr><th>check</th><th>result</th></tr></thead>
+      <tbody>
+        <tr><td>h2spec 2.6.0</td><td><span class="win">146/146</span>, in 30 consecutive runs</td></tr>
+        <tr><td>QUIC Interop Runner, server role, against ngtcp2, quiche and quic-go</td><td><span class="win">54 of 58</span> supported pairs; the 4 failures are 0-RTT (refused by design) and ECN (not implemented)</td></tr>
+        <tr><td>HTTP Garden, next to nginx, Apache httpd, h2o, hyper, gunicorn and Go</td><td><span class="win">0 desyncs</span>, 0 dangerous discrepancies</td></tr>
+        <tr><td>Request smuggling behind nginx 1.24 and haproxy 2.8</td><td>165 streams, 0 desyncs; accepted 0 requests that both refused</td></tr>
+        <tr><td>testssl.sh 3.2.1</td><td>no vulnerabilities found</td></tr>
+        <tr><td>Test suite</td><td>777 tests on Windows, 791 on Linux, zero warnings</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">Versions, commands and details: <a href="../docs/SECURITY.html">Security</a>. No independent security audit has been done yet.</p>
+  </div>
+</section>
+
+<section class="c-sec faq" id="faq">
+  <div class="wrap">
+    <h2>Common questions</h2>
+    <details><summary>What is the fastest Rust HTTP server?</summary><p>It depends on the scenario and the machine. In simoom's runs on one 4-vCPU DigitalOcean droplet, simoom led plain HTTP at 64 and 256 connections and over TLS, io_uring simoom led at 1,024 connections, and may-minihttp held up better on a degraded network path. Numbers from different machines should not be compared: droplets of the same type differed by up to 7x.</p></details>
+    <details><summary>Why p99 under 1 ms instead of maximum requests per second?</summary><p>A server that answers more requests but makes some of them wait seconds is not faster for the people waiting. The headline figure is the highest steady rate at which 99% of answers arrive within 1 ms, with the load sent at a fixed rate so a slow server cannot slow the load down and hide its latency.</p></details>
+    <details><summary>Why are only servers on the same droplet compared?</summary><p>Droplets of the same type differed by up to 7x for every server, and one had a degraded network path for all of them. A comparison across droplets would measure the machines, not the servers.</p></details>
+    <details><summary>Can I rerun the benchmarks?</summary><p>Yes. The scripts are in <code>bench/cloud</code> in the repository, the competitor programs in <code>bench/competitors</code>, and the raw HDR logs, tables and analyses in <code>bench/results</code>. <code>scripts/size.sh</code> reproduces the size table.</p></details>
+    <details><summary>Has anyone else measured simoom?</summary><p>Not yet. Every figure here was measured by the project. If you measure it differently and get a different number, open an issue with your method.</p></details>
+  </div>
+</section>
+
+<section class="c-sec" id="next">
+  <div class="wrap">
+    <h2>Read on</h2>
+    <div class="cta">
+      <a class="btn primary" href="../compare/">Compare with hyper, axum, nginx and others</a>
+      <a class="btn" href="../docs/guides/features-and-size.html">Features and binary size</a>
+      <a class="btn" href="../../cameleering/ledger/">The Cameleering ledger</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. Other product names are trademarks of their owners.</p>
+    </div>
+    <div>
+      <h4>Use cases</h4>
+      <ul>
+        <li><a href="../use-cases/">All use cases</a></li>
+        <li><a href="../use-cases/serverless-cold-start/">Serverless functions</a></li>
+        <li><a href="../use-cases/edge-iot-http-server/">Edge and IoT devices</a></li>
+        <li><a href="../use-cases/http3-server/">HTTP/3 in Rust</a></li>
+        <li><a href="../compare/">Compare</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="../docs/">Documentation</a></li>
+        <li><a href="../docs/guides/getting-started.html">Getting started</a></li>
+        <li><a href="./">Benchmarks</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script>addEventListener('scroll',function(){document.getElementById('top').classList.toggle('scrolled',scrollY>8)},{passive:true})</script>
+</body>
+</html>

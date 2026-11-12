@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>simoom documentation | simoom</title>
+<meta name="description" content="simoom is an HTTP server you build into a Rust program; these guides show how to write services, add TLS, HTTP/2 and HTTP/3, and keep the build small.">
+<link rel="canonical" href="https://cameleer.ing/simoom/docs/">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="simoom">
+<meta property="og:title" content="simoom documentation">
+<meta property="og:description" content="simoom is an HTTP server you build into a Rust program; these guides show how to write services, add TLS, HTTP/2 and HTTP/3, and keep the build small.">
+<meta property="og:url" content="https://cameleer.ing/simoom/docs/">
+<meta property="og:image" content="https://cameleer.ing/simoom/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../brand/simoom-mark.svg" type="image/svg+xml">
+<link rel="icon" href="../../favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="../../apple-touch-icon.png">
+<link rel="alternate" type="text/plain" href="../llms.txt" title="LLM-readable summary">
+<link rel="alternate" type="text/markdown" href="README.md" title="Markdown source">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../../assets/site.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "simoom documentation", "description": "simoom is an HTTP server you build into a Rust program; these guides show how to write services, add TLS, HTTP/2 and HTTP/3, and keep the build small.", "url": "https://cameleer.ing/simoom/docs/", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Which version do these docs describe?", "acceptedAnswer": {"@type": "Answer", "text": "simoom 0.1.0, the first release. The API can still change before 1.0; breaking changes will be listed in the release notes."}}, {"@type": "Question", "name": "Is there a version of these docs for coding assistants?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. The site publishes llms.txt (a summary with links) and llms-full.txt (every page as plain markdown), and every HTML page has its markdown source next to it. The coding agents guide lists the rules an assistant most often gets wrong."}}, {"@type": "Question", "name": "Where do I report a mistake in the docs?", "acceptedAnswer": {"@type": "Answer", "text": "Open an issue or a pull request on GitHub. Security problems go through a private advisory, as described in SECURITY.md."}}]}</script>
+</head>
+<body class="docs">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top scrolled" id="top">
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="simoom home">
+      <img src="../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
+      simoom
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
+    <nav id="main-nav" aria-label="Main">
+      <a class="keep" href="index.html">Docs</a>
+      <a href="guides/index.html">Guides</a>
+      <a href="../use-cases/">Use cases</a>
+      <a href="../benchmarks/">Benchmarks</a>
+      <a href="../compare/">Compare</a>
+      <a href="../../cameleering/">Cameleering</a>
+      <a class="gh" href="https://github.com/Cameleering/simoom">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </nav>
+  </div>
+</header>
+<div class="docs-layout">
+  <aside class="sidebar">
+    <details class="navbox" open>
+      <summary>Browse the docs</summary>
+      <nav aria-label="Documentation">
+<ul class="nav-top">
+<li><a href="index.html" aria-current="page">Docs home</a></li>
+</ul>
+<details class="nav-group"><summary>Guides <span class="n">15</span></summary><ul><li><a href="guides/index.html">All guides</a></li><li><a href="guides/getting-started.html">Getting started with simoom</a></li><li><a href="guides/services-and-replies.html">How do I read requests and send responses in simoom?</a></li><li><a href="guides/routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="guides/slow-work.html">How do I call a database or another service from a simoom handler?</a></li><li><a href="guides/streaming-and-sse.html">How do I stream bodies and send server-sent events with simoom?</a></li><li><a href="guides/websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="guides/tls.html">How do I serve HTTPS with simoom?</a></li><li><a href="guides/http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="guides/limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="guides/runtime.html">How do I configure simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="guides/client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="guides/features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="guides/sans-io-crates.html">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="guides/coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="guides/faq.html">simoom FAQ</a></li></ul></details>
+<details class="nav-group"><summary>Project <span class="n">1</span></summary><ul><li><a href="SECURITY.html">Security</a></li></ul></details>
+      </nav>
+    </details>
+    <script>if (matchMedia('(max-width: 900px)').matches) document.currentScript.previousElementSibling.open = false;</script>
+  </aside>
+  <main id="content" class="article">
+    <nav class="crumbs" aria-label="Breadcrumb"><span>Docs</span></nav>
+    <article>
+<h1 id="simoom-documentation">simoom documentation</h1>
+<blockquote class="answer">
+<p>simoom is an HTTP server you build into a Rust program; these guides show how to write services, add TLS, HTTP/2 and HTTP/3, and keep the build small.</p>
+</blockquote>
+<p>simoom serves HTTP/1.1, HTTP/2 and HTTP/3, does its own TLS 1.3, and runs one event loop per CPU
+core on epoll, io_uring, IOCP or kqueue. It uses nothing outside the Rust standard library and
+needs no async runtime. If you have used a Rust web framework before, the main difference is
+this: a service is a plain function that runs on the loop thread, so it answers fast work at
+once and hands slow work to a pool or to your own threads.</p>
+<h2 id="where-to-find-what">Where to find what<a class="anchor" href="#where-to-find-what" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Read the guides in this order the first time; after that, jump to the one you need.</p>
+<div class="table"><table>
+<thead><tr><th>you want to</th><th>go to</th></tr></thead>
+<tbody>
+<tr><td>install simoom, run a first server and learn what a service is</td><td><a href="guides/getting-started.html">Getting started</a></td></tr>
+<tr><td>read requests and build responses</td><td><a href="guides/services-and-replies.html">Services and replies</a></td></tr>
+<tr><td>send requests to handlers by method and path</td><td><a href="guides/routing.html">Routing</a></td></tr>
+<tr><td>call a database or another service without blocking the server</td><td><a href="guides/slow-work.html">Slow work</a></td></tr>
+<tr><td>stream request and response bodies, push server-sent events</td><td><a href="guides/streaming-and-sse.html">Streaming and SSE</a></td></tr>
+<tr><td>accept WebSocket connections</td><td><a href="guides/websocket.html">WebSocket</a></td></tr>
+<tr><td>serve HTTPS with your certificates, mutual TLS, certificate rotation</td><td><a href="guides/tls.html">TLS</a></td></tr>
+<tr><td>turn on HTTP/2 and HTTP/3 and tune them</td><td><a href="guides/http2-and-http3.html">HTTP/2 and HTTP/3</a></td></tr>
+<tr><td>set limits, see what is refused, log requests</td><td><a href="guides/limits-and-security.html">Limits and security</a></td></tr>
+<tr><td>choose threads and the I/O back end, stop gracefully, read counters</td><td><a href="guides/runtime.html">Runtime</a></td></tr>
+<tr><td>make HTTP and WebSocket requests from Rust</td><td><a href="guides/client.html">The client</a></td></tr>
+<tr><td>pick cargo features and see what each adds to the binary</td><td><a href="guides/features-and-size.html">Features and size</a></td></tr>
+<tr><td>drive the HTTP/1.1, HTTP/2, QUIC or TLS crates from your own I/O loop</td><td><a href="guides/sans-io-crates.html">Sans-io crates</a></td></tr>
+<tr><td>give a coding agent the rules it needs to write simoom code</td><td><a href="guides/coding-agents.html">For coding agents</a></td></tr>
+<tr><td>find quick answers to common questions</td><td><a href="guides/faq.html">FAQ</a></td></tr>
+</tbody></table></div>
+<p>The security model, every limit with its default, and the test results are in
+<a href="SECURITY.html">SECURITY.md</a>. Measured numbers and how they were taken are on the
+<a href="https://cameleer.ing/simoom/benchmarks/">benchmarks page</a>. The API reference is on
+<a href="https://docs.rs/simoom">docs.rs/simoom</a>.</p>
+<h2 id="how-the-pages-are-organized">How the pages are organized<a class="anchor" href="#how-the-pages-are-organized" aria-hidden="true" tabindex="-1"></a></h2>
+<p>Every guide starts with a short answer under its title, then shows code you can copy. Every Rust
+example was compiled against simoom 0.1.0 with <code>--features full</code>; examples that need another
+feature say so. Each guide ends with common questions.</p>
+<h2 id="common-questions">Common questions<a class="anchor" href="#common-questions" aria-hidden="true" tabindex="-1"></a></h2>
+<h3 id="which-version-do-these-docs-describe">Which version do these docs describe?<a class="anchor" href="#which-version-do-these-docs-describe" aria-hidden="true" tabindex="-1"></a></h3>
+<p>simoom 0.1.0, the first release. The API can still change before 1.0; breaking changes will be
+listed in the release notes.</p>
+<h3 id="is-there-a-version-of-these-docs-for-coding-assistants">Is there a version of these docs for coding assistants?<a class="anchor" href="#is-there-a-version-of-these-docs-for-coding-assistants" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Yes. The site publishes <code>llms.txt</code> (a summary with links) and <code>llms-full.txt</code> (every page as plain
+markdown), and every HTML page has its markdown source next to it. The
+<a href="guides/coding-agents.html">coding agents guide</a> lists the rules an assistant most often gets wrong.</p>
+<h3 id="where-do-i-report-a-mistake-in-the-docs">Where do I report a mistake in the docs?<a class="anchor" href="#where-do-i-report-a-mistake-in-the-docs" aria-hidden="true" tabindex="-1"></a></h3>
+<p>Open an issue or a pull request on <a href="https://github.com/Cameleering/simoom">GitHub</a>. Security
+problems go through a private advisory, as described in <a href="SECURITY.html">SECURITY.md</a>.</p>
+    </article>
+    <p class="edit"><a href="https://github.com/Cameleering/simoom/blob/main/docs/README.md">Edit this page on GitHub</a></p>
+  </main>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#where-to-find-what">Where to find what</a></li><li><a href="#how-the-pages-are-organized">How the pages are organized</a></li><li><a href="#common-questions">Common questions</a></li></ul></nav>
+</div>
+<footer>
+  <div class="wrap">
+    <div class="credit">
+      <h4>simoom</h4>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="../">simoom home</a></li>
+        <li><a href="../use-cases/">Use cases</a></li>
+        <li><a href="../benchmarks/">Benchmarks</a></li>
+        <li><a href="../compare/">Compare</a></li>
+        <li><a href="https://github.com/Cameleering/simoom">Source on GitHub</a></li>
+        <li><a href="https://github.com/Cameleering/simoom/blob/main/CONTRIBUTING.md">Contributing</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Docs</h4>
+      <ul>
+        <li><a href="index.html">Docs home</a></li>
+        <li><a href="guides/index.html">Guides</a></li>
+        <li><a href="SECURITY.html">Security</a></li>
+        <li><a href="https://docs.rs/simoom">API reference (docs.rs)</a></li>
+        <li><a href="../llms.txt">llms.txt</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+<script src="../../assets/docs.js" defer></script>
+</body>
+</html>
