@@ -1,0 +1,49 @@
+# simoom
+
+> simoom is an embeddable HTTP/1.1, HTTP/2 and HTTP/3 server engine for Rust, with TLS 1.3, WebSocket and an HTTP client. It uses only the Rust standard library: no tokio, no hyper, no rustls and no OpenSSL. It runs one event loop per core on epoll or io_uring (Linux), IOCP (Windows) or kqueue (macOS), and is built for edge devices, serverless functions and servers. It is the HTTP engine behind Cameleer (https://github.com/Cameleering/cameleer), and it is a Cameleering project (https://cameleer.ing/cameleering/). Licence: Apache-2.0. Status: version 0.1.0, before the first release, not on crates.io yet.
+
+## Facts
+
+- Repository: https://github.com/Cameleering/simoom
+- Add it: `simoom = { git = "https://github.com/Cameleering/simoom" }` (Rust 1.89+). For HTTP/1.1 only: `default-features = false, features = ["http1"]`.
+- API: `Server::builder().listen(addr).service(f).start()`. A service is `Fn(&mut Request, Reply) -> Outcome` and runs on the loop thread. `Router` handles paths and methods. Blocking work goes through `simoom::blocking` (a bounded offload pool) or `Reply::defer` (answer from your own thread through a `Responder`). `Reply::stream` and `Reply::sse` stream bodies, and `Reply::websocket` upgrades to a WebSocket. No async runtime is needed.
+- TLS: `simoom::tls::{CertifiedKey, ServerConfig}` with `Builder::listen_tls` and `.tls(cfg)`. HTTP/3: `Builder::listen_quic` and `.quic_tls(cfg)` (features `tls` and `http3`, or `full`).
+- Client: the `simoom-client` crate provides `Client::builder()...build()`, `client.get(url).send()` and `HttpVersion::{Auto, Http1, Http2, Http3}`.
+- Cargo features: `http1`, `http2`, `websocket` and `io-uring` (default); `tls`, `tls-extra`, `http3`, `full`; `compression`, `brotli`, `zstd`; `websocket-h2`, `websocket-h3`, `ws-deflate`, `h2-keepalive`; `multipart`, `cookies`, `conditional`, `cors`, `auth`.
+- Not included: a static-file server, a reverse proxy, a configuration-file web server, QUIC 0-RTT (refused by design) and ECN.
+
+## Measured
+
+Same DigitalOcean c-4 droplet, open-loop load from two separate nodes, SLO = p99 ≤ 1 ms:
+
+- Plaintext GET with a 13-byte reply, 256 connections (2026-11-12): 172,638 req/s, against 144,443 for hyper and 150,673 for may-minihttp. At 64 connections: 170,648, 122,240 and 158,598.
+- TLS 1.3 handshakes (2026-11-11): 10,083 full and 11,213 resumed per second, against 7,711 and 7,758 for h2o. The same plaintext test over TLS: 160,441 req/s, against 97,219 for h2o.
+- HTTP/3: 106,947 req/s, against 94,507 for h2o. CPU per request at 50k req/s: 25.05 µs, against 28.10 µs for hyper.
+- Memory per idle connection with 100k open: 520-533 B, against 532 B for nginx.
+- Cold start to first response: 0.73 ms plain and 0.87 ms with TLS, against 0.77 ms and 1.37 ms for Cameleer's previous HTTP server on the same machine. Idle PSS is about 1 MB.
+- Code a build adds to a binary (stripped, x86-64 Linux): 214,568 B for HTTP/1.1 only (budget 250 KB) and 935,064 B for the full server with HTTP/3 (budget 1 MB).
+
+Where simoom is behind:
+
+- Under overload at 1.17x the NIC ceiling, nginx answers more requests within 1 ms (52.4k against 6.4k), although simoom has the higher total goodput (160.3k against 145.5k).
+- may-minihttp holds up better on a degraded network path.
+- haproxy's p99 under slowloris attack is 8% lower.
+
+## Verification
+
+- h2spec 2.6.0: 146/146.
+- QUIC Interop Runner against ngtcp2, quiche and quic-go: 54 of 58 supported pairs (the failures are 0-RTT, refused by design, and ECN, not implemented).
+- HTTP Garden: 0 desyncs.
+- testssl.sh: no vulnerabilities found.
+- Hermetic test suite: 777 tests on Windows and 791 on Linux.
+- No independent audit yet.
+
+## Docs
+
+- [README](https://github.com/Cameleering/simoom/blob/main/README.md): overview, examples, benchmarks, FAQ
+- [Status](https://github.com/Cameleering/simoom/blob/main/docs/STATUS.md): current state and the latest measurements
+- [Design and budgets](https://github.com/Cameleering/simoom/blob/main/docs/design/plan.md)
+- [Security](https://github.com/Cameleering/simoom/blob/main/docs/SECURITY.md): model, limits, test results, reporting a vulnerability
+- [Bugs and open items](https://github.com/Cameleering/simoom/blob/main/docs/BUGS.md)
+- [Benchmark results](https://github.com/Cameleering/simoom/tree/main/bench/results): raw data and analyses
+- [Contributing](https://github.com/Cameleering/simoom/blob/main/CONTRIBUTING.md)
