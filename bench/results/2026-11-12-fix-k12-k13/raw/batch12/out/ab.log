@@ -1,0 +1,26 @@
+==> 05:33:37 round 1: hyper (hyper: S1,MP) 
+==> 05:40:00 ab done
+==> 05:40:22 round 1: epoll-head (simoom: S1,MP) SIMOOM_EXTRA="--no-balance --stats-s 5"
+==> 05:46:46 round 1: uring-head (simoom-uring: S1) SIMOOM_EXTRA="--no-balance --stats-s 5"
+==> 05:52:47 round 1: may-minihttp (may-minihttp: S1) 
+==> 05:58:13 round 1: epoll-bal (simoom: S1,MP) SIMOOM_EXTRA="--stats-s 5"
+==> 06:04:38 round 1: uring-bal (simoom-uring: S1) SIMOOM_EXTRA="--stats-s 5"
+==> 06:10:42 round 1: epoll-c2 (simoom-c2: S1R) 
+==> 06:12:25 round 2: hyper (hyper: S1R) 
+==> 06:15:31 round 2: epoll-head (simoom: S1R) SIMOOM_EXTRA="--no-balance --stats-s 5"
+==> 06:18:37 round 2: epoll-t3 (simoom: S1,MP) SIMOOM_EXTRA="--no-balance --stats-s 5 --threads 3"
+==> 06:24:55 round 2: uring-t3 (simoom-uring: S1) SIMOOM_EXTRA="--no-balance --stats-s 5 --threads 3"
+==> 06:30:21 round 2: epoll-t8 (simoom: S1R) SIMOOM_EXTRA="--no-balance --stats-s 5 --threads 8"
+==> 06:33:26 round 2: epoll-rb512 (simoom: S1) SIMOOM_EXTRA="--no-balance --stats-s 5 --recv-buffers 512"
+==> 06:39:29 round 2: epoll-c2 (simoom-c2: S1R) 
+==> 06:42:35 round 2: epoll-noflush (simoom: S1R) SIMOOM_EXTRA="--no-balance --stats-s 5" SIMOOM_FLUSH_EARLY_BATCH=1000000000
+==> 06:45:40 round 2: epoll-bal (simoom: S1R) SIMOOM_EXTRA="--stats-s 5"
+==> 06:48:47 round 2: nginx (nginx: S1R,S9) 
+==> 06:52:32 round 2: uring-s9 (simoom-uring: S9) SIMOOM_EXTRA="--stats-s 5"
+==> 06:53:26 round 2: uring-tb300 (simoom-uring: S9) SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 300"
+==> 06:54:21 round 2: uring-tb600 (simoom-uring: S9) SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 600"
+==> 06:55:16 round 2: epoll-s9 (simoom: S9) SIMOOM_EXTRA="--stats-s 5"
+==> 06:56:11 round 2: epoll-tb300 (simoom: S9) SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 300"
+==> 06:57:06 round 2: hyper-s9 (hyper: S9) 
+==> 06:58:04 ab done
+AB DONE 2026-11-12T06:58:04Z

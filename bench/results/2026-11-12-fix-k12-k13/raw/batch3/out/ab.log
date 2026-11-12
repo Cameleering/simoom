@@ -1,0 +1,17 @@
+==> 07:27:17 round 3: hyper (hyper: S1) 
+==> 07:33:20 round 3: epoll (simoom: S1,MP) SIMOOM_EXTRA="--stats-s 5"
+==> 07:39:40 round 3: uring (simoom-uring: S1) SIMOOM_EXTRA="--stats-s 5"
+==> 07:45:30 round 3: may-minihttp (may-minihttp: S1) 
+==> 07:51:06 round 3: epoll-t4 (simoom: S1,MP) SIMOOM_EXTRA="--stats-s 5 --threads 4"
+==> 07:57:30 round 3: uring-t4 (simoom-uring: S1) SIMOOM_EXTRA="--stats-s 5 --threads 4"
+==> 08:03:34 round 3: epoll-reg (simoom: S3,S5,S7,S8,CPU) SIMOOM_EXTRA="--stats-s 5"
+==> 08:10:14 round 3: epoll-t4-reg (simoom: S3,S5,S7,S8,CPU) SIMOOM_EXTRA="--stats-s 5 --threads 4"
+==> 08:17:15 round 3: uring-reg (simoom-uring: S3,S5,S7,S8,CPU) SIMOOM_EXTRA="--stats-s 5"
+==> 08:24:14 round 3: uring-t4-reg (simoom-uring: S3,S5,S7,S8,CPU) SIMOOM_EXTRA="--stats-s 5 --threads 4"
+==> 08:31:20 round 3: nginx-s9 (nginx: S9) 
+==> 08:32:15 round 3: hyper-s9 (hyper: S9) 
+==> 08:33:11 round 3: uring-s9 (simoom-uring: S9) SIMOOM_EXTRA="--stats-s 5"
+==> 08:34:06 round 3: epoll-s9 (simoom: S9) SIMOOM_EXTRA="--stats-s 5"
+==> 08:35:01 round 3: uring-t4-s9 (simoom-uring: S9) SIMOOM_EXTRA="--stats-s 5 --threads 4"
+==> 08:35:56 ab done
+AB DONE 2026-11-12T08:35:56Z

@@ -1,0 +1,16 @@
+# LABEL SERVER SCENARIOS [ENV...]  (batch 1, round 1)
+hyper hyper S1,MP
+epoll-head simoom S1,MP SIMOOM_EXTRA="--no-balance --stats-s 5"
+uring-head simoom-uring S1 SIMOOM_EXTRA="--no-balance --stats-s 5"
+may-minihttp may-minihttp S1
+epoll-bal simoom S1,MP SIMOOM_EXTRA="--stats-s 5"
+uring-bal simoom-uring S1 SIMOOM_EXTRA="--stats-s 5"
+epoll-c2 simoom-c2 S1R
+epoll-bal-noflush simoom S1R SIMOOM_EXTRA="--stats-s 5" SIMOOM_FLUSH_EARLY_BATCH=1000000000
+epoll-bal-nospin simoom S1R SIMOOM_EXTRA="--stats-s 5" SIMOOM_BUSY_POLL_US=0
+nginx nginx S1R,S9
+uring-bal-s9 simoom-uring S9 SIMOOM_EXTRA="--stats-s 5"
+uring-tb300 simoom-uring S9 SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 300"
+uring-tb600 simoom-uring S9 SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 600"
+epoll-bal-s9 simoom S9 SIMOOM_EXTRA="--stats-s 5"
+epoll-tb300 simoom S9 SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 300"

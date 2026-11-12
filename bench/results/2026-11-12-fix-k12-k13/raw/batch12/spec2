@@ -1,0 +1,18 @@
+# batch 2 (same droplet): drift check, loop count against the single-queue NIC (its softirq on one
+# CPU), receive buffer stock, campaign 2's commit, the K4 early flush, and S9
+hyper hyper S1R
+epoll-head simoom S1R SIMOOM_EXTRA="--no-balance --stats-s 5"
+epoll-t3 simoom S1,MP SIMOOM_EXTRA="--no-balance --stats-s 5 --threads 3"
+uring-t3 simoom-uring S1 SIMOOM_EXTRA="--no-balance --stats-s 5 --threads 3"
+epoll-t8 simoom S1R SIMOOM_EXTRA="--no-balance --stats-s 5 --threads 8"
+epoll-rb512 simoom S1 SIMOOM_EXTRA="--no-balance --stats-s 5 --recv-buffers 512"
+epoll-c2 simoom-c2 S1R
+epoll-noflush simoom S1R SIMOOM_EXTRA="--no-balance --stats-s 5" SIMOOM_FLUSH_EARLY_BATCH=1000000000
+epoll-bal simoom S1R SIMOOM_EXTRA="--stats-s 5"
+nginx nginx S1R,S9
+uring-s9 simoom-uring S9 SIMOOM_EXTRA="--stats-s 5"
+uring-tb300 simoom-uring S9 SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 300"
+uring-tb600 simoom-uring S9 SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 600"
+epoll-s9 simoom S9 SIMOOM_EXTRA="--stats-s 5"
+epoll-tb300 simoom S9 SIMOOM_EXTRA="--stats-s 5 --turn-budget-us 300"
+hyper-s9 hyper S9

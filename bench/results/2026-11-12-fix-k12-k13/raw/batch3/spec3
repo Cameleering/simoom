@@ -1,0 +1,18 @@
+# batch 3 (one new droplet, candidate build 6d2fb3d): the default loop count (leave_cpu_for_network:
+# three loops on this droplet) against four loops and the competitors, then the other scenarios
+# with three loops against four, then S9
+hyper hyper S1
+epoll simoom S1,MP SIMOOM_EXTRA="--stats-s 5"
+uring simoom-uring S1 SIMOOM_EXTRA="--stats-s 5"
+may-minihttp may-minihttp S1
+epoll-t4 simoom S1,MP SIMOOM_EXTRA="--stats-s 5 --threads 4"
+uring-t4 simoom-uring S1 SIMOOM_EXTRA="--stats-s 5 --threads 4"
+epoll-reg simoom S3,S5,S7,S8,CPU SIMOOM_EXTRA="--stats-s 5"
+epoll-t4-reg simoom S3,S5,S7,S8,CPU SIMOOM_EXTRA="--stats-s 5 --threads 4"
+uring-reg simoom-uring S3,S5,S7,S8,CPU SIMOOM_EXTRA="--stats-s 5"
+uring-t4-reg simoom-uring S3,S5,S7,S8,CPU SIMOOM_EXTRA="--stats-s 5 --threads 4"
+nginx-s9 nginx S9
+hyper-s9 hyper S9
+uring-s9 simoom-uring S9 SIMOOM_EXTRA="--stats-s 5"
+epoll-s9 simoom S9 SIMOOM_EXTRA="--stats-s 5"
+uring-t4-s9 simoom-uring S9 SIMOOM_EXTRA="--stats-s 5 --threads 4"

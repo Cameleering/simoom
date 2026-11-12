@@ -9,6 +9,21 @@ _2026-11-07._ The repository was created and the workspace scaffolded. The desig
 Wave 1, crates built in parallel: `simoom-sys` + `simoom-rt`, `simoom-http1`, `simoom-hpack` +
 `simoom-h2`, `simoom-tls`, `simoom-quic` + `simoom-qpack` + `simoom-h3`.
 
+## K12 / K13 fix round
+
+_2026-11-12._ Same-droplet A/B on DigitalOcean (`bench/cloud/ab.sh`, results and analysis in
+`bench/results/2026-11-12-fix-k12-k13/`).
+
+- K12's cause: the c-4 droplet's NIC has one receive queue, so its softirq takes most of one CPU,
+  and the simoom loop on that CPU holds a quarter of the connections. The runtime now starts one
+  loop fewer than CPUs when the receive work is concentrated (`Config::leave_cpu_for_network`).
+  S1 on one droplet, 64/256/1024 connections: io_uring 152.7k/162.1k/144.0k against hyper
+  122.2k/145.6k/70.5k and may-minihttp 140.8k/168.8k/42.9k (four loops: 128.9k/116.8k/88.2k).
+  epoll gained 45-69% but is still behind at 64 and 256 connections.
+- K13: a read-side turn budget did not help (removed); nginx's in-time goodput under overload comes
+  from its worker pinned to the interrupt CPU starving, and changes by 20x between droplets.
+  Recorded as a limit of the benchmark at 1.17x the NIC ceiling.
+
 ## Cloud benchmark campaign 3
 
 _2026-11-11._ simoom pinned at `28d2a6f` (K1-K10 in), three lanes on 9 DigitalOcean c-4 droplets

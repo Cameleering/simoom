@@ -1,0 +1,15 @@
+2026-11-12T07:33:20Z round=3 variant=hyper
+2026-11-12T07:39:40Z round=3 variant=epoll
+2026-11-12T07:45:30Z round=3 variant=uring
+2026-11-12T07:51:06Z round=3 variant=may-minihttp
+2026-11-12T07:57:30Z round=3 variant=epoll-t4
+2026-11-12T08:03:34Z round=3 variant=uring-t4
+2026-11-12T08:10:14Z round=3 variant=epoll-reg
+2026-11-12T08:17:15Z round=3 variant=epoll-t4-reg
+2026-11-12T08:24:14Z round=3 variant=uring-reg
+2026-11-12T08:31:20Z round=3 variant=uring-t4-reg
+2026-11-12T08:32:15Z round=3 variant=nginx-s9
+2026-11-12T08:33:11Z round=3 variant=hyper-s9
+2026-11-12T08:34:06Z round=3 variant=uring-s9
+2026-11-12T08:35:01Z round=3 variant=epoll-s9
+2026-11-12T08:35:56Z round=3 variant=uring-t4-s9
