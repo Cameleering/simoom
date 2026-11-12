@@ -95,19 +95,29 @@ fn cgroup_quota() -> Option<usize> {
 
 /// Whether the network's receive processing concentrates on one CPU (K12): a NIC with a single
 /// receive queue and no RPS runs every packet's softirq on the CPU that takes its interrupt, as on
-/// DigitalOcean's 4-vCPU droplets (about 65% of that CPU at 165k packets/s). Read from the `NET_RX`
-/// line of `/proc/softirqs`: true when at most half of the CPUs did the receive work since boot
-/// (a CPU counts when it did at least half of an even share), and there was some. A droplet
-/// with two NICs (public and private, a queue each) shows two such CPUs out of four. Linux only;
-/// false elsewhere or when the file can't be read.
+/// DigitalOcean's 4-vCPU droplets (about 65% of that CPU at 165k packets/s). Read from the
+/// softirq time per CPU in `/proc/stat`: true when one CPU spent at least half of all the
+/// softirq time since boot, and there was some (2 s). Network receive dominates softirq time on
+/// a busy server; timers and the rest are spread over the CPUs. Linux only; false elsewhere or
+/// when the file can't be read.
+///
+/// When true, it also records that CPU for [`keep_current_thread_off_net_rx`]. (The `NET_RX`
+/// counts of `/proc/softirqs` can't tell it: a NIC's transmit completions are counted there too,
+/// often more often than its receives, but they cost far less: on the K12 droplet 590k on CPU 3
+/// against 342k on CPU 2 in 12 s, with CPU 2 in softirq 65% of the time and CPU 3 10%.)
 #[inline(never)]
 pub fn net_rx_concentrated() -> bool {
     #[cfg(target_os = "linux")]
     {
-        // The NET_RX line is the fifth: 4 KiB holds it whole up to about 70 CPUs (a cut line has
-        // no newline and is not counted).
+        // 4 KiB holds the per-CPU lines up to about 40 CPUs (a cut line is not counted)
         let mut buf = [0u8; 4096];
-        rx_concentrated(read_small_bytes("/proc/softirqs", &mut buf))
+        match softirq_concentrated(read_small_bytes("/proc/stat", &mut buf)) {
+            Some(cpu) => {
+                RX_CPU.store(cpu, std::sync::atomic::Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -115,36 +125,68 @@ pub fn net_rx_concentrated() -> bool {
     }
 }
 
-/// The parsing half of [`net_rx_concentrated`].
+/// The receive-interrupt CPU [`net_rx_concentrated`] found (`usize::MAX`: none).
 #[cfg(target_os = "linux")]
-fn rx_concentrated(softirqs: &[u8]) -> bool {
-    // the first `RX:` is NET_RX's (NET_TX comes before it, BLOCK and the rest after)
-    let Some(at) = (2..softirqs.len()).find(|&i| softirqs[i] == b':' && softirqs[i - 1] == b'X' && softirqs[i - 2] == b'R') else { return false };
-    let rest = &softirqs[at + 1..];
-    let Some(end) = rest.iter().position(|&b| b == b'\n') else { return false };
-    let line = &rest[..=end];
-    let (total, cpus) = scan(line, 0);
-    // a CPU counts as busy when it did at least half of an even share of the receive work
-    let (busy, _) = scan(line, total.div_ceil(2 * cpus.max(1)).max(1));
-    total >= 10_000 && busy * 2 <= cpus
+static RX_CPU: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+/// The parsing half of [`net_rx_concentrated`]: the CPU of a `/proc/stat` that spent at least
+/// half of all the softirq time (of each `cpuN` line, N and the seventh number after it: user,
+/// nice, system, idle, iowait, irq, softirq), if the total is at least 2 s (200 ticks).
+#[cfg(target_os = "linux")]
+fn softirq_concentrated(stat: &[u8]) -> Option<usize> {
+    let (mut best, mut most, mut total) = (0, 0u64, 0u64);
+    // the numbers of the current line: number 0 is the CPU's index on a `cpuN` line (the only
+    // lines whose first digit follows a `u`), number 7 its softirq time
+    let (mut n, mut cur, mut cpu, mut digits, mut on, mut prev) = (0, 0u64, 0u64, false, false, 0u8);
+    for &b in stat {
+        if b.is_ascii_digit() {
+            if !digits && n == 0 {
+                on = prev == b'u';
+            }
+            cur = cur.wrapping_mul(10).wrapping_add(u64::from(b - b'0'));
+            digits = true;
+        } else {
+            if digits {
+                if on && n == 0 {
+                    cpu = cur;
+                } else if on && n == 7 {
+                    total = total.wrapping_add(cur);
+                    if cur > most {
+                        (best, most) = (cpu as usize, cur);
+                    }
+                }
+                (n, cur, digits) = (n + 1, 0, false);
+            }
+            if b == b'\n' {
+                n = 0;
+            }
+        }
+        prev = b;
+    }
+    (total >= 200 && most * 2 >= total).then_some(best)
 }
 
-/// The numbers of a `/proc/softirqs` line (ending in a newline): with `min` 0 their sum and
-/// count; otherwise how many are at least `min`, and the count.
+/// Takes the receive-interrupt CPU recorded by [`net_rx_concentrated`] out of the calling
+/// thread's affinity mask (Linux; elsewhere, or when none was recorded, it does nothing).
+/// Nothing changes when the thread may not run there anyway or it is the only CPU left.
+pub fn keep_current_thread_off_net_rx() {
+    #[cfg(target_os = "linux")]
+    keep_current_thread_off(RX_CPU.load(std::sync::atomic::Ordering::Relaxed));
+}
+
 #[cfg(target_os = "linux")]
-fn scan(line: &[u8], min: u64) -> (u64, u64) {
-    let (mut acc, mut n, mut cur, mut digits) = (0u64, 0u64, 0u64, false);
-    for &b in line {
-        if b.is_ascii_digit() {
-            cur = cur.saturating_mul(10).saturating_add(u64::from(b - b'0'));
-            digits = true;
-        } else if digits {
-            acc += if min == 0 { cur } else { u64::from(cur >= min) };
-            n += 1;
-            (cur, digits) = (0, false);
-        }
+fn keep_current_thread_off(cpu: usize) {
+    let mut mask = [0u8; 128];
+    let (byte, bit) = (cpu / 8, 1u8 << (cpu % 8));
+    // SAFETY: the kernel writes at most `mask.len()` bytes; pid 0 is the calling thread.
+    if byte >= mask.len() || unsafe { crate::os::sys::sched_getaffinity(0, mask.len(), mask.as_mut_ptr()) } != 0 || mask[byte] & bit == 0 {
+        return;
     }
-    (acc, n)
+    mask[byte] &= !bit;
+    if mask.iter().any(|&b| b != 0) {
+        // SAFETY: passes a mask of `mask.len()` bytes; pid 0 is the calling thread.
+        unsafe { crate::os::sys::sched_setaffinity(0, mask.len(), mask.as_ptr()) };
+    }
 }
 
 /// Reads a small file into `buf` (one read: these kernel files are produced whole); empty when
@@ -301,17 +343,41 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn net_rx_concentration() {
-        // a DigitalOcean c-4: one receive queue, its interrupt on CPU 2
-        let one = b"                    CPU0       CPU1       CPU2       CPU3\n          HI:          1          0          0          0\n      NET_TX:        120        300         90        410\n      NET_RX:       5521       8012    3082311      10022\n       BLOCK:          0          0          0          0\n";
-        assert!(rx_concentrated(one));
-        // the same droplet after boot: the public NIC's queue (CPU 3) and set-up traffic
-        assert!(rx_concentrated(b"      NET_RX:      15924         52       1618      14372\n"));
-        assert!(!rx_concentrated(b"      NET_RX:      15924         52       1618"), "a cut line");
-        let spread = b"      NET_RX:     810221     790112     802311     799022\n";
-        assert!(!rx_concentrated(spread));
-        assert!(!rx_concentrated(b"      NET_RX:        12         0       900         3\n"), "too little traffic to tell");
-        assert!(!rx_concentrated(b"no such line\n"));
+        // the K12 droplet: CPU 2 takes the private NIC's receive interrupts, CPU 3 its transmit
+        // completions (more NET_RX softirqs there, much less time)
+        let k12 = b"cpu  53911 675 72359 206845 12924 0 29173 141 0 0\ncpu0 15347 395 22098 54484 3504 0 159 36 0 0\ncpu1 15620 280 23352 52153 4305 0 105 38 0 0\ncpu2 9220 0 8644 44155 1482 0 24987 36 0 0\ncpu3 13724 0 18265 56053 3633 0 3922 31 0 0\nintr 123 0 0\n";
+        assert_eq!(softirq_concentrated(k12), Some(2));
+        let spread = b"cpu  1 2 3 4 5 6 4000\ncpu0 1 2 3 4 5 6 1000\ncpu1 1 2 3 4 5 6 900\ncpu2 1 2 3 4 5 6 1100\ncpu3 1 2 3 4 5 6 1000\n";
+        assert_eq!(softirq_concentrated(spread), None);
+        assert_eq!(softirq_concentrated(b"cpu  0 0 0 0 0 0 0\ncpu0 1 2 3 4 5 6 5\ncpu1 1 2 3 4 5 6 150\n"), None, "too little to tell");
+        assert_eq!(softirq_concentrated(b"cpu  9\ncpu0 1 2 3 4 5 6 10\ncpu1 1 2 3 4 5 6 900\ncpu2 1 2 3\n"), Some(1), "a cut line is not counted");
+        assert_eq!(softirq_concentrated(b"cpu  1 2 3 4 5 6 9000\ncpu0 1 2 3 4 5 6 1000\ncpu1 1 2 3 4 5 6 1000\n"), Some(0), "not the total line");
+        assert_eq!(softirq_concentrated(b""), None);
         let _ = net_rx_concentrated(); // reads the real file without failing
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_thread_can_be_kept_off_one_cpu() {
+        let cpus = allowed_cpus();
+        std::thread::spawn(move || {
+            keep_current_thread_off(100_000); // out of range: nothing changes
+            assert_eq!(allowed_cpus(), cpus);
+            keep_current_thread_off(cpus[0]);
+            if cpus.len() > 1 {
+                assert_eq!(allowed_cpus(), cpus[1..], "the first CPU left");
+                for &c in &cpus[2..] {
+                    keep_current_thread_off(c);
+                }
+                assert_eq!(allowed_cpus(), [cpus[1]]);
+                keep_current_thread_off(cpus[1]);
+                assert_eq!(allowed_cpus(), [cpus[1]], "never the last CPU");
+            } else {
+                assert_eq!(allowed_cpus(), cpus, "never the last CPU");
+            }
+        })
+        .join()
+        .unwrap();
     }
 
     #[cfg(target_arch = "x86_64")]

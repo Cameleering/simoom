@@ -86,10 +86,12 @@ pub struct Config {
     pub stack_size: Option<usize>,
     /// With the default loop count (`threads` 0, no `cpus`) on 4 CPUs or more: one loop fewer
     /// than CPUs when the network's receive processing concentrates on one CPU (a NIC with a
-    /// single receive queue and no RPS, [`simoom_sys::cpu::net_rx_concentrated`]). That CPU spends
-    /// most of its time in softirq at high packet rates, and a loop sharing it falls behind the
-    /// others with every connection it holds (K12: S1 at 256 connections on a 4-vCPU droplet,
-    /// 111k req/s with four loops against 151k with three). Default `true`.
+    /// single receive queue and no RPS, [`simoom_sys::cpu::net_rx_concentrated`]), and the loop
+    /// threads keep off that CPU. It spends most of its time in softirq at high packet rates, and
+    /// a loop sharing it falls behind the others with every connection it holds (K12: S1 at 256
+    /// connections on a 4-vCPU droplet, 111k req/s with four loops against 151k with three).
+    /// Leaving the CPU free is not enough: the scheduler moves a loop thread woken by that CPU's
+    /// softirq onto it, so unrestricted loops ran there 40% of the time. Default `true`.
     pub leave_cpu_for_network: bool,
 }
 
@@ -607,7 +609,7 @@ impl Builder {
                                     lock(&shared.threads).push(t);
                                     spawned += 1;
                                 }
-                                Err(e) => eprintln!("simoom loop {i} failed to start: {e}"),
+                                Err(e) => log_failure(i, "failed to start", &e),
                             }
                         }
                         // every loop registered (or failed): parked connections can be spread
@@ -689,6 +691,9 @@ fn spawn_loop(cfg: &Config, setup: LoopSetup, pin: Option<usize>, shared: Arc<Sh
     crate::spawn(loop_thread(cfg, i), Box::new(move || {
         if let Some(cpu) = pin {
             let _ = simoom_sys::cpu::pin_current_thread(cpu);
+        } else {
+            // off the CPU left to the network, if the loop count left one
+            simoom_sys::cpu::keep_current_thread_off_net_rx();
         }
         let mut starting = Starting { shared, done: false };
         let shared = &starting.shared;
@@ -696,7 +701,7 @@ fn spawn_loop(cfg: &Config, setup: LoopSetup, pin: Option<usize>, shared: Arc<Sh
             Ok(x) => x,
             Err(e) => {
                 if log {
-                    eprintln!("simoom loop {i} failed to start: {e}");
+                    log_failure(i, "failed to start", &e);
                 }
                 if i == 0 {
                     shared.booted((Backend::Auto, Some(format!("loop 0 failed to start: {e}"))));
@@ -712,9 +717,16 @@ fn spawn_loop(cfg: &Config, setup: LoopSetup, pin: Option<usize>, shared: Arc<Sh
         starting.done = true;
         drop(starting);
         if let Err(e) = core.run() {
-            eprintln!("simoom loop {i} failed: {e}");
+            log_failure(i, "failed", &e);
         }
     }))
+}
+
+/// Logs a loop's failure: one copy of the formatting for every site.
+#[cold]
+#[inline(never)]
+fn log_failure(i: usize, what: &str, e: &io::Error) {
+    eprintln!("simoom loop {i} {what}: {e}");
 }
 
 fn loop_thread(cfg: &Config, i: usize) -> std::thread::Builder {

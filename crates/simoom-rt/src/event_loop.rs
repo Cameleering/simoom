@@ -1441,6 +1441,9 @@ impl Core {
                 // burst that arrived before theirs existed) are handed out for a while too.
                 self.handoff_until = self.now_ns.saturating_add(BALANCE_AFTER_GROWTH_NS).max(1);
                 self.spread_parked();
+                // loop 0 started before the loop count was chosen: off a CPU left to the
+                // network too
+                simoom_sys::cpu::keep_current_thread_off_net_rx();
             }
             if self.grow_next {
                 // a third connection at once, served and flushed by the turn

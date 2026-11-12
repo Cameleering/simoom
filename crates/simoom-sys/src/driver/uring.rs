@@ -519,7 +519,8 @@ fn probe_ops(ring: &Ring) -> io::Result<OptionalOps> {
     for op in [OP_POLL_ADD, OP_SENDMSG, OP_ACCEPT, OP_ASYNC_CANCEL, OP_SEND, OP_RECV] {
         let ok = (op as usize) < probe.ops_len as usize && probe.ops[op as usize].flags & PROBE_OP_SUPPORTED != 0;
         if !ok {
-            return Err(io::Error::new(io::ErrorKind::Unsupported, format!("io_uring opcode {op} not supported")));
+            // through `step`'s formatting: one copy of it (K9)
+            return Err(step("a required io_uring opcode (poll, sendmsg, accept, cancel, send, recv)", io::ErrorKind::Unsupported.into()));
         }
     }
     let has = |op: u8| (op as usize) < probe.ops_len as usize && probe.ops[op as usize].flags & PROBE_OP_SUPPORTED != 0;
