@@ -99,6 +99,16 @@ def fixed_rate(field):
     return f
 
 
+def speak_metric(scen):
+    def f(R):
+        d = SPEAK_TS.get(scen, {})
+        return d
+    return f
+
+
+SPEAK_TS = {}
+
+
 METRICS = [
     ("s1-64", "status", "Status endpoint, 64 clients: requests/s with 99% within 1 ms", "req/s", True, verified("S1", "conns", 64, 1000)),
     ("s1-256", "status", "Status endpoint, 256 clients: requests/s with 99% within 1 ms", "req/s", True, verified("S1", "conns", 256, 1000)),
@@ -122,9 +132,58 @@ METRICS = [
     ("size", "footprint", "Program size, stripped", "KB", False, lambda R: {k: {c: v / 1024 for c, v in d.items()} for k, d in rec("SIZE", "bytes", absent=("variant",))(R).items()}),
     ("base", "footprint", "Memory at rest (PSS)", "KB", False, rec("BASE", "pss_kb")),
     ("peak", "footprint", "Peak memory over the whole run (PSS)", "KB", False, rec("PEAK", "pss_kb")),
-    ("peak-s1", "footprint", "Peak memory while serving the status endpoint (PSS)", "KB", False, rec("SPEAK", "pss_kb", {"scenario": "S1"})),
-    ("peak-s7", "footprint", "Peak memory while serving HTTPS (PSS)", "KB", False, rec("SPEAK", "pss_kb", {"scenario": "S7"})),
+    ("peak-s1", "footprint", "Peak memory while serving the status endpoint (PSS)", "KB", False, speak_metric("S1")),
+    ("peak-s3", "footprint", "Peak memory while serving the JSON API (PSS)", "KB", False, speak_metric("S3")),
+    ("peak-s7", "footprint", "Peak memory while serving HTTPS (PSS)", "KB", False, speak_metric("S7")),
+    ("peak-h3", "footprint", "Peak memory while serving HTTP/3 (PSS)", "KB", False, speak_metric("H3")),
 ]
+
+
+def speak_from_samples(raw_dir):
+    """Peak PSS per (server, scenario, lane, round) from the timestamped samplers on the server
+    droplets (raw/lane1/pss-ts-srvX.log: "epoch pss_kb" every second) and each lane's progress.txt
+    (the time each scenario finished; it started when the previous entry of that lane finished)."""
+    import datetime
+    import glob
+    import os
+    samples = {}
+    for f in glob.glob(os.path.join(raw_dir, "lane*", "pss-ts-*.log")):
+        srv = os.path.basename(f)[len("pss-ts-"):-len(".log")]
+        pts = []
+        for line in open(f, encoding="utf-8", errors="replace"):
+            parts = line.split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                pts.append((int(parts[0]), int(parts[1])))
+        samples[srv] = sorted(pts)
+    out = defaultdict(lambda: defaultdict(dict))
+    if not samples:
+        return out
+    for lane_dir in sorted(glob.glob(os.path.join(raw_dir, "lane*"))):
+        lane = os.path.basename(lane_dir)
+        droplet = {}
+        mf = os.path.join(lane_dir, "machine.txt")
+        if os.path.exists(mf):
+            for line in open(mf, encoding="utf-8"):
+                m = re.match(r"MACHINE round=(\d+) lane=\d+ srv=(\S+)", line)
+                if m:
+                    droplet[m.group(1)] = m.group(2)
+        pf = os.path.join(lane_dir, "progress.txt")
+        if not os.path.exists(pf):
+            continue
+        prev = None
+        for line in open(pf, encoding="utf-8"):
+            m = re.match(r"(\S+Z) round=(\d+) server=(\S+) scenario=(\S+)", line)
+            if not m:
+                continue
+            t = int(datetime.datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp())
+            rnd, srvname, scen = m.group(2), m.group(3), m.group(4)
+            if prev is not None and scen not in ("S6", "COLD"):
+                pts = samples.get(droplet.get(rnd, ""), [])
+                vals = [v for (ts, v) in pts if prev < ts <= t]
+                if vals:
+                    out[(srvname, scen)][(lane, rnd)] = max(vals)
+            prev = t
+    return out
 
 
 def med(vals):
@@ -191,7 +250,7 @@ def markdown(res):
         if not rows:
             continue
         lines += [f"## {m['title']}", "", f"`{mid}` · use case `{m['use']}` · {'higher' if m['higher_is_better'] else 'lower'} is better", "",
-                  "| server | value | simoom on the same droplet | comparison | rounds |", "|---|---:|---:|---|---:|"]
+                  "| server | value | simoom on the same droplet | comparison | runs |", "|---|---:|---:|---|---:|"]
         order = sorted(rows.items(), key=lambda kv: (-(kv[1]["value"] or 0) if m["higher_is_better"] else (kv[1]["value"] if kv[1]["value"] is not None else 1e18)))
         for srv, r in order:
             name = f"**{srv}**" if srv == REF else srv
@@ -203,6 +262,11 @@ def markdown(res):
 
 def main():
     R = parse(sys.argv[1])
+    import os
+    raw = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), "raw")
+    for (srv, scen), cells in speak_from_samples(raw).items():
+        scen = "S1" if scen == "S1R" else scen
+        SPEAK_TS.setdefault(scen, defaultdict(dict))[srv].update(cells)
     res = compute(R)
     if "--json" in sys.argv:
         json.dump(res, sys.stdout, indent=1, ensure_ascii=False)

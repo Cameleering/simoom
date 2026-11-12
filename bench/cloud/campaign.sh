@@ -158,8 +158,8 @@ applies() {
 done_mark() { grep -q "^DONE round=$1 server=$2 scenario=$3\$" $RES; }
 mark() { echo "DONE round=$1 server=$2 scenario=$3" >> $RES; echo "$(date -u +%FT%TZ) round=$1 server=$2 scenario=$3" >> $OUT/progress.txt; }
 rec() { # rec PREFIX: tag record lines from stdin and append them
-  if [ -z "$1" ]; then grep -E '^(RESULT|SLO|METRIC|NIC|NICPEAK|PEAK|BASE|IDLE|COLDSTART|SIZE|VERSION|ATTACK|SKIPPED|FAILED|PROFILE) ' | tee -a $RES; return; fi
-  sed -u "s/^\(RESULT\|SLO\|METRIC\|NIC\|NICPEAK\|PEAK\|BASE\|IDLE\|COLDSTART\|SIZE\|VERSION\|ATTACK\|SKIPPED\|FAILED\|PROFILE\) /\1 $1 /" | grep -E '^(RESULT|SLO|METRIC|NIC|NICPEAK|PEAK|BASE|IDLE|COLDSTART|SIZE|VERSION|ATTACK|SKIPPED|FAILED|PROFILE) ' | tee -a $RES
+  if [ -z "$1" ]; then grep -E '^(RESULT|SLO|METRIC|NIC|NICPEAK|PEAK|SPEAK|BASE|IDLE|COLDSTART|SIZE|VERSION|ATTACK|SKIPPED|FAILED|PROFILE) ' | tee -a $RES; return; fi
+  sed -u "s/^\(RESULT\|SLO\|METRIC\|NIC\|NICPEAK\|PEAK\|SPEAK\|BASE\|IDLE\|COLDSTART\|SIZE\|VERSION\|ATTACK\|SKIPPED\|FAILED\|PROFILE\) /\1 $1 /" | grep -E '^(RESULT|SLO|METRIC|NIC|NICPEAK|PEAK|SPEAK|BASE|IDLE|COLDSTART|SIZE|VERSION|ATTACK|SKIPPED|FAILED|PROFILE) ' | tee -a $RES
 }
 sb() { $SB "$@" 2>>$OUT/run.log; }
 if [ "${DRY:-0}" = 1 ]; then # control-flow check: every remote command and load run is logged
