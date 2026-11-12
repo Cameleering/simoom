@@ -37,6 +37,7 @@ touch $RES
 SB=${SB:-/root/simoom/target/release/simoom-bench}
 SRVSH=/root/simoom/bench/competitors/server.sh
 NODE="bash /root/simoom/bench/cloud/node.sh"
+PSSLOG=/root/node/pss.log
 CA=(--cacert /root/bench-ca.pem --sni bench.local)
 AGENTS="$(for l in $LOADS; do printf '%s:7070,' "$l"; done)"; AGENTS="${AGENTS%,}"
 read -r -a LOADA <<<"$LOADS"
@@ -70,6 +71,17 @@ hint_arg() { # hint_arg SERVER KEY CONNS -> "--hint R": this lane's earlier SLO,
 # common set plus each server's extras; rounds 2 and 3: S1 at 256 connections (S1R).
 THREE="${THREE:-simoom simoom-uring simoom-builder simoom-builder-uring simoom-default simoom-deferred simoom-deferred-stream simoom-blocking cameleer-http-min hyper may-minihttp xitca ntex axum h2o nginx haproxy}"
 scen_for() { # scen_for SERVER ROUND
+  # campaign 4 (C4=1): the whole field against the current simoom, simoom in every lane. Round 1:
+  # every scenario a server supports; rounds 2 and 3, on the other two droplets: the headline
+  # scenarios again, so each competitor/simoom ratio has three same-droplet samples.
+  if [ -n "${C4:-}" ]; then
+    case $1 in
+      axum-rustls) [ "$2" = 1 ] && echo "S7 COLD" || echo "S7" ;;
+      quinn-h3) [ "$2" = 1 ] && echo "H3 COLD" || echo "H3" ;;
+      *) [ "$2" = 1 ] && echo "S1 S3 S4 S5 S7 S8 S9 S10 H3 CPU S6 COLD" || echo "S1R S3 S5 S7 H3 CPU" ;;
+    esac
+    return
+  fi
   if [ "$2" != 1 ]; then case " $THREE " in *" $1 "*) echo S1R ;; esac; return; fi
   local x=""
   case $1 in
@@ -109,6 +121,8 @@ caps() {
     simoom-deferred*|simoom-blocking) echo "echo" ;;
     simoom*) echo "echo s4 tls h2c:8080 h3" ;;
     cameleer-http-min) echo "tls" ;;
+    axum-rustls) echo "tls" ;;
+    quinn-h3) echo "h3" ;;
     nginx) echo "s4 tls h2c:8081 h3?" ;;
     h2o) echo "s4 tls h2c:8080 h3" ;;
     haproxy) echo "tls h2c:8081" ;;
@@ -219,11 +233,13 @@ run_server() { # run_server ROUND HOST SRVNAME NAME SCENARIOS
   for s in $scen; do
     done_mark "$r" "$n" "$s" && continue
     log "  $n $s"
+    local pss_n0; pss_n0=$(on "$S" "wc -l < $PSSLOG 2>/dev/null || echo 0")
     case $s in
       S1|S1R)
         local cl="64 256 1024"
         if [ -n "${LANE:-}" ]; then
           cl="256 1024"; case $n in simoom*|may-minihttp|hyper) cl="64 256 1024" ;; esac
+          [ -n "${C4:-}" ] && cl="64 256 1024"
           [ $s = S1R ] && cl=256
         fi
         for c in $cl; do
@@ -363,6 +379,11 @@ server-no-tls|/root/simoom/target/release/simoom-server --addr 0.0.0.0:8080 --no
           on "$S" "$SB coldstart --addr 127.0.0.1:8080 --repeat 20 -- $vc" 2>&1 < /dev/null | grep -E '^COLDSTART|simoom-bench:' | sed "s/^COLDSTART /COLDSTART variant=$vn /; s/^simoom-bench: /FAILED step=coldstart-$vn /" | rec "$tag"
         done <<<"$cv"
         server_start "$S" "$n" >>$OUT/run.log 2>&1 || true ;;
+    esac
+    # peak PSS during this scenario alone (campaign 4; S6 and COLD restart the server, skip them)
+    case $s in S6|COLD) ;; *)
+      local sp; sp=$(on "$S" "tail -n +$(( ${pss_n0:-0} + 1 )) $PSSLOG 2>/dev/null | sort -n | tail -1")
+      [ -n "$sp" ] && echo "SPEAK scenario=$s pss_kb=$sp" | rec "$tag" ;;
     esac
     mark "$r" "$n" "$s"
   done

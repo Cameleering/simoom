@@ -176,6 +176,7 @@ SERVERS="$srv"
 ROUNDS="1 2 3"
 DEADLINE="${DEADLINE:-0}"
 S9_RATE="${S9_RATE:-}"
+C4="${C4:-}"
 PROF_SERVERS="$(eval echo \${PROF$i:-})"
 PROF_CASES="${PROF_CASES:-s1 s3 s5 s8}"
 EOF

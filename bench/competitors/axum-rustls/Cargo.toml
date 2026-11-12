@@ -1,0 +1,21 @@
+[package]
+name = "bench-axum-rustls"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# axum 0.8 with TLS the way axum users usually add it: axum-server's rustls support, rustls 0.23
+# with its default aws-lc-rs provider.
+[dependencies]
+axum = { version = "0.8", features = ["http1", "http2", "tokio"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+
+[workspace]
+# a standalone project outside the simoom workspace, with its own Cargo.lock (CLAUDE.md rule 1 exception)
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
