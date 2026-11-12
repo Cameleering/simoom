@@ -73,8 +73,10 @@ scen_for() { # scen_for SERVER ROUND
   if [ "$2" != 1 ]; then case " $THREE " in *" $1 "*) echo S1R ;; esac; return; fi
   local x=""
   case $1 in
-    nginx) x="S4 S6 S10" ;; hyper) x="S6" ;; xitca) x="S6 S9" ;; ntex) x="S9" ;; haproxy) x="S10" ;;
+    nginx) x="S4 S6 S9 S10" ;; hyper) x="S6 S9" ;; xitca) x="S6 S9" ;; ntex|may-minihttp) x="S9" ;; haproxy) x="S9 S10" ;;
     cameleer-http-min) x="S6 SLEEP" ;; simoom-deferred*|simoom-blocking) x="SLEEP" ;;
+    # campaign 3: the scenarios of campaign 2's losses (K4-K8) on simoom itself, in the lanes
+    simoom) x="S4 S6 S9 S10" ;; simoom-uring) x="S6 S9 S10" ;; simoom-default) x="S6" ;;
   esac
   echo "S1 S3 S5 S7 S8 H3 CPU $x COLD"
 }
@@ -277,8 +279,12 @@ run_server() { # run_server ROUND HOST SRVNAME NAME SCENARIOS
           sb sweep --url "http://$S:$hp/" --proto h2c --depth 100 --conns 64 --agents "$AGENTS" $SWEEP_ONE $(hint_arg "$n" S8 64) --slo-us 5000 --label "$tag scenario=S8 conns=64 streams=100" --out $OUT/hdr/r$r-$n-S8 | rec ""
         fi ;;
       S9)
+        # S9_RATE (campaign 3): one absolute offered rate for every server (about 1.15 x the c-4 NIC
+        # ceiling), so the rows compare; without it, 2 x the server's own S1 SLO at 1024 connections
         local slo; slo=$(slo_of "$r" "$n" S1 1024)
-        if [ "$slo" -gt 0 ]; then
+        if [ -n "${S9_RATE:-}" ]; then
+          sb load --url "$url" --conns 1024 --rate $S9_RATE --agents "$AGENTS" --warmup 5 --duration 30 --label "$tag scenario=S9 conns=1024 slo_rps=$slo offered=abs" | rec ""
+        elif [ "$slo" -gt 0 ]; then
           sb load --url "$url" --conns 1024 --rate $((slo * 2)) --agents "$AGENTS" --warmup 5 --duration 30 --label "$tag scenario=S9 conns=1024 slo_rps=$slo" | rec ""
         fi ;;
       S10)
@@ -336,7 +342,7 @@ run_server() { # run_server ROUND HOST SRVNAME NAME SCENARIOS
         on "$S" "$SRVSH stop" >/dev/null 2>&1
         on "$S" "b=\$($SRVSH binary $n); cp \"\$b\" /tmp/size.bin && strip -s /tmp/size.bin 2>/dev/null; echo \"SIZE bytes=\$(stat -c %s /tmp/size.bin) unstripped=\$(stat -c %s \"\$b\") path=\$b\"" | rec "$tag"
         if [ $n = simoom ]; then
-          for v in bench_server:/root/simoom/target/release/examples/bench_server min_server:/root/simoom/target-minplain/release/examples/min_server min_server-tls:/root/simoom/target-mintls/release/examples/min_server; do
+          for v in bench_server:/root/simoom/target/release/examples/bench_server min_server:/root/simoom/target-minplain/release/examples/min_server min_server-tls:/root/simoom/target-mintls/release/examples/min_server min_server-h1:/root/simoom/target-minh1/release/examples/min_server; do
             on "$S" "b=${v#*:}; cp \$b /tmp/size.bin && strip -s /tmp/size.bin; echo \"SIZE variant=${v%%:*} bytes=\$(stat -c %s /tmp/size.bin) unstripped=\$(stat -c %s \$b) path=\$b\"" | rec "$tag"
           done
         fi
@@ -348,6 +354,7 @@ run_server() { # run_server ROUND HOST SRVNAME NAME SCENARIOS
           simoom) cv="bench_server|/root/simoom/target/release/examples/bench_server --addr 0.0.0.0:8080
 min_server|/root/simoom/target-minplain/release/examples/min_server --addr 0.0.0.0:8080
 min_server-tls|/root/simoom/target-mintls/release/examples/min_server --addr 0.0.0.0:8080 --tls-addr 0.0.0.0:8443 $cert
+min_server-h1|/root/simoom/target-minh1/release/examples/min_server --addr 0.0.0.0:8080
 server-no-tls|/root/simoom/target/release/simoom-server --addr 0.0.0.0:8080 --no-tls" ;;
           cameleer-http-min) cv="plain|/root/cameleer/target-min/release/cameleer-http-min --addr 0.0.0.0:8080" ;;
         esac

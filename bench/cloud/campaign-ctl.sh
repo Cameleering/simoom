@@ -53,7 +53,7 @@ ship() {
   mkdir -p "$STATE_DIR"
   # the simoom crates pinned to SIMOOM_REV (other agents edit the working tree), the benchmark's
   # own paths from the working tree (bench/cloud/pin-tree.sh)
-  local rev="${SIMOOM_REV:-1e50579}"
+  local rev="${SIMOOM_REV:?set SIMOOM_REV to the measured commit}"
   log "packing simoom at $rev + the benchmark paths of the working tree"
   SIMOOM_REV="$rev" bash "$ROOT/bench/cloud/pin-tree.sh" --tgz "$STATE_DIR/simoom.tgz"
   tar -xzOf "$STATE_DIR/simoom.tgz" ./PIN.txt > "$STATE_DIR/tree.txt"
@@ -175,6 +175,7 @@ LOADS="$loads"
 SERVERS="$srv"
 ROUNDS="1 2 3"
 DEADLINE="${DEADLINE:-0}"
+S9_RATE="${S9_RATE:-}"
 PROF_SERVERS="$(eval echo \${PROF$i:-})"
 PROF_CASES="${PROF_CASES:-s1 s3 s5 s8}"
 EOF
@@ -212,6 +213,11 @@ waitssh() {
   done
 }
 
+# an armed safety net whose deadline passed while the operator was away (machine restarted, task
+# missed) fires before anything else; the token stays on this machine
+case "${1:-status}" in down|merge|sh) ;; *)
+  if [ -f "$STATE_DIR/safety-net.deadline" ]; then BENCH_STATE="$STATE_DIR" bash "$ROOT/bench/cloud/safety-net.sh" due || true; fi ;;
+esac
 case "${1:-status}" in
   all) bash "$ROOT/bench/cloud/droplets.sh" up && waitssh && setup && start ;;
   syncbench) syncbench ;;

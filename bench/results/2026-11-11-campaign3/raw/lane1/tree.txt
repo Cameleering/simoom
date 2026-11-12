@@ -1,0 +1,10 @@
+simoom commit (measured): 28d2a6fded67f004ed24668ac9e6c460ec24547b
+overlaid from the working tree: crates/simoom-bench bench scripts/bench-facade.sh scripts/bench-modes.sh scripts/bench-validate.sh
+benchmark diff against 28d2a6f:
+ bench/cloud/campaign-ctl.sh       |  3 ++-
+ bench/cloud/campaign.sh           | 13 ++++++++++---
+ bench/cloud/node.sh               |  7 ++++++-
+ bench/competitors/simoom/setup.sh |  2 ++
+ 4 files changed, 20 insertions(+), 5 deletions(-)
+crates outside the overlay differ from the working tree in: 
+cameleer head: f42b5f3 (main, committed tree)

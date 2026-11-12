@@ -1,0 +1,189 @@
+--- session lane1
+==> 17:08:05 lane 1 start: rounds [1 2 3], servers [simoom may-minihttp haproxy xitca cameleer], loads [10.122.0.6 10.122.0.5], deadline 2026-11-11T19:02:58Z
+==> 17:08:07 round 1 on srvA: simoom (S1 S3 S5 S7 S8 H3 CPU S4 S6 S9 S10 COLD)
+==> 17:08:25   simoom S1
+==> 17:14:15   simoom S3
+==> 17:15:43   simoom S5
+==> 17:17:10   simoom S7
+==> 17:19:15   simoom S8
+==> 17:20:12   simoom H3
+==> 17:22:18   simoom CPU
+==> 17:22:42   simoom S4
+==> 17:24:17   simoom S6
+==> 17:26:21   simoom S9
+==> 17:26:59   simoom S10
+==> 17:28:51   simoom COLD
+==> 17:28:55 round 1 on srvA: may-minihttp (S1 S3 S5 CPU S9 COLD)
+==> 17:29:14   may-minihttp S1
+==> 17:34:22   may-minihttp S3
+==> 17:35:49   may-minihttp S5
+==> 17:37:16   may-minihttp CPU
+==> 17:37:40   may-minihttp S9
+==> 17:38:18   may-minihttp COLD
+==> 17:38:20 round 1 on srvA: haproxy (S1 S5 S7 S8 CPU S9 S10 COLD)
+==> 17:38:38   haproxy S1
+==> 17:42:57   haproxy S5
+==> 17:44:24   haproxy S7
+==> 17:46:29   haproxy S8
+==> 17:47:56   haproxy CPU
+==> 17:48:20   haproxy S9
+==> 17:48:58   haproxy S10
+==> 17:50:51   haproxy COLD
+==> 17:50:57 round 1 on srvA: xitca (S1 S5 CPU S6 S9 COLD)
+==> 17:51:15   xitca S1
+==> 17:55:36   xitca S5
+==> 17:57:02   xitca CPU
+==> 17:57:27   xitca S6
+==> 17:59:09   xitca S9
+==> 17:59:46   xitca COLD
+==> 17:59:49 round 1 on srvA: cameleer (S1 S3 S5 CPU COLD)
+==> 18:00:08   cameleer S1
+==> 18:04:27   cameleer S3
+==> 18:05:55   cameleer S5
+==> 18:07:22   cameleer CPU
+==> 18:07:46   cameleer COLD
+==> 18:07:48 lane 1 waiting for the other lanes to finish round 1
+==> 18:07:50 round 2 on srvB: simoom (S1R)
+==> 18:08:09   simoom S1R
+==> 18:09:47 round 2 on srvB: may-minihttp (S1R)
+==> 18:10:05   may-minihttp S1R
+==> 18:11:39 round 2 on srvB: haproxy (S1R)
+==> 18:11:58   haproxy S1R
+==> 18:13:40 round 2 on srvB: xitca (S1R)
+==> 18:13:57   xitca S1R
+==> 18:15:37 lane 1 waiting for the other lanes to finish round 2
+==> 18:17:59 round 3 on srvC: simoom (S1R)
+==> 18:18:18   simoom S1R
+==> 18:19:58 round 3 on srvC: may-minihttp (S1R)
+==> 18:20:16   may-minihttp S1R
+==> 18:21:57 round 3 on srvC: haproxy (S1R)
+==> 18:22:15   haproxy S1R
+==> 18:23:56 round 3 on srvC: xitca (S1R)
+==> 18:24:14   xitca S1R
+==> 18:25:54 profiles: simoom-prof
+==> 18:26:54 campaign done
+CAMPAIGN DONE 2026-11-11T18:26:54Z
+--- session lane2
+==> 17:08:07 lane 2 start: rounds [1 2 3], servers [simoom-uring hyper h2o simoom-builder], loads [10.122.0.8 10.122.0.4], deadline 2026-11-11T19:02:58Z
+==> 17:08:09 round 1 on srvB: simoom-uring (S1 S3 S5 S7 S8 H3 CPU S6 S9 S10 COLD)
+==> 17:08:27   simoom-uring S1
+==> 17:13:59   simoom-uring S3
+==> 17:15:28   simoom-uring S5
+==> 17:16:55   simoom-uring S7
+==> 17:18:52   simoom-uring S8
+==> 17:19:49   simoom-uring H3
+==> 17:21:54   simoom-uring CPU
+==> 17:22:19   simoom-uring S6
+==> 17:24:20   simoom-uring S9
+==> 17:24:58   simoom-uring S10
+==> 17:26:50   simoom-uring COLD
+==> 17:26:53 round 1 on srvB: hyper (S1 S3 S5 S8 CPU S6 S9 COLD)
+==> 17:27:11   hyper S1
+==> 17:32:47   hyper S3
+==> 17:33:59   hyper S5
+==> 17:35:27   hyper S8
+==> 17:36:47   hyper CPU
+==> 17:37:11   hyper S6
+==> 17:39:27   hyper S9
+==> 17:40:06   hyper COLD
+==> 17:40:08 round 1 on srvB: h2o (S1 S5 S7 S8 H3 CPU COLD)
+==> 17:40:27   h2o S1
+==> 17:44:44   h2o S5
+==> 17:46:11   h2o S7
+==> 17:48:15   h2o S8
+==> 17:49:13   h2o H3
+==> 17:51:19   h2o CPU
+==> 17:51:44   h2o COLD
+==> 17:51:52 round 1 on srvB: simoom-builder (S1 S3 S5 S7 S8 H3 CPU COLD)
+==> 17:52:11   simoom-builder S1
+==> 17:57:48   simoom-builder S3
+==> 17:59:16   simoom-builder S5
+==> 18:00:43   simoom-builder S7
+==> 18:02:47   simoom-builder S8
+==> 18:03:44   simoom-builder H3
+==> 18:05:53   simoom-builder CPU
+==> 18:06:18   simoom-builder COLD
+==> 18:06:21 lane 2 waiting for the other lanes to finish round 1
+==> 18:07:53 round 2 on srvC: simoom-uring (S1R)
+==> 18:08:12   simoom-uring S1R
+==> 18:09:54 round 2 on srvC: hyper (S1R)
+==> 18:10:13   hyper S1R
+==> 18:11:55 round 2 on srvC: h2o (S1R)
+==> 18:12:13   h2o S1R
+==> 18:13:53 round 2 on srvC: simoom-builder (S1R)
+==> 18:14:12   simoom-builder S1R
+==> 18:15:52 lane 2 waiting for the other lanes to finish round 2
+==> 18:17:54 round 3 on srvA: simoom-uring (S1R)
+==> 18:18:12   simoom-uring S1R
+==> 18:19:53 round 3 on srvA: hyper (S1R)
+==> 18:20:12   hyper S1R
+==> 18:21:51 round 3 on srvA: h2o (S1R)
+==> 18:22:10   h2o S1R
+==> 18:23:51 round 3 on srvA: simoom-builder (S1R)
+==> 18:24:10   simoom-builder S1R
+==> 18:25:50 campaign done
+CAMPAIGN DONE 2026-11-11T18:25:50Z
+--- session lane3
+==> 17:08:09 lane 3 start: rounds [1 2 3], servers [simoom-default simoom-deferred simoom-blocking cameleer-http-min nginx], loads [10.122.0.10 10.122.0.9], deadline 2026-11-11T19:02:58Z
+==> 17:08:11 round 1 on srvC: simoom-default (S1 S3 S5 S8 CPU S6 COLD)
+==> 17:08:30   simoom-default S1
+==> 17:14:16   simoom-default S3
+==> 17:15:44   simoom-default S5
+==> 17:17:12   simoom-default S8
+==> 17:18:32   simoom-default CPU
+==> 17:18:56   simoom-default S6
+==> 17:20:50   simoom-default COLD
+==> 17:20:53 round 1 on srvC: simoom-deferred (S1 S3 CPU SLEEP)
+==> 17:21:11   simoom-deferred S1
+==> 17:26:59   simoom-deferred S3
+==> 17:28:29   simoom-deferred CPU
+==> 17:28:53   simoom-deferred SLEEP
+==> 17:29:20 round 1 on srvC: simoom-blocking (S1 S3 CPU SLEEP)
+==> 17:29:39   simoom-blocking S1
+==> 17:35:25   simoom-blocking S3
+==> 17:36:53   simoom-blocking CPU
+==> 17:37:18   simoom-blocking SLEEP
+==> 17:37:44 round 1 on srvC: cameleer-http-min (S1 S5 S7 CPU S6 SLEEP COLD)
+==> 17:38:04   cameleer-http-min S1
+==> 17:42:24   cameleer-http-min S5
+==> 17:43:52   cameleer-http-min S7
+==> 17:45:59   cameleer-http-min CPU
+==> 17:46:24   cameleer-http-min S6
+==> 17:48:26   cameleer-http-min SLEEP
+==> 17:48:53   cameleer-http-min COLD
+==> 17:48:56 round 1 on srvC: nginx (S1 S5 S7 S8 H3 CPU S4 S6 S9 S10 COLD)
+==> 17:49:14   nginx S1
+==> 17:53:34   nginx S5
+==> 17:54:31   nginx S7
+==> 17:56:37   nginx S8
+==> 17:58:04   nginx H3
+==> 17:58:05   nginx CPU
+==> 17:58:29   nginx S4
+==> 18:00:04   nginx S6
+==> 18:02:01   nginx S9
+==> 18:02:39   nginx S10
+==> 18:04:31   nginx COLD
+==> 18:04:34 lane 3 waiting for the other lanes to finish round 1
+==> 18:07:57 round 2 on srvA: simoom-default (S1R)
+==> 18:08:16   simoom-default S1R
+==> 18:09:56 round 2 on srvA: simoom-deferred (S1R)
+==> 18:10:15   simoom-deferred S1R
+==> 18:11:54 round 2 on srvA: simoom-blocking (S1R)
+==> 18:12:13   simoom-blocking S1R
+==> 18:13:53 round 2 on srvA: cameleer-http-min (S1R)
+==> 18:14:13   cameleer-http-min S1R
+==> 18:15:52 round 2 on srvA: nginx (S1R)
+==> 18:16:10   nginx S1R
+==> 18:17:52 lane 3 waiting for the other lanes to finish round 2
+==> 18:17:54 round 3 on srvB: simoom-default (S1R)
+==> 18:18:12   simoom-default S1R
+==> 18:19:51 round 3 on srvB: simoom-deferred (S1R)
+==> 18:20:10   simoom-deferred S1R
+==> 18:21:50 round 3 on srvB: simoom-blocking (S1R)
+==> 18:22:09   simoom-blocking S1R
+==> 18:23:49 round 3 on srvB: cameleer-http-min (S1R)
+==> 18:24:09   cameleer-http-min S1R
+==> 18:25:50 round 3 on srvB: nginx (S1R)
+==> 18:26:08   nginx S1R
+==> 18:27:49 campaign done
+CAMPAIGN DONE 2026-11-11T18:27:49Z

@@ -16,6 +16,8 @@ SRV=/root/simoom/bench/competitors/server.sh
 CG=/sys/fs/cgroup/system.slice/bench-server.service
 W=/root/node
 mkdir -p $W
+# tcpstat FIELD...: the named counters of the Tcp: line in /proc/net/snmp (retransmits, K4)
+tcpstat() { awk -v f="$*" '/^Tcp:/ { if (!h) { for (i = 2; i <= NF; i++) c[$i] = i; h = 1 } else { n = split(f, k, " "); o = ""; for (j = 1; j <= n; j++) o = o (j > 1 ? " " : "") $(c[k[j]]); print o } }' /proc/net/snmp; }
 
 case "$1" in
   cost-begin)
@@ -53,6 +55,7 @@ case "$1" in
     pkill -f "# mon-$2\$" 2>/dev/null || true
     LC_ALL=C nohup bash -c "sar -n DEV 1 $3 # mon-$2" > "$W/mon-$2.net" 2>&1 < /dev/null &
     LC_ALL=C nohup bash -c "sar -u 1 $3 # mon-$2" > "$W/mon-$2.cpu" 2>&1 < /dev/null &
+    tcpstat RetransSegs OutSegs > "$W/mon-$2.tcp"
     ;;
   mon-end) # mon-end TAG LABEL: NICPEAK line, the highest per-second values seen
     pkill -f "# mon-$2\$" 2>/dev/null || true
@@ -63,7 +66,9 @@ case "$1" in
     pk=$(awk "$sec"' {if ($3 + $4 > m) m = $3 + $4} END {printf "%.0f", m}' "$W/mon-$2.net")
     mb=$(awk "$sec"' {v = ($5 + $6) * 8 / 1000; if (v > m) m = v} END {printf "%.0f", m}' "$W/mon-$2.net")
     cpu=$(awk '$1 ~ /^[0-9]+:[0-9]+:[0-9]+$/ && $2 == "all" {b = 100 - $8; if (b > m) m = b; if (b > 20) {s += $7; n++}; if ($7 > sm) sm = $7} END {printf "cpu_busy_max=%.1f steal_max=%.1f steal_avg_busy=%.1f busy_secs=%d", m, sm, (n ? s / n : 0), n}' "$W/mon-$2.cpu")
-    echo "NICPEAK $3 rxpck_max=$rx txpck_max=$tx pck_max=$pk mbit_max=$mb $cpu"
+    read -r rt0 os0 < "$W/mon-$2.tcp" 2>/dev/null || { rt0=0; os0=0; }
+    read -r rt1 os1 < <(tcpstat RetransSegs OutSegs)
+    echo "NICPEAK $3 rxpck_max=$rx txpck_max=$tx pck_max=$pk mbit_max=$mb $cpu retrans_segs=$((rt1 - rt0)) out_segs=$((os1 - os0))"
     ;;
   pss-end)
     kill "$(cat $W/pss.pid)" 2>/dev/null || true

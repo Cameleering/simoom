@@ -11,3 +11,5 @@ cargo build -q --release -p simoom --example bench_server --target-dir /root/sim
 # against cameleer-http-min (docs/STATUS.md); own target directories so features don't unify.
 cargo build -q --release -p simoom --example min_server --target-dir /root/simoom/target-minplain
 cargo build -q --release -p simoom --features tls --example min_server --target-dir /root/simoom/target-mintls
+# The edge build (http1 only, plan.md §0 and docs/BUGS.md K9), for size and cold start
+cargo build -q --release -p simoom --no-default-features --features http1 --example min_server --target-dir /root/simoom/target-minh1

@@ -1,0 +1,8 @@
+
+
+@[tracepoint:syscalls:sys_enter_mprotect]: 7
+@[tracepoint:syscalls:sys_enter_madvise]: 178
+@[tracepoint:syscalls:sys_enter_shutdown]: 256
+@[tracepoint:syscalls:sys_enter_epoll_wait]: 662956
+@[tracepoint:syscalls:sys_enter_sendto]: 949613
+@[tracepoint:syscalls:sys_enter_recvfrom]: 952372

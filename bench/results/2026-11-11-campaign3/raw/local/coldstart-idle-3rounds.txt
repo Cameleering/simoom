@@ -1,0 +1,12 @@
+LOCAL round=1 variant=min_server COLDSTART min_ms=0.67 median_ms=0.72 max_ms=1.07 runs=40
+LOCAL round=1 variant=min_server idle_pss_kb=962
+LOCAL round=1 variant=cameleer-http-min COLDSTART min_ms=0.73 median_ms=0.78 max_ms=1.05 runs=40
+LOCAL round=1 variant=cameleer-http-min idle_pss_kb=1065
+LOCAL round=2 variant=min_server COLDSTART min_ms=0.67 median_ms=0.70 max_ms=0.92 runs=40
+LOCAL round=2 variant=min_server idle_pss_kb=977
+LOCAL round=2 variant=cameleer-http-min COLDSTART min_ms=0.73 median_ms=0.77 max_ms=0.97 runs=40
+LOCAL round=2 variant=cameleer-http-min idle_pss_kb=897
+LOCAL round=3 variant=min_server COLDSTART min_ms=0.67 median_ms=0.72 max_ms=0.99 runs=40
+LOCAL round=3 variant=min_server idle_pss_kb=1025
+LOCAL round=3 variant=cameleer-http-min COLDSTART min_ms=0.71 median_ms=0.75 max_ms=0.92 runs=40
+LOCAL round=3 variant=cameleer-http-min idle_pss_kb=892

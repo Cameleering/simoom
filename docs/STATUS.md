@@ -9,6 +9,29 @@ _2026-11-07._ The repository was created and the workspace scaffolded. The desig
 Wave 1, crates built in parallel: `simoom-sys` + `simoom-rt`, `simoom-http1`, `simoom-hpack` +
 `simoom-h2`, `simoom-tls`, `simoom-quic` + `simoom-qpack` + `simoom-h3`.
 
+## Cloud benchmark campaign 3
+
+_2026-11-11._ simoom pinned at `28d2a6f` (K1-K10 in), three lanes on 9 DigitalOcean c-4 droplets
+against may-minihttp, hyper, xitca, h2o, nginx, haproxy, cameleer-http-min and Cameleer.
+Results, tables and analysis: `bench/results/2026-11-11-campaign3/` (`analysis.md`).
+
+- One droplet (srvC) had a degraded network path for every server, so only servers of the same
+  lane compare directly in the one-round scenarios; the analysis says which droplet each figure is
+  from.
+- Confirmed on the droplets: TLS handshakes +31% / +45% and S1 over TLS +65% against h2o; CPU per
+  request 11% below hyper; idle PSS below cameleer-http-min (K7); memory per idle connection level
+  with nginx at 100k (K8); 1 MiB TLS bodies no longer balloon memory (K2); slowloris no longer
+  churns (K6); the offload pool serves 100 ms handlers without 503s (K10); the http1-only build is
+  536 KB against may-minihttp's 515 KB (K9).
+- Still behind: S1 at 256 connections with epoll (-14%) and on degraded droplets, S1 at 1024
+  against hyper (-17%), in-time goodput under overload against nginx (K12, K13).
+- Start-up and memory against cameleer-http (same machine, WSL2): cold start passes plain and TLS;
+  idle memory passes plain; TLS idle PSS is +11% (K11, was +8-9% below).
+- Client (workstation, not a droplet): simoom-client at parity or ahead of Cameleer's client on
+  HTTP/1.1 and h2c, at 10-47% less CPU per request.
+- About 77 of the 90 droplet-hours were idle after an operator restart; the safety net now also
+  fires at logon and from the operator's next command (`bench/cloud/safety-net.sh due`).
+
 ## Start-up and memory against cameleer-http
 
 _2026-11-09._ Owner requirement (plan §0 item 7): cold start and memory within 5% of Cameleer's

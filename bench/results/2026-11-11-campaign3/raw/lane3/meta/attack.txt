@@ -1,0 +1,1 @@
+ATTACK slowloris=10000 slowread=1000 opened=11000 slowloris_open_end=10000 slowread_open_end=1000 slowloris_closed_by_server=10000 slowread_closed_by_server=0 reopen_failed=0 slowread_bytes=76677120 longest_closed_loris_s=60.0 duration_s=75

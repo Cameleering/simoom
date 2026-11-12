@@ -9,10 +9,18 @@
 #                              process, independent of the shell that armed them
 #   safety-net.sh fire         final incremental pull of the results (campaign-ctl.sh pull, at most
 #                              10 min), then delete; logs to $BENCH_STATE/safety-net.log
+#   safety-net.sh due          fire if the armed deadline has passed, else print the time left
+#                              (the scheduled task runs this at the deadline and at every logon,
+#                              and campaign-ctl.sh runs it before every command)
 #   safety-net.sh delete       delete now, without the pull
 #   safety-net.sh disarm       remove the task and stop the watcher
 #   safety-net.sh status       the task, the watcher, the deadline and what is still alive
 #   safety-net.sh test         arm a task 2 minutes ahead with DRY=1 (lists, deletes nothing)
+#
+# Campaign 3 (2026-11-11) lost about 77 droplet-hours although the net was armed: the machine
+# restarted, the watcher process died with the session, and the task (registered for the logged-on
+# user only) never ran. Hence `due`: the task also triggers at logon, and the operator's next
+# campaign-ctl.sh command fires an overdue net before doing anything else.
 #
 # Deletes only droplets that carry the simoom-bench tag AND whose name starts with simoom-bench-,
 # re-read by id just before the delete; never ubuntu-s-4vcpu-8gb-blr1, never an untagged droplet.
@@ -83,12 +91,12 @@ case "${1:-status}" in
     at=$(( $(date +%s) + secs ))
     echo "$at" > "$BENCH_STATE/safety-net.deadline"
     out="${BENCH_OUT:-$ROOT/bench/results/$(date -u +%F)-${LABEL:-campaign2}}"
-    cmd="cd '$ROOT' && BENCH_STATE='$BENCH_STATE' BENCH_OUT='$out' DO_TOKEN_FILE='$DO_TOKEN_FILE' SESSION='${SESSION:-s1}' DRY='${DRY:-0}' bash bench/cloud/safety-net.sh fire"
+    cmd="cd '$ROOT' && BENCH_STATE='$BENCH_STATE' BENCH_OUT='$out' DO_TOKEN_FILE='$DO_TOKEN_FILE' SESSION='${SESSION:-s1}' DRY='${DRY:-0}' bash bench/cloud/safety-net.sh due"
     printf '%s\n' "$cmd" > "$BENCH_STATE/safety-net.cmd"
     # the scheduled task: wakes the machine, starts as soon as possible if the time was missed
     powershell.exe -NoProfile -Command "
       \$a = New-ScheduledTaskAction -Execute '$BASH_EXE' -Argument '-lc \"bash ''$BENCH_STATE/safety-net.cmd''\"'
-      \$t = New-ScheduledTaskTrigger -Once -At ([DateTimeOffset]::FromUnixTimeSeconds($at).LocalDateTime)
+      \$t = @((New-ScheduledTaskTrigger -Once -At ([DateTimeOffset]::FromUnixTimeSeconds($at).LocalDateTime)), (New-ScheduledTaskTrigger -AtLogOn -User \$env:USERNAME))
       \$s = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 1)
       Register-ScheduledTask -TaskName '$TASK' -Action \$a -Trigger \$t -Settings \$s -Force | Out-Null
       (Get-ScheduledTask -TaskName '$TASK').State" || { echo "scheduled task failed" >&2; exit 1; }
@@ -103,6 +111,17 @@ case "${1:-status}" in
       timeout 600 bash "$ROOT/bench/cloud/campaign-ctl.sh" pull >> "$LOG" 2>&1 && log "final pull done" || log "final pull failed or timed out"
     fi
     delete_all
+    ;;
+  due)
+    [ -f "$BENCH_STATE/safety-net.deadline" ] || { echo "safety net: not armed" >&2; exit 0; }
+    d=$(cat "$BENCH_STATE/safety-net.deadline")
+    if [ "$(date +%s)" -ge "$d" ]; then
+      log "deadline $(date -u -d @"$d" +%FT%TZ) has passed: firing now"
+      "$0" fire
+      rm -f "$BENCH_STATE/safety-net.deadline"
+    else
+      echo "safety net: $(( (d - $(date +%s)) / 60 )) min left" >&2
+    fi
     ;;
   delete) delete_all ;;
   disarm)

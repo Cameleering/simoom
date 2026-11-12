@@ -449,7 +449,7 @@ def main():
 
     s9 = [x for x in R if x.get("scenario") == "S9"]
     if s9:
-        w("## S9: overload at 2 × the S1 SLO throughput (1024 connections)\n")
+        w("## S9: overload, 1024 connections (offered: one absolute rate from campaign 3 on, 2 × the server's S1 SLO before)\n")
         w("Goodput: 2xx responses per second in the window; within SLO: answered ≤ 1 ms after the intended time; admitted p99: latency of the answered requests from when they were actually sent.\n")
         w("| server | offered | achieved | goodput | goodput within SLO | admitted p50 / p99 / p99.9 µs | errors |")
         w("|---|---:|---:|---:|---:|---|---:|")
