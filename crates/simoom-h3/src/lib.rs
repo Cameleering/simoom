@@ -374,7 +374,13 @@ impl Http3 {
         if let Some(r) = self.reqs.get_mut(&id) {
             r.send_done = true;
             r.out.clear();
-            self.events.push_back(H3Event::Reset { stream: id, code: code_ });
+            // STOP_SENDING ends only our sending direction. With H3_NO_ERROR the peer already has
+            // what it needs: a server may answer before it has read the whole request, and the
+            // client must not discard that response (RFC 9114 §4.1.1), so the receiving side goes
+            // on. Any other code abandons the request.
+            if code_ != code::NO_ERROR {
+                self.events.push_back(H3Event::Reset { stream: id, code: code_ });
+            }
             self.maybe_drop(id);
         }
         Ok(())

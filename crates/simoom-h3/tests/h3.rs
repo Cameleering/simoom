@@ -495,3 +495,60 @@ fn event_driven_response_larger_than_the_stream_window_finishes() {
     assert!(ok, "server sent {sent} of {}; client got {}", body.len(), cl.resp.get(&id).map_or(0, |m| m.body.len()));
     assert!(cl.resp[&id].body == body);
 }
+
+/// A server that has the request it needs stops reading with STOP_SENDING(H3_NO_ERROR) and
+/// answers (as h3 over quinn does after every request). RFC 9114 §4.1.1: the client must not
+/// discard the response. Both a GET whose FIN was already sent and a POST still uploading.
+#[test]
+fn stop_sending_no_error_keeps_the_response() {
+    for (req, fin) in [(get("/stop"), true), (post("/upload", 100_000), false)] {
+        let mut h = H3Pair::new(Link::default(), 41, Some(H3Config::default()), H3Config::default());
+        let (h3, conn) = h.client_mut();
+        let id = h3.send_request(conn, &refs(&req), fin).unwrap();
+        if !fin {
+            let chunk = vec![7u8; 4096];
+            h3.send_body(conn, id, &chunk, false).unwrap();
+        }
+        let mut answered = false;
+        let mut cl = Client::default();
+        let ok = h.run(LIMIT, |h| {
+            let events: Vec<H3Event> = h.sev.drain(..).collect();
+            if !answered && events.iter().any(|e| matches!(e, H3Event::Headers { stream, .. } if *stream == id)) {
+                answered = true;
+                h.sconn().stream_stop(id, code::NO_ERROR).unwrap();
+                let (h3, conn) = h.server_mut();
+                h3.send_headers(conn, id, &[(b":status", b"200"), (b"content-length", b"4")], false).unwrap();
+                h3.send_body(conn, id, b"done", true).unwrap();
+            }
+            cl.step(h);
+            cl.resp.get(&id).is_some_and(|m| m.finished || m.reset.is_some())
+        });
+        assert!(ok, "no outcome (fin={fin})");
+        let m = &cl.resp[&id];
+        assert_eq!(m.reset, None, "the response was discarded (fin={fin})");
+        assert_eq!(pseudo(&m.headers, b":status"), Some(&b"200"[..]));
+        assert_eq!(m.body, b"done");
+    }
+}
+
+/// STOP_SENDING with an error code still abandons the request.
+#[test]
+fn stop_sending_with_an_error_resets_the_request() {
+    let mut h = H3Pair::new(Link::default(), 43, Some(H3Config::default()), H3Config::default());
+    let req = post("/upload", 100_000);
+    let (h3, conn) = h.client_mut();
+    let id = h3.send_request(conn, &refs(&req), false).unwrap();
+    let mut stopped = false;
+    let mut cl = Client::default();
+    let ok = h.run(LIMIT, |h| {
+        let events: Vec<H3Event> = h.sev.drain(..).collect();
+        if !stopped && events.iter().any(|e| matches!(e, H3Event::Headers { stream, .. } if *stream == id)) {
+            stopped = true;
+            h.sconn().stream_stop(id, code::REQUEST_REJECTED).unwrap();
+        }
+        cl.step(h);
+        cl.resp.get(&id).is_some_and(|m| m.reset.is_some())
+    });
+    assert!(ok);
+    assert_eq!(cl.resp[&id].reset, Some(code::REQUEST_REJECTED));
+}
