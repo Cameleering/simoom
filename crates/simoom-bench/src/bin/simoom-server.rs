@@ -9,12 +9,18 @@
 //! simoom-server [--addr 0.0.0.0:8080] [--tls-addr 0.0.0.0:8443] [--quic-addr 0.0.0.0:8443]
 //!     [--cert cert.pem --key key.pem] [--threads N] [--backend epoll|io_uring|auto]
 //!     [--mode fixed|builder|deferred|deferred-stream|blocking] [--workers 512] [--body-buffer N]
-//!     [--keepalive-s 120] [--no-quic] [--no-tls] [--no-watchdog]
+//!     [--keepalive-s 120] [--no-quic] [--no-tls] [--no-watchdog] [--stats-s N]
+//!     [--recv-buffers N]
 //! ```
 //!
 //! `--mode fixed` answers `/` with a pre-serialized `StaticReply` (the same path as the facade's
 //! `bench_server` example); `--mode builder` builds every reply. Large bodies always go out as
 //! `body_static` (no copy of the body per request). Runs until killed.
+//!
+//! `--stats-s N` prints a `STATS` line to standard error every N seconds: per loop the open
+//! connections and the system calls since the last line (K12: whether the load is spread evenly).
+//! `--recv-buffers N` sets `simoom_rt::Config::recv_buffers`. `--threads N` (not 0) also turns
+//! off `Config::leave_cpu_for_network`, which applies only to the default loop count.
 //!
 //! The blocking paths, the way Cameleer calls simoom (its routes are blocking):
 //! - `--mode deferred`: `/`, `/echo` and `/sleep` call `Reply::defer` and hand the `Responder` to
@@ -106,6 +112,8 @@ fn main() {
     let mut watchdog = true;
     let mut workers = 512usize;
     let mut body_buffer: Option<usize> = None;
+    let mut stats_s = 0u64;
+    let mut recv_buffers = 0usize;
     let v: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < v.len() {
@@ -137,6 +145,8 @@ fn main() {
             "--workers" => workers = val.parse().expect("--workers"),
             "--body-buffer" => body_buffer = Some(val.parse().expect("--body-buffer")),
             "--keepalive-s" => keepalive = val.parse().expect("--keepalive-s"),
+            "--stats-s" => stats_s = val.parse().expect("--stats-s"),
+            "--recv-buffers" => recv_buffers = val.parse().expect("--recv-buffers"),
             "--backend" => {
                 backend = match val.as_str() {
                     "epoll" => Backend::Epoll,
@@ -221,7 +231,11 @@ fn main() {
             }
         }
     };
-    let mut b = Server::builder().listen(addr.as_str()).threads(threads).backend(backend).limits(limits);
+    let mut b = Server::builder().listen(addr.as_str()).threads(threads).backend(backend).limits(limits).runtime(move |c| {
+        if recv_buffers > 0 {
+            c.recv_buffers = recv_buffers;
+        }
+    });
     b = if mode == "blocking" {
         // simoom's own offload pool runs the whole service
         b.service(simoom::blocking(move |mut req: OwnedRequest| match req.path() {
@@ -260,7 +274,29 @@ fn main() {
         server.backend(),
         server.fallback_reason().map(|r| format!(" ({r})")).unwrap_or_default()
     );
+    if stats_s == 0 {
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
+    let mut last = server.stats();
     loop {
-        std::thread::sleep(Duration::from_secs(3600));
+        std::thread::sleep(Duration::from_secs(stats_s));
+        let s = server.stats();
+        let mut line = format!("STATS requests={} stalls={} offloaded_routes={} overloaded={} shed={}", s.requests - last.requests, s.stalls, s.offloaded_routes, s.overloaded, s.shed);
+        for (i, (l, p)) in s.runtime.loops.iter().zip(last.runtime.loops.iter()).enumerate() {
+            let d = |a: u64, b: u64| a.saturating_sub(b);
+            line.push_str(&format!(
+                " loop{i}=active:{},recv:{},send:{},waits:{},sleeps:{},events:{}",
+                l.active,
+                d(l.driver.recv_calls, p.driver.recv_calls),
+                d(l.driver.send_calls, p.driver.send_calls),
+                d(l.driver.waits, p.driver.waits),
+                d(l.driver.sleeps, p.driver.sleeps),
+                d(l.driver.os_events, p.driver.os_events)
+            ));
+        }
+        eprintln!("{line}");
+        last = s;
     }
 }

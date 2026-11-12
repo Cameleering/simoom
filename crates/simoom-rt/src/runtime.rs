@@ -84,6 +84,13 @@ pub struct Config {
     /// Stack size of the loop threads; `None` keeps std's default (2 MiB, or `RUST_MIN_STACK`).
     /// Only touched pages cost memory, so this mostly matters for address space.
     pub stack_size: Option<usize>,
+    /// With the default loop count (`threads` 0, no `cpus`) on 4 CPUs or more: one loop fewer
+    /// than CPUs when the network's receive processing concentrates on one CPU (a NIC with a
+    /// single receive queue and no RPS, [`simoom_sys::cpu::net_rx_concentrated`]). That CPU spends
+    /// most of its time in softirq at high packet rates, and a loop sharing it falls behind the
+    /// others with every connection it holds (K12: S1 at 256 connections on a 4-vCPU droplet,
+    /// 111k req/s with four loops against 151k with three). Default `true`.
+    pub leave_cpu_for_network: bool,
 }
 
 impl Default for Config {
@@ -110,6 +117,7 @@ impl Default for Config {
             linger: Duration::from_secs(2),
             linger_bytes: 256 * 1024,
             lazy_loops: false,
+            leave_cpu_for_network: true,
         }
     }
 }
@@ -295,6 +303,35 @@ pub struct LoopSnapshot {
     pub timers: u64,
 }
 
+/// The loop count for `cpus` CPUs when the configuration leaves it to the runtime (see
+/// [`Config::leave_cpu_for_network`]).
+fn default_loops(cfg: &Config, cpus: usize) -> usize {
+    loops_for(cfg.leave_cpu_for_network, cpus, simoom_sys::cpu::net_rx_concentrated)
+}
+
+/// [`default_loops`] with the receive-path check as a function (read only when it matters).
+fn loops_for(leave: bool, cpus: usize, concentrated: impl FnOnce() -> bool) -> usize {
+    if leave && cpus >= 4 && concentrated() {
+        cpus - 1
+    } else {
+        cpus
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loops_for;
+
+    #[test]
+    fn a_cpu_is_left_to_a_concentrated_receive_path_from_four_cpus() {
+        assert_eq!(loops_for(true, 4, || true), 3);
+        assert_eq!(loops_for(true, 16, || true), 15);
+        assert_eq!(loops_for(true, 4, || false), 4, "receive work spread: every CPU");
+        assert_eq!(loops_for(true, 3, || panic!("not read below 4 CPUs")), 3);
+        assert_eq!(loops_for(false, 8, || panic!("not read when turned off")), 8);
+    }
+}
+
 /// Runtime counters.
 #[derive(Clone, Debug, Default)]
 pub struct Stats {
@@ -436,7 +473,7 @@ impl Builder {
         let n = match (cfg.threads, &cfg.cpus) {
             (0, Some(_)) => cpus.len().max(1),
             (0, None) if quota_later => cpus.len().max(1),
-            (0, None) => simoom_sys::cpu::cpu_count(),
+            (0, None) => default_loops(&cfg, simoom_sys::cpu::cpu_count()),
             (t, _) => t,
         };
         cfg.threads = n;
@@ -556,7 +593,7 @@ impl Builder {
                     let helper = crate::spawn(std::thread::Builder::new().name(format!("{}-start", cfg.thread_name)), Box::new(move || {
                         let mut later = later;
                         if quota_later {
-                            later.truncate(simoom_sys::cpu::cpu_count().saturating_sub(1));
+                            later.truncate(default_loops(&cfg, simoom_sys::cpu::cpu_count()).saturating_sub(1));
                         }
                         let mut spawned = 0;
                         for setup in later {

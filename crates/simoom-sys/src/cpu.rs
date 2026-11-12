@@ -93,9 +93,64 @@ fn cgroup_quota() -> Option<usize> {
     }
 }
 
+/// Whether the network's receive processing concentrates on one CPU (K12): a NIC with a single
+/// receive queue and no RPS runs every packet's softirq on the CPU that takes its interrupt, as on
+/// DigitalOcean's 4-vCPU droplets (about 65% of that CPU at 165k packets/s). Read from the `NET_RX`
+/// line of `/proc/softirqs`: true when at most half of the CPUs did the receive work since boot
+/// (a CPU counts when it did at least half of an even share), and there was some. A droplet
+/// with two NICs (public and private, a queue each) shows two such CPUs out of four. Linux only;
+/// false elsewhere or when the file can't be read.
+#[inline(never)]
+pub fn net_rx_concentrated() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // The NET_RX line is the fifth: 4 KiB holds it whole up to about 70 CPUs (a cut line has
+        // no newline and is not counted).
+        let mut buf = [0u8; 4096];
+        rx_concentrated(read_small_bytes("/proc/softirqs", &mut buf))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+/// The parsing half of [`net_rx_concentrated`].
+#[cfg(target_os = "linux")]
+fn rx_concentrated(softirqs: &[u8]) -> bool {
+    // the first `RX:` is NET_RX's (NET_TX comes before it, BLOCK and the rest after)
+    let Some(at) = (2..softirqs.len()).find(|&i| softirqs[i] == b':' && softirqs[i - 1] == b'X' && softirqs[i - 2] == b'R') else { return false };
+    let rest = &softirqs[at + 1..];
+    let Some(end) = rest.iter().position(|&b| b == b'\n') else { return false };
+    let line = &rest[..=end];
+    let (total, cpus) = scan(line, 0);
+    // a CPU counts as busy when it did at least half of an even share of the receive work
+    let (busy, _) = scan(line, total.div_ceil(2 * cpus.max(1)).max(1));
+    total >= 10_000 && busy * 2 <= cpus
+}
+
+/// The numbers of a `/proc/softirqs` line (ending in a newline): with `min` 0 their sum and
+/// count; otherwise how many are at least `min`, and the count.
+#[cfg(target_os = "linux")]
+fn scan(line: &[u8], min: u64) -> (u64, u64) {
+    let (mut acc, mut n, mut cur, mut digits) = (0u64, 0u64, 0u64, false);
+    for &b in line {
+        if b.is_ascii_digit() {
+            cur = cur.saturating_mul(10).saturating_add(u64::from(b - b'0'));
+            digits = true;
+        } else if digits {
+            acc += if min == 0 { cur } else { u64::from(cur >= min) };
+            n += 1;
+            (cur, digits) = (0, false);
+        }
+    }
+    (acc, n)
+}
+
 /// Reads a small file into `buf` (one read: these kernel files are produced whole); empty when
 /// the file can't be read.
 #[cfg(target_os = "linux")]
+#[inline(never)]
 pub(crate) fn read_small_bytes<'b>(path: &str, buf: &'b mut [u8]) -> &'b [u8] {
     use std::io::Read;
     let n = std::fs::File::open(path).and_then(|mut f| f.read(buf)).unwrap_or(0);
@@ -241,6 +296,22 @@ mod tests {
         assert_eq!(parse_cpu_max(b"0 100000"), None);
         assert_eq!(parse_cpu_max(b""), None);
         assert!(cpu_count() <= allowed_cpus().len());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn net_rx_concentration() {
+        // a DigitalOcean c-4: one receive queue, its interrupt on CPU 2
+        let one = b"                    CPU0       CPU1       CPU2       CPU3\n          HI:          1          0          0          0\n      NET_TX:        120        300         90        410\n      NET_RX:       5521       8012    3082311      10022\n       BLOCK:          0          0          0          0\n";
+        assert!(rx_concentrated(one));
+        // the same droplet after boot: the public NIC's queue (CPU 3) and set-up traffic
+        assert!(rx_concentrated(b"      NET_RX:      15924         52       1618      14372\n"));
+        assert!(!rx_concentrated(b"      NET_RX:      15924         52       1618"), "a cut line");
+        let spread = b"      NET_RX:     810221     790112     802311     799022\n";
+        assert!(!rx_concentrated(spread));
+        assert!(!rx_concentrated(b"      NET_RX:        12         0       900         3\n"), "too little traffic to tell");
+        assert!(!rx_concentrated(b"no such line\n"));
+        let _ = net_rx_concentrated(); // reads the real file without failing
     }
 
     #[cfg(target_arch = "x86_64")]
