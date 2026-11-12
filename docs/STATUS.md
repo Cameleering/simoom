@@ -26,7 +26,9 @@ Results, tables and analysis: `bench/results/2026-11-11-campaign3/` (`analysis.m
 - Still behind: S1 at 256 connections with epoll (-14%) and on degraded droplets, S1 at 1024
   against hyper (-17%), in-time goodput under overload against nginx (K12, K13).
 - Start-up and memory against cameleer-http (same machine, WSL2): cold start passes plain and TLS;
-  idle memory passes plain; TLS idle PSS is +11% (K11, was +8-9% below).
+  idle memory passes plain; TLS idle PSS was +11% (K11). Fixed 2026-11-12: +3.3% (1,360 against
+  1,316.5 KB, 20 rounds); the gap was the P-256 table's build scratch left in the loop's malloc
+  arena, not code pages (`docs/BUGS.md` K11).
 - Client (workstation, not a droplet): simoom-client at parity or ahead of Cameleer's client on
   HTTP/1.1 and h2c, at 10-47% less CPU per request.
 - About 77 of the 90 droplet-hours were idle after an operator restart; the safety net now also
@@ -66,7 +68,8 @@ after 1,000 requests on one keep-alive connection, then with 1,000 idle connecti
 
 Cold start is within 5% or faster everywhere, plain memory on Linux is 2% lower. Above 5%:
 
-- **TLS PSS on Linux, +8-9%.** The anonymous memory is the same (224-240 KB against 208-220 KB);
+- **TLS PSS on Linux, +8-9%** (since fixed, K11: +3.3% on 2026-11-12; the cause was the P-256 table's
+  build scratch kept in the loop thread's malloc arena, not the code pages described next). The anonymous memory is the same (224-240 KB against 208-220 KB);
   the difference is file-backed pages of the binary touched at start (1,007-1,095 KB against
   937-1,097 KB, Cameleer's own figure moves by 100 KB from run to run). It is code, shared by
   every process that maps the same binary, and it does not grow with traffic: after 1,000
@@ -99,8 +102,8 @@ Cold start is within 5% or faster everywhere, plain memory on Linux is 2% lower.
 - The QUIC endpoint of each loop is built on its first datagram (`Stats::quic_endpoints`).
 - Receive buffers on epoll/kqueue start at 8 and double when a read finds the stock empty, up to
   `recv_buffers` (64 at once cost about 130 KiB per loop).
-- A P-256 key's public point is computed without the 53 KB base-point table when the key is
-  loaded (the first signature builds it, about 0.3 ms); the certificate is parsed once, and a
+- A P-256 key's public point is computed without the base-point table when the key is
+  loaded (the first signature builds it, 32 KB since K11, about 0.34 ms); the certificate is parsed once, and a
   `ServerConfig` clone shares it (`simoom-server` builds one for TCP and QUIC).
 - The cgroup CPU quota (about 40 µs of file reads) is read once per process, and with lazy loops
   only when the other loops start; the offload pool sizes itself on its first job.

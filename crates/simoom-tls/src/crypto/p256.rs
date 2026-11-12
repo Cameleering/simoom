@@ -8,10 +8,12 @@
 //!   the point at infinity as Z = 0, handled with masks. These formulas are wrong when both
 //!   inputs are the same point; the scalar multiplications below never add equal points, which
 //!   is proven at `mul_base` and `mul` (the scalar is first replaced by min(k, n - k)).
-//! - **Fixed base** (signing, key generation): signed 5-bit digits and a table of
-//!   d * 32^i * G for d = 1..16 and each of the 52 digit positions (53 KB, affine, built on
-//!   first use), so k * G is 52 mixed additions and no doublings.
-//! - **Variable base** (ECDH): the same signed digits over a table of 1..16 * P, 255 doublings
+//! - **Fixed base** (signing, key generation): signed 4-bit digits and a table of
+//!   d * 16^i * G for d = 1..8 and each of the 64 digit positions (32 KB, affine, built on
+//!   first use with no other heap), so k * G is 64 mixed additions and no doublings. Radix 32
+//!   took 52 additions over a 53 KB table; the 21 KB it saves count in every TLS server's
+//!   idle memory (K11).
+//! - **Variable base** (ECDH): signed 5-bit digits over a table of 1..16 * P, 255 doublings
 //!   and 52 additions.
 //! - **Verification** (public inputs): u1 * G + u2 * Q in one chain of doublings with width-5
 //!   NAF digits of both scalars (Straus-Shamir), in variable time.
@@ -348,6 +350,19 @@ fn booth5(k: &Fe) -> [i8; 52] {
     d
 }
 
+/// Signed radix-16 digits in [-7, 8] of k < 2^255: k = sum d[i] * 16^i. Branch-free. The
+/// top window holds bits 252..255 with bit 255 clear, so it ends without a carry.
+fn booth4(k: &Fe) -> [i8; 64] {
+    let mut d = [0i8; 64];
+    let mut carry = 0u64;
+    for (i, di) in d.iter_mut().enumerate() {
+        let v = ((k[i / 16] >> (4 * (i % 16))) & 15) + carry;
+        carry = (v + 7) >> 4;
+        *di = (v as i64 - (carry << 4) as i64) as i8;
+    }
+    d
+}
+
 /// |d| and an all-ones mask when d is negative.
 #[inline(always)]
 fn digit_abs(d: i8) -> (u64, u64) {
@@ -462,17 +477,17 @@ fn neg_point(p: &Jac) -> Jac {
 
 /// k * G, constant time.
 ///
-/// With k' = min(k, n - k) < 2^255 and its signed digits d[i], the loop adds
-/// t = d[i] * 32^i * G to s = sum_{j<i} d[j] * 32^j * G. As integers |s| < 32^i * 16/31 <
-/// |d[i]| * 32^i, so s != t, and |s - t| < 17 * 32^i < 2^255 < n for i <= 50; for i = 51,
-/// d[51] <= 1 and |s - t| < 2^255 * 47/31 < n. So s and t are never the same point; s = -t
-/// gives the point at infinity, which the masked selection handles like a zero s.
+/// With k' = min(k, n - k) < 2^255 and its signed digits d[i] in [-7, 8], the loop adds
+/// t = d[i] * 16^i * G to s = sum_{j<i} d[j] * 16^j * G. As integers |s| <= 8 * (16^i - 1) / 15
+/// < 16^i <= |d[i]| * 16^i, so s != t, and |s - t| < 16^i * (8 + 8/15) < 2^255.1 < n for
+/// i <= 63. So s and t are never the same point; s = -t gives the point at infinity, which the
+/// masked selection handles like a zero s.
 fn mul_base(k: &Fe) -> Jac {
     let (k, neg) = halve(k);
-    let digits = booth5(&k);
+    let digits = booth4(&k);
     let tbl = base_table();
     let mut acc = INFINITY;
-    for (row, &d) in tbl.iter().zip(digits.iter()) {
+    for (row, &d) in tbl.rows.iter().zip(digits.iter()) {
         let (abs, dneg) = digit_abs(d);
         let mut a = Affine { x: [0; 4], y: [0; 4] };
         for (j, e) in row.iter().enumerate() {
@@ -486,39 +501,62 @@ fn mul_base(k: &Fe) -> Jac {
     Jac { x: acc.x, y: sel(neg, &fneg(&acc.y), &acc.y), z: acc.z }
 }
 
-/// The base-point table: entry [i][d-1] = d * 32^i * G, affine, Montgomery form.
-fn base_table() -> &'static [[Affine; 16]] {
-    static T: OnceLock<Vec<[Affine; 16]>> = OnceLock::new();
+/// The fixed-base tables: `rows[i][d-1]` = d * 16^i * G, and `odd[j]` = (2j + 1) * G for the
+/// width-5 NAF digits of verification; affine, Montgomery form.
+struct BaseTable {
+    rows: Vec<[Affine; 8]>,
+    odd: [Affine; 8],
+}
+
+/// Built on first use, a row at a time with each row's Z coordinates inverted together, so the
+/// rows are the only heap allocation (K11: one batch over every point needed 160 KB of
+/// scratch, and glibc kept those pages resident in the arena of the loop thread that signed
+/// first).
+fn base_table() -> &'static BaseTable {
+    static T: OnceLock<BaseTable> = OnceLock::new();
     T.get_or_init(|| {
-        let g = Jac { x: to_mont(&GX), y: to_mont(&GY), z: ONE_MONT };
-        let mut proj = Vec::with_capacity(52 * 16);
-        let mut base = g;
-        for _ in 0..52 {
-            let row = multiples(&base);
-            proj.extend_from_slice(&row);
-            base = double(&row[15]); // 32 * base
+        // 16 multiples per row (the variable-base code's helpers, so no second copy of them):
+        // the 16th is the next row's base.
+        let mut rows = Vec::with_capacity(64);
+        let mut odd = [Affine { x: [0; 4], y: [0; 4] }; 8];
+        let mut base = Jac { x: to_mont(&GX), y: to_mont(&GY), z: ONE_MONT };
+        for i in 0..64 {
+            let m = multiples(&base);
+            let a = to_affine_row(&m);
+            if i == 0 {
+                odd = core::array::from_fn(|j| a[2 * j]);
+            }
+            rows.push(core::array::from_fn(|j| a[j]));
+            base = m[15]; // 16 * base
         }
-        // batch inversion of the Z coordinates (Montgomery's trick); no Z is zero
-        let mut prefix = Vec::with_capacity(proj.len());
-        let mut acc = ONE_MONT;
-        for p in &proj {
-            prefix.push(acc);
-            acc = fmul(&acc, &p.z);
-        }
-        let mut inv = finv(&acc);
-        let mut out = vec![Affine { x: [0; 4], y: [0; 4] }; proj.len()];
-        for i in (0..proj.len()).rev() {
-            let zi = fmul(&inv, &prefix[i]);
-            inv = fmul(&inv, &proj[i].z);
-            let zi2 = fsqr(&zi);
-            out[i] = Affine { x: fmul(&proj[i].x, &zi2), y: fmul(&proj[i].y, &fmul(&zi2, &zi)) };
-        }
-        out.chunks(16).map(|c| c.try_into().unwrap()).collect()
+        BaseTable { rows, odd }
     })
+}
+
+/// Affine forms of 16 points, none the point at infinity: one inversion for all of them
+/// (Montgomery's trick).
+#[inline(never)]
+fn to_affine_row(p: &[Jac; 16]) -> [Affine; 16] {
+    let mut prefix = [ONE_MONT; 16];
+    let mut acc = ONE_MONT;
+    for (pre, q) in prefix.iter_mut().zip(p) {
+        *pre = acc;
+        acc = fmul(&acc, &q.z);
+    }
+    let mut inv = finv(&acc);
+    let mut out = [Affine { x: [0; 4], y: [0; 4] }; 16];
+    for i in (0..16).rev() {
+        let zi = fmul(&inv, &prefix[i]);
+        inv = fmul(&inv, &p[i].z);
+        let zi2 = fsqr(&zi);
+        out[i] = Affine { x: fmul(&p[i].x, &zi2), y: fmul(&p[i].y, &fmul(&zi2, &zi)) };
+    }
+    out
 }
 
 /// [1P, 2P, ..., 16P] for a point P that is not the point at infinity (no addition below adds
 /// equal points: jP + P with 2 <= j <= 15).
+#[inline(never)]
 fn multiples(p: &Jac) -> [Jac; 16] {
     let mut t = [*p; 16];
     for i in 1..16 {
@@ -591,8 +629,8 @@ fn wnaf5(k: &Fe) -> [i8; 257] {
 }
 
 /// u1 * G + u2 * P for public scalars and P, in variable time (Straus-Shamir: one chain of
-/// doublings, width-5 NAF digits of both scalars; the odd multiples of G come from the first
-/// row of the fixed-base table).
+/// doublings, width-5 NAF digits of both scalars; the odd multiples of G come from the
+/// fixed-base table).
 fn mul2_vartime(u1: &Fe, p: &Jac, u2: &Fe) -> Jac {
     let (n1, n2) = (wnaf5(u1), wnaf5(u2));
     let p2 = double(p);
@@ -600,9 +638,9 @@ fn mul2_vartime(u1: &Fe, p: &Jac, u2: &Fe) -> Jac {
     for i in 1..8 {
         odd[i] = add_vartime(&odd[i - 1], &p2);
     }
-    let g = &base_table()[0];
+    let g = &base_table().odd;
     let gj = |d: i8| -> Jac {
-        let a = &g[(d.unsigned_abs() - 1) as usize];
+        let a = &g[((d.unsigned_abs() - 1) / 2) as usize];
         Jac { x: a.x, y: if d < 0 { fneg(&a.y) } else { a.y }, z: ONE_MONT }
     };
     let top = (0..257).rev().find(|&i| n1[i] != 0 || n2[i] != 0).unwrap_or(0);
@@ -1023,6 +1061,46 @@ mod tests {
         check(N_HALF);
         check([u64::MAX, u64::MAX, u64::MAX, (1 << 63) - 1]);
         check([0x0842_1084_2108_4210; 4]);
+        for _ in 0..100 {
+            let mut k = from_be(&crate::crypto::rng::array::<32>());
+            k[3] >>= 1;
+            check(k);
+        }
+    }
+
+    #[test]
+    fn radix16_digits_reconstruct_the_scalar() {
+        let check = |k: Fe| {
+            let d = booth4(&k);
+            assert!(d.iter().all(|&x| (-7..=8).contains(&x)), "{d:?}");
+            // sum d[i] 16^i from the top, in 5-limb two's complement
+            let mut v = [0u64; 5];
+            for &di in d.iter().rev() {
+                let mut c = 0u64;
+                for l in v.iter_mut() {
+                    let t = ((*l as u128) << 4) | c as u128;
+                    *l = t as u64;
+                    c = (t >> 64) as u64;
+                }
+                let ext = if di < 0 { u64::MAX } else { 0 };
+                let (s, mut cy) = v[0].overflowing_add(di as i64 as u64);
+                v[0] = s;
+                for l in v.iter_mut().skip(1) {
+                    let (s1, c1) = l.overflowing_add(ext);
+                    let (s2, c2) = s1.overflowing_add(cy as u64);
+                    *l = s2;
+                    cy = c1 | c2;
+                }
+            }
+            assert_eq!(&v[..4], &k[..], "{k:x?}");
+            assert_eq!(v[4], 0);
+        };
+        check([0; 4]);
+        check([1, 0, 0, 0]);
+        check(N_HALF);
+        check([u64::MAX, u64::MAX, u64::MAX, (1 << 63) - 1]);
+        check([0x8888_8888_8888_8888, 0x8888_8888_8888_8888, 0x8888_8888_8888_8888, 0x0888_8888_8888_8888]);
+        check([0x7777_7777_7777_7777; 4]);
         for _ in 0..100 {
             let mut k = from_be(&crate::crypto::rng::array::<32>());
             k[3] >>= 1;

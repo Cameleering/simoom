@@ -158,39 +158,49 @@ fn eq(a: u64, b: u64) -> u64 {
 }
 
 /// Table entry [i][j-1] = j * 256^i * B.
+///
+/// Built four rows at a time, each group's Z coordinates inverted together, so the table
+/// itself is the only heap allocation (K11: one batch over all 256 points left its scratch
+/// resident in the arena of the thread that used the table first).
 fn base_table() -> &'static [[Niels; 8]] {
     static T: OnceLock<Vec<[Niels; 8]>> = OnceLock::new();
     T.get_or_init(|| {
         let c = consts();
-        let mut proj = Vec::with_capacity(256);
+        let mut t = Vec::with_capacity(32);
         let mut base = c.base;
-        for _ in 0..32 {
-            let mut acc = base;
-            proj.push(acc);
-            for _ in 2..=8 {
-                acc = acc.add(&base);
-                proj.push(acc);
+        for _ in 0..8 {
+            let mut proj = [c.base; 32];
+            for row in proj.chunks_mut(8) {
+                let mut acc = base;
+                row[0] = acc;
+                for e in &mut row[1..] {
+                    acc = acc.add(&base);
+                    *e = acc;
+                }
+                for _ in 0..8 {
+                    base = base.double();
+                }
             }
-            for _ in 0..8 {
-                base = base.double();
+            // batch inversion of Z
+            let mut prefix = [Fe::ONE; 32];
+            let mut acc = Fe::ONE;
+            for (pre, p) in prefix.iter_mut().zip(&proj) {
+                *pre = acc;
+                acc = acc.mul(p.z);
+            }
+            let mut inv = acc.invert();
+            let mut out = [NIELS_IDENTITY; 32];
+            for i in (0..32).rev() {
+                let zi = inv.mul(prefix[i]);
+                inv = inv.mul(proj[i].z);
+                let (x, y) = (proj[i].x.mul(zi), proj[i].y.mul(zi));
+                out[i] = Niels { ypx: y.add(x), ymx: y.sub(x), xy2d: x.mul(y).mul(c.d2) };
+            }
+            for row in out.chunks(8) {
+                t.push(row.try_into().unwrap());
             }
         }
-        // batch inversion of Z
-        let mut prefix = Vec::with_capacity(proj.len());
-        let mut acc = Fe::ONE;
-        for p in &proj {
-            prefix.push(acc);
-            acc = acc.mul(p.z);
-        }
-        let mut inv = acc.invert();
-        let mut out = vec![NIELS_IDENTITY; proj.len()];
-        for i in (0..proj.len()).rev() {
-            let zi = inv.mul(prefix[i]);
-            inv = inv.mul(proj[i].z);
-            let (x, y) = (proj[i].x.mul(zi), proj[i].y.mul(zi));
-            out[i] = Niels { ypx: y.add(x), ymx: y.sub(x), xy2d: x.mul(y).mul(c.d2) };
-        }
-        out.chunks(8).map(|ch| ch.try_into().unwrap()).collect()
+        t
     })
 }
 

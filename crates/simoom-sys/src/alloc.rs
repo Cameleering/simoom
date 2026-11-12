@@ -25,6 +25,8 @@ static LIVE: AtomicI64 = AtomicI64::new(0);
 
 thread_local! {
     static LOCAL: Cell<i64> = const { Cell::new(0) };
+    /// The highest value `LOCAL` reached since the last [`reset_thread_peak`].
+    static PEAK: Cell<i64> = const { Cell::new(0) };
 }
 
 fn add(n: i64) {
@@ -32,7 +34,11 @@ fn add(n: i64) {
     if n > 0 {
         CALLS.fetch_add(1, Ordering::Relaxed);
     }
-    let _ = LOCAL.try_with(|c| c.set(c.get() + n));
+    let _ = LOCAL.try_with(|c| {
+        let v = c.get() + n;
+        c.set(v);
+        let _ = PEAK.try_with(|p| p.set(p.get().max(v)));
+    });
 }
 
 // SAFETY: every method forwards to `System` with the same arguments and only updates counters,
@@ -94,6 +100,19 @@ pub fn allocation_calls() -> i64 {
 /// Net heap bytes allocated minus freed by the calling thread.
 pub fn thread_bytes() -> i64 {
     LOCAL.try_with(|c| c.get()).unwrap_or(0)
+}
+
+/// The highest [`thread_bytes`] of the calling thread since its last [`reset_thread_peak`]
+/// (or since it started): what a piece of code needs at its peak, scratch included.
+pub fn thread_peak_bytes() -> i64 {
+    PEAK.try_with(|c| c.get()).unwrap_or(0)
+}
+
+/// Starts a new peak for [`thread_peak_bytes`] at the calling thread's current
+/// [`thread_bytes`].
+pub fn reset_thread_peak() {
+    let now = thread_bytes();
+    let _ = PEAK.try_with(|c| c.set(now));
 }
 
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
