@@ -23,8 +23,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../../../assets/site.css">
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I read requests and send responses in simoom?", "description": "A service gets a borrowed Request and a Reply; read the request, then finish the reply once with a body, a stream, a deferred answer or an upgrade.", "url": "https://cameleer.ing/simoom/docs/guides/services-and-replies.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-12"}</script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 3, "name": "How do I read requests and send responses in simoom?", "item": "https://cameleer.ing/simoom/docs/guides/services-and-replies.html"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I read requests and send responses in simoom?", "description": "A service gets a borrowed Request and a Reply; read the request, then finish the reply once with a body, a stream, a deferred answer or an upgrade.", "url": "https://cameleer.ing/simoom/docs/guides/services-and-replies.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@id": "https://cameleer.ing/#org"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-12"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Cameleering", "item": "https://cameleer.ing/"}, {"@type": "ListItem", "position": 2, "name": "simoom", "item": "https://cameleer.ing/simoom/"}, {"@type": "ListItem", "position": 3, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 4, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 5, "name": "How do I read requests and send responses in simoom?", "item": "https://cameleer.ing/simoom/docs/guides/services-and-replies.html"}]}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How do I return JSON?", "acceptedAnswer": {"@type": "Answer", "text": "Set the content type and send the text: r.header(\"content-type\", \"application/json\").body(json). simoom has no JSON library, since it has no dependencies; use the serializer you already have (for example serde_json in your own crate) and pass the resulting String."}}, {"@type": "Question", "name": "How do I read a path parameter or a query parameter?", "acceptedAnswer": {"@type": "Answer", "text": "req.param_str(\"id\") for a :id route segment, req.query_param(\"page\") for ?page=2. Both return the raw value; decode it with simoom::percent_decode when it can contain %XX escapes."}}, {"@type": "Question", "name": "Can a handler be async?", "acceptedAnswer": {"@type": "Answer", "text": "No. A service is a plain function that returns before the loop moves on. For work that waits, use Reply::defer and answer from any thread, or the offload pool; see Slow work."}}, {"@type": "Question", "name": "Why does my response come back as a 500?", "acceptedAnswer": {"@type": "Answer", "text": "Three causes: the reply was dropped without a finisher, a header name or value was invalid, or the status was outside 200 to 999. A panic in the handler gives a 500 too."}}]}</script>
 </head>
 <body class="docs">
@@ -42,7 +42,19 @@
       <a href="../../use-cases/">Use cases</a>
       <a href="../../benchmarks/">Benchmarks</a>
       <a href="../../compare/">Compare</a>
-      <a href="../../../cameleering/">Cameleering</a>
+      <!-- cameleering family menu v1 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
+      <div class="nav-menu">
+        <a href="../../../" aria-haspopup="true">Cameleering</a>
+        <div class="nav-sub">
+          <a href="../../../"><b>Cameleering</b><span>Carry more on less, measured against the original</span></a>
+          <a href="../../../ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
+          <a href="../../../method/"><b>The method</b><span>How a gain is measured and reported</span></a>
+          <a href="../../../finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
+          <a href="../../../projects/"><b>Projects</b><span>Cameleer and simoom measured; karez and ksar not yet</span></a>
+          <a href="../../../about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
+          <a href="../../../cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>
+        </div>
+      </div>
       <a class="gh" href="https://github.com/Cameleering/simoom">
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
@@ -262,8 +274,8 @@ the status was outside 200 to 999. A panic in the handler gives a 500 too.</p>
   <div class="wrap">
     <div class="credit">
       <h4>simoom</h4>
-      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../">Cameleer</a>.</p>
-      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../cameleer/">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../">Cameleering</a> project: carry more on less, no claim without a number.</p>
       <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
     </div>
     <div>

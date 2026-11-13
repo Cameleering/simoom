@@ -1025,15 +1025,17 @@ class Site:
             "url": url,
             "inLanguage": "en",
             "author": {"@type": "Person", "name": "Sudheesh PM"},
-            "publisher": {"@type": "Organization", "name": SITE_NAME, "url": SITE_URL},
+            "publisher": {"@id": "https://cameleer.ing/#org"},  # the Cameleering Organization, defined at the root
             "isPartOf": {"@type": "WebSite", "name": SITE_NAME + " documentation", "url": SITE_URL + "docs/"},
             "about": {"@type": "SoftwareSourceCode", "name": SITE_NAME, "codeRepository": REPO_URL, "programmingLanguage": "Rust"},
             "image": SITE_URL + "og.jpg",
         }]
         if date:
             ld[0]["dateModified"] = date
-        items = []
-        for k, (name, o) in enumerate(crumbs):
+        # structured-data trail starts at the practice home, then simoom, then the docs crumbs
+        items = [{"@type": "ListItem", "position": 1, "name": "Cameleering", "item": "https://cameleer.ing/"},
+                 {"@type": "ListItem", "position": 2, "name": SITE_NAME, "item": SITE_URL}]
+        for k, (name, o) in enumerate(crumbs, start=2):
             it = {"@type": "ListItem", "position": k + 1, "name": name}
             if o:
                 it["item"] = abs_url(o)
@@ -1341,7 +1343,19 @@ TEMPLATE = """<!doctype html>
       <a href="{site_root}use-cases/">Use cases</a>
       <a href="{site_root}benchmarks/">Benchmarks</a>
       <a href="{site_root}compare/">Compare</a>
-      <a href="{host_root}cameleering/">Cameleering</a>
+      <!-- cameleering family menu v1 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
+      <div class="nav-menu">
+        <a href="{host_root}" aria-haspopup="true">Cameleering</a>
+        <div class="nav-sub">
+          <a href="{host_root}"><b>Cameleering</b><span>Carry more on less, measured against the original</span></a>
+          <a href="{host_root}ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
+          <a href="{host_root}method/"><b>The method</b><span>How a gain is measured and reported</span></a>
+          <a href="{host_root}finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
+          <a href="{host_root}projects/"><b>Projects</b><span>Cameleer and simoom measured; karez and ksar not yet</span></a>
+          <a href="{host_root}about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
+          <a href="{host_root}cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>
+        </div>
+      </div>
       <a class="gh" href="https://github.com/Cameleering/simoom">
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
@@ -1372,8 +1386,8 @@ TEMPLATE = """<!doctype html>
   <div class="wrap">
     <div class="credit">
       <h4>simoom</h4>
-      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="{host_root}">Cameleer</a>.</p>
-      <p>simoom is a <a href="{host_root}cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="{host_root}cameleer/">Cameleer</a>.</p>
+      <p>simoom is a <a href="{host_root}">Cameleering</a> project: carry more on less, no claim without a number.</p>
       <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
     </div>
     <div>

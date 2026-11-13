@@ -40,8 +40,9 @@
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "version": "0.1.0",
   "author": {"@type": "Person", "name": "Sudheesh PM"},
+  "maintainer": {"@id": "https://cameleer.ing/#org"},
   "keywords": "Rust, HTTP server, HTTP/2, HTTP/3, QUIC, TLS 1.3, WebSocket, zero dependencies, no tokio, embedded, serverless, edge, io_uring",
-  "isPartOf": {"@type": "CreativeWork", "name": "Cameleering", "url": "https://cameleer.ing/cameleering/"}
+  "isPartOf": {"@type": "CreativeWork", "name": "Cameleering", "url": "https://cameleer.ing/"}
 }
 </script>
 <script type="application/ld+json">
@@ -63,7 +64,19 @@
       <a class="keep" href="use-cases/">Use cases</a>
       <a href="benchmarks/">Benchmarks</a>
       <a href="compare/">Compare</a>
-      <a href="../cameleering/">Cameleering</a>
+      <!-- cameleering family menu v1 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
+      <div class="nav-menu">
+        <a href="../" aria-haspopup="true">Cameleering</a>
+        <div class="nav-sub">
+          <a href="../"><b>Cameleering</b><span>Carry more on less, measured against the original</span></a>
+          <a href="../ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
+          <a href="../method/"><b>The method</b><span>How a gain is measured and reported</span></a>
+          <a href="../finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
+          <a href="../projects/"><b>Projects</b><span>Cameleer and simoom measured; karez and ksar not yet</span></a>
+          <a href="../about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
+          <a href="../cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>
+        </div>
+      </div>
       <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
     </nav>
   </div>
@@ -159,14 +172,14 @@
 <section class="c-sec" id="why">
   <div class="wrap">
     <h2>Why it exists: Cameleer needed a better door</h2>
-    <p class="intro"><a href="../">Cameleer</a> runs Apache Camel-style integration routes in Rust, with nothing outside the standard library. Its first HTTP server gave every connection its own thread: simple, but heavy. simoom was written from the ground up to replace it, under the same rule, and measured against it on the same machine.</p>
+    <p class="intro"><a href="../cameleer/">Cameleer</a> runs Apache Camel-style integration routes in Rust, with nothing outside the standard library. Its first HTTP server gave every connection its own thread: simple, but heavy. simoom was written from the ground up to replace it, under the same rule, and measured against it on the same machine.</p>
     <div class="crossing">
       <div class="x"><h3>Requests per second</h3><span class="after">293k–311k</span><span class="before">before: 172k–173k (1.7–1.8x)</span></div>
       <div class="x"><h3>p99 latency</h3><span class="after">0.32–0.44 ms</span><span class="before">before: 0.87–0.91 ms</span></div>
       <div class="x"><h3>1,000 idle connections</h3><span class="after">2.7 MB</span><span class="before">before: 7.7 MB</span></div>
       <div class="x"><h3>Start-up with TLS</h3><span class="after">0.87 ms</span><span class="before">before: 1.37 ms</span></div>
     </div>
-    <p class="note">Same machine (WSL2), server on 4 CPUs, 64 connections, closed loop, 2026-11-09; start-up 2026-11-11, 10 alternating rounds. One loss: idle memory with TLS is 3.3% higher (1,360 KB against 1,317 KB). Details in <a href="benchmarks/#original">the benchmarks</a> and the <a href="../cameleering/ledger/#simoom">Cameleering ledger</a>.</p>
+    <p class="note">Same machine (WSL2), server on 4 CPUs, 64 connections, closed loop, 2026-11-09; start-up 2026-11-11, 10 alternating rounds. One loss: idle memory with TLS is 3.3% higher (1,360 KB against 1,317 KB). Details in <a href="benchmarks/#original">the benchmarks</a> and the <a href="../ledger/#simoom">Cameleering ledger</a>.</p>
   </div>
 </section>
 
@@ -329,7 +342,7 @@ simoom = { version = "0.1", default-features = false, features = ["http1"] }</pr
 <section class="band" id="cameleering">
   <div class="wrap">
     <h2>A Cameleering project</h2>
-    <p>A simoom is a hot, fast wind that crosses the desert. It travels with <a href="../">Cameleer</a>, the integration engine, under the same practice: <a href="../cameleering/">Cameleering</a>, making software carry the same load on less and proving every gain against the original, on the same hardware, with the method published.</p>
+    <p>A simoom is a hot, fast wind that crosses the desert. It travels with <a href="../cameleer/">Cameleer</a>, the integration engine, under the same practice: <a href="../">Cameleering</a>, making software carry the same load on less and proving every gain against the original, on the same hardware, with the method published.</p>
     <p>That is why every number on this site names its machine, its date and its baseline, and why the losses sit next to the wins.</p>
     <span class="rule">Carry more on less. No claim without a number.</span>
   </div>
@@ -340,8 +353,8 @@ simoom = { version = "0.1", default-features = false, features = ["http1"] }</pr
   <div class="wrap">
     <div class="credit">
       <h4>simoom</h4>
-      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../">Cameleer</a>.</p>
-      <p>simoom is a <a href="../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../cameleer/">Cameleer</a>.</p>
+      <p>simoom is a <a href="../">Cameleering</a> project: carry more on less, no claim without a number.</p>
       <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
     </div>
     <div>

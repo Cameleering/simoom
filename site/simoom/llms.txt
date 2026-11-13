@@ -1,6 +1,6 @@
 # simoom
 
-> simoom is a small, fast HTTP server engine that you build into your own Rust program. It serves HTTP/1.1, HTTP/2 and HTTP/3 over QUIC, with its own TLS 1.3, WebSocket, server-sent events and an HTTP client, and it depends on nothing but the Rust standard library: no tokio, no hyper, no rustls, no OpenSSL, zero crates.io dependencies. It needs no async runtime. It runs one event loop per CPU core on epoll or io_uring (Linux), IOCP (Windows) or kqueue (macOS). It suits edge devices, serverless functions, CLI and desktop apps that need a local endpoint, integration engines, supply-chain-sensitive environments and services that want HTTP/3. It is the HTTP engine behind Cameleer (https://github.com/Cameleering/cameleer) and a Cameleering project (https://cameleer.ing/cameleering/): carry more on less, no claim without a number. Licence: Apache-2.0. Version 0.1.0.
+> simoom is a small, fast HTTP server engine that you build into your own Rust program. It serves HTTP/1.1, HTTP/2 and HTTP/3 over QUIC, with its own TLS 1.3, WebSocket, server-sent events and an HTTP client, and it depends on nothing but the Rust standard library: no tokio, no hyper, no rustls, no OpenSSL, zero crates.io dependencies. It needs no async runtime. It runs one event loop per CPU core on epoll or io_uring (Linux), IOCP (Windows) or kqueue (macOS). It suits edge devices, serverless functions, CLI and desktop apps that need a local endpoint, integration engines, supply-chain-sensitive environments and services that want HTTP/3. It is the HTTP engine behind Cameleer (https://github.com/Cameleering/cameleer, site https://cameleer.ing/cameleer/) and a Cameleering project (https://cameleer.ing/): carry more on less, no claim without a number. Licence: Apache-2.0. Version 0.1.0.
 
 simoom is a library, not a web-server product: it has no static-file server, reverse proxy or configuration file (use nginx, Caddy or h2o for those). It is std-only, not `no_std`: it needs an operating system.
 
@@ -64,7 +64,7 @@ Where simoom is behind (campaign 4, same droplet):
 - [Use cases](https://cameleer.ing/simoom/use-cases/): edge and IoT devices, serverless cold starts, CLI and desktop apps, integration engines, zero-dependency audited environments, HTTP/3
 - [Compare](https://cameleer.ing/simoom/compare/): simoom vs hyper and axum, vs may-minihttp, vs nginx and h2o
 - [Rust HTTP servers without tokio](https://cameleer.ing/simoom/alternatives/rust-http-server-without-tokio/): tiny_http, rouille, may-minihttp, simoom, and when to use axum on tokio instead
-- [Cameleering ledger, simoom row](https://cameleer.ing/cameleering/ledger/#simoom): the measured crossing from Cameleer's previous HTTP server
+- [Cameleering ledger, simoom row](https://cameleer.ing/ledger/#simoom): the measured crossing from Cameleer's previous HTTP server
 
 ## Documentation
 
@@ -96,7 +96,7 @@ Guides:
 - [Repository](https://github.com/Cameleering/simoom): source, README, CONTRIBUTING
 - [API reference](https://docs.rs/simoom) on docs.rs
 - [Benchmark results](https://github.com/Cameleering/simoom/tree/main/bench/results): raw data and analyses
-- [Cameleer](https://cameleer.ing/): the integration engine simoom serves HTTP for
-- [Cameleering](https://cameleer.ing/cameleering/): the practice: carry more on less, no claim without a number
+- [Cameleer](https://cameleer.ing/cameleer/): the integration engine simoom serves HTTP for
+- [Cameleering](https://cameleer.ing/): the practice: carry more on less, no claim without a number
 
 simoom is independent of the Apache Software Foundation. Apache and Apache Camel are trademarks of the ASF.

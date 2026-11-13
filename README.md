@@ -95,7 +95,7 @@ idle connections in 2.7 MB instead of 7.7 MB.
 **The name.** A simoom is a hot, fast wind that crosses the desert. It belongs to the same
 caravan as Cameleer and Cameleering.
 
-**The rule.** simoom is a [Cameleering](https://cameleer.ing/cameleering/) project. Cameleering
+**The rule.** simoom is a [Cameleering](https://cameleer.ing/) project. Cameleering
 means making software carry the same load on less, and proving it against the original. No claim
 without a number: every figure in this README comes from results committed in this repository,
 and the scenarios where simoom loses are published next to the ones where it wins.
@@ -646,7 +646,7 @@ has not had an independent security audit yet; see [docs/SECURITY.md](docs/SECUR
   Details are in [docs/SECURITY.md](docs/SECURITY.md).
 - **Licence:** [Apache License 2.0](LICENSE).
 
-simoom is a [Cameleering](https://cameleer.ing/cameleering/) project, alongside
+simoom is a [Cameleering](https://cameleer.ing/) project, alongside
 [Cameleer](https://github.com/Cameleering/cameleer), which runs Apache Camel routes in Rust.
 simoom is independent of the Apache Software Foundation. Apache and Apache Camel are trademarks
 of the ASF.
