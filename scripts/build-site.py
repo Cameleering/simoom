@@ -1059,7 +1059,7 @@ class Site:
             edit = '<p class="edit"><a href="%s/blob/main/docs/%s">Edit this page on GitHub</a></p>' % (REPO_URL, esc(source_rel))
             alt = '<link rel="alternate" type="text/markdown" href="%s" title="Markdown source">\n' % esc(os.path.basename(source_rel))
         return TEMPLATE.format(
-            title=esc(title), full_title=esc("%s | %s" % (title, SITE_NAME) if title != SITE_NAME else SITE_NAME),
+            title=esc(title), full_title=esc("%s | %s" % (title, SITE_NAME) if title != SITE_NAME and len(title) + 3 + len(SITE_NAME) <= 60 else title),  # titles stay within 60 characters
             desc=esc(desc), url=esc(url), root=root, site_root=site_root, host_root=host_root, ld=ld_json, alt=alt,
             nav=self.nav(out), crumbs=crumb_html, body=body, toc=toc, edit=edit,
             og_image=SITE_URL + "og.jpg",
