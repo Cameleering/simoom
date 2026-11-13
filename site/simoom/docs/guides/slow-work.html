@@ -23,7 +23,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../../../assets/site.css">
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I call a database or a service from a simoom handler?", "description": "Never block the loop thread: wrap slow handlers in simoom::blocking, or use Reply::offload, or Reply::defer and answer later from your own threads.", "url": "https://cameleer.ing/simoom/docs/guides/slow-work.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@id": "https://cameleer.ing/#org"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-12"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I call a database or a service from a simoom handler?", "description": "Never block the loop thread: wrap slow handlers in simoom::blocking, or use Reply::offload, or Reply::defer and answer later from your own threads.", "url": "https://cameleer.ing/simoom/docs/guides/slow-work.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@id": "https://cameleer.ing/#org"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-13"}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Cameleering", "item": "https://cameleer.ing/"}, {"@type": "ListItem", "position": 2, "name": "simoom", "item": "https://cameleer.ing/simoom/"}, {"@type": "ListItem", "position": 3, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 4, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 5, "name": "How do I call a database or a service from a simoom handler?", "item": "https://cameleer.ing/simoom/docs/guides/slow-work.html"}]}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Can I use async/await or tokio inside a handler?", "acceptedAnswer": {"@type": "Answer", "text": "Not directly: a service returns before the loop moves on. You can run tokio in your program and hand it the work: take a Responder with reply.defer(), move it into a spawned task, and call responder.send(...) when the future completes. Responder is a plain Send value."}}, {"@type": "Question", "name": "What happens when the offload pool is full?", "acceptedAnswer": {"@type": "Answer", "text": "New requests that need it get 503 Service Unavailable with Retry-After: 1 right away, and stats().overloaded counts them. Requests already admitted keep their latency."}}, {"@type": "Question", "name": "Is blocking the same as tokio::task::spawn_blocking?", "acceptedAnswer": {"@type": "Answer", "text": "Similar idea, different shape: blocking wraps a whole handler, the pool is bounded with admission control, and overload answers 503 instead of queueing without limit."}}, {"@type": "Question", "name": "How do I read a large request body in a slow handler?", "acceptedAnswer": {"@type": "Answer", "text": "On the pool, OwnedRequest::read_body() reads the whole body, and take_body() gives a std::io::Read stream. See Streaming and SSE."}}]}</script>
 </head>
@@ -31,10 +31,7 @@
 <a class="skip" href="#content">Skip to content</a>
 <header class="top scrolled" id="top">
   <div class="wrap">
-    <a class="brand" href="../../" aria-label="simoom home">
-      <img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
-      simoom
-    </a>
+    <span class="lockup"><a class="fam" href="../../../" aria-label="Cameleering home"><img src="../../../brand/cameleering/cameleering-mark-64.png" width="22" height="22" alt="" aria-hidden="true">Cameleering</a><span class="sep" aria-hidden="true">/</span><a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a></span>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
     <nav id="main-nav" aria-label="Main">
       <a class="keep" href="../index.html">Docs</a>
@@ -42,7 +39,7 @@
       <a href="../../use-cases/">Use cases</a>
       <a href="../../benchmarks/">Benchmarks</a>
       <a href="../../compare/">Compare</a>
-      <!-- cameleering family menu v1 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
+      <!-- cameleering family menu v2 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
       <div class="nav-menu">
         <a href="../../../" aria-haspopup="true">Cameleering</a>
         <div class="nav-sub">
@@ -50,6 +47,7 @@
           <a href="../../../ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
           <a href="../../../method/"><b>The method</b><span>How a gain is measured and reported</span></a>
           <a href="../../../finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
+          <a href="../../../articles/"><b>Articles</b><span>Essays on efficiency, outages and cost, with sources</span></a>
           <a href="../../../projects/"><b>Projects</b><span>Cameleer and simoom Cameleered; karez and ksar not yet</span></a>
           <a href="../../../about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
           <a href="../../../cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>

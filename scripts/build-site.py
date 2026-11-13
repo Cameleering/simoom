@@ -1332,10 +1332,7 @@ TEMPLATE = """<!doctype html>
 <a class="skip" href="#content">Skip to content</a>
 <header class="top scrolled" id="top">
   <div class="wrap">
-    <a class="brand" href="{site_root}" aria-label="simoom home">
-      <img src="{site_root}brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
-      simoom
-    </a>
+    <span class="lockup"><a class="fam" href="{host_root}" aria-label="Cameleering home"><img src="{host_root}brand/cameleering/cameleering-mark-64.png" width="22" height="22" alt="" aria-hidden="true">Cameleering</a><span class="sep" aria-hidden="true">/</span><a class="brand" href="{site_root}" aria-label="simoom home"><img src="{site_root}brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a></span>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
     <nav id="main-nav" aria-label="Main">
       <a class="keep" href="{root}index.html">Docs</a>
@@ -1343,7 +1340,7 @@ TEMPLATE = """<!doctype html>
       <a href="{site_root}use-cases/">Use cases</a>
       <a href="{site_root}benchmarks/">Benchmarks</a>
       <a href="{site_root}compare/">Compare</a>
-      <!-- cameleering family menu v1 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
+      <!-- cameleering family menu v2 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
       <div class="nav-menu">
         <a href="{host_root}" aria-haspopup="true">Cameleering</a>
         <div class="nav-sub">
@@ -1351,6 +1348,7 @@ TEMPLATE = """<!doctype html>
           <a href="{host_root}ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
           <a href="{host_root}method/"><b>The method</b><span>How a gain is measured and reported</span></a>
           <a href="{host_root}finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
+          <a href="{host_root}articles/"><b>Articles</b><span>Essays on efficiency, outages and cost, with sources</span></a>
           <a href="{host_root}projects/"><b>Projects</b><span>Cameleer and simoom Cameleered; karez and ksar not yet</span></a>
           <a href="{host_root}about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
           <a href="{host_root}cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>
