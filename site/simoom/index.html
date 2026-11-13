@@ -148,6 +148,20 @@
   </div>
 </section>
 
+<section class="c-sec" id="why">
+  <div class="wrap">
+    <h2>Why it exists: Cameleer needed a better door</h2>
+    <p class="intro"><a href="../cameleer/">Cameleer</a> runs Apache Camel-style integration routes in Rust, with nothing outside the standard library. Its first HTTP server gave every connection its own thread: simple, but heavy. simoom was written from the ground up to replace it, under the same rule, and measured against it on the same machine.</p>
+    <div class="crossing">
+      <div class="x"><h3>Requests per second</h3><span class="after">293k–311k</span><span class="before">before: 172k–173k (1.7–1.8x)</span></div>
+      <div class="x"><h3>p99 latency</h3><span class="after">0.32–0.44 ms</span><span class="before">before: 0.87–0.91 ms</span></div>
+      <div class="x"><h3>1,000 idle connections</h3><span class="after">2.7 MB</span><span class="before">before: 7.7 MB</span></div>
+      <div class="x"><h3>Start-up with TLS</h3><span class="after">0.87 ms</span><span class="before">before: 1.37 ms</span></div>
+    </div>
+    <p class="note">Same machine (WSL2), server on 4 CPUs, 64 connections, closed loop, 2026-11-09; start-up 2026-11-11, 10 alternating rounds. One loss: idle memory with TLS is 3.3% higher (1,360 KB against 1,317 KB). Details in <a href="benchmarks/#original">the benchmarks</a> and the <a href="../ledger/#simoom">Cameleering ledger</a>.</p>
+  </div>
+</section>
+
 <section class="c-sec" id="glance">
   <div class="wrap">
     <h2>Against 20 servers, use case by use case</h2>
@@ -166,20 +180,6 @@
 <tr><td><a href="benchmarks/#u-footprint">Start-up, size and memory</a><small>Start-up, process start to first answer: simoom&#x27;s default build (HTTP/1.1, HTTP/2, WebSocket)</small></td><td class="num"><span class="win">1st of 21</span></td><td>hyper: simoom 57% faster</td><td>simoom 6.4x faster</td></tr></tbody></table></div>
 <!-- c4-board:end -->
     <p class="note">Every ratio is against simoom on the same droplet in the same round, median of rounds. Charts for every measure and every server: <a href="benchmarks/#field">the benchmarks</a>.</p>
-  </div>
-</section>
-
-<section class="c-sec" id="why">
-  <div class="wrap">
-    <h2>Why it exists: Cameleer needed a better door</h2>
-    <p class="intro"><a href="../cameleer/">Cameleer</a> runs Apache Camel-style integration routes in Rust, with nothing outside the standard library. Its first HTTP server gave every connection its own thread: simple, but heavy. simoom was written from the ground up to replace it, under the same rule, and measured against it on the same machine.</p>
-    <div class="crossing">
-      <div class="x"><h3>Requests per second</h3><span class="after">293k–311k</span><span class="before">before: 172k–173k (1.7–1.8x)</span></div>
-      <div class="x"><h3>p99 latency</h3><span class="after">0.32–0.44 ms</span><span class="before">before: 0.87–0.91 ms</span></div>
-      <div class="x"><h3>1,000 idle connections</h3><span class="after">2.7 MB</span><span class="before">before: 7.7 MB</span></div>
-      <div class="x"><h3>Start-up with TLS</h3><span class="after">0.87 ms</span><span class="before">before: 1.37 ms</span></div>
-    </div>
-    <p class="note">Same machine (WSL2), server on 4 CPUs, 64 connections, closed loop, 2026-11-09; start-up 2026-11-11, 10 alternating rounds. One loss: idle memory with TLS is 3.3% higher (1,360 KB against 1,317 KB). Details in <a href="benchmarks/#original">the benchmarks</a> and the <a href="../ledger/#simoom">Cameleering ledger</a>.</p>
   </div>
 </section>
 
