@@ -1347,7 +1347,7 @@ TEMPLATE = """<!doctype html>
       <div class="nav-menu">
         <a href="{host_root}" aria-haspopup="true">Cameleering</a>
         <div class="nav-sub">
-          <a href="{host_root}"><b>Cameleering</b><span>Carry more on less, measured against the original</span></a>
+          <a href="{host_root}"><b>Cameleering</b><span>Carry more on less: improve it, then prove it</span></a>
           <a href="{host_root}ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
           <a href="{host_root}method/"><b>The method</b><span>How a gain is measured and reported</span></a>
           <a href="{host_root}finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
