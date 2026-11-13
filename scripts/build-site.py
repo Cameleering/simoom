@@ -1351,7 +1351,7 @@ TEMPLATE = """<!doctype html>
           <a href="{host_root}ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
           <a href="{host_root}method/"><b>The method</b><span>How a gain is measured and reported</span></a>
           <a href="{host_root}finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
-          <a href="{host_root}projects/"><b>Projects</b><span>Cameleer and simoom measured; karez and ksar not yet</span></a>
+          <a href="{host_root}projects/"><b>Projects</b><span>Cameleer and simoom Cameleered; karez and ksar not yet</span></a>
           <a href="{host_root}about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
           <a href="{host_root}cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>
         </div>
