@@ -160,3 +160,16 @@ Cold start is within 5% or faster everywhere, plain memory on Linux is 2% lower.
 Reproduce: `target-bugs/` scripts are not committed; the commands are `simoom-bench coldstart
 --addr 127.0.0.1:18080 --repeat 20 [--ready ready] -- BIN --addr 127.0.0.1:18080 [--tls-addr
 127.0.0.1:18443 --cert C --key K]`, and PSS from `/proc/PID/smaps_rollup`.
+
+## Proxied requests on the server's own loop (branch `rt-same-loop`, not released)
+
+_2026-11-19._ For async routes in Cameleer (a platform-http request forwarded by `RtClient`):
+`LoopHandle::current()`, `LoopHandle::is_current()` and `PartialEq` for `LoopHandle` (simoom-rt);
+`ServerHandle::loops()` and `simoom::LoopHandle` (simoom); `RtClient::send` on a loop thread
+dispatches inline on that loop, and `RtClient::idle_on_loop` (simoom-client). Items a loop queues for
+itself are delivered in the same turn (they cost one extra loop turn each before: 1002 OS waits
+for 1000 self-queued tasks, now under 20). Idle `RtClient` connections are pooled per client and
+origin (were per origin, so two clients on shared loops could take each other's). Tests:
+`crates/simoom-rt/tests/current.rs`, `crates/simoom-client/tests/rt.rs` (sending from a foreign
+loop, a server handler proxying on its own loop).
+

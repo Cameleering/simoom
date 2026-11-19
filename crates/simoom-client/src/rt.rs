@@ -160,6 +160,8 @@ struct Job {
 }
 
 struct RtInner {
+    /// Tells this client's idle connections apart from another client's on a shared loop.
+    id: u64,
     loops: Vec<LoopHandle>,
     next: AtomicUsize,
     cfg: RtConfig,
@@ -226,6 +228,10 @@ impl RtClient {
         let engine = b.build();
         RtClient {
             inner: Arc::new(RtInner {
+                id: {
+                    static IDS: AtomicUsize = AtomicUsize::new(1);
+                    IDS.fetch_add(1, Ordering::Relaxed) as u64
+                },
                 loops,
                 next: AtomicUsize::new(0),
                 cfg,
@@ -251,6 +257,12 @@ impl RtClient {
 
     /// Sends a request; `cb` gets the response or the error. With `version` `Http2`/`Http3`
     /// it runs on a worker thread.
+    ///
+    /// Called on a simoom-rt loop thread (in a server handler, or in another request's
+    /// callback), the request runs on that loop, whether or not it is one of the client's
+    /// loops: it is dispatched right there, takes an idle connection kept on that loop or has
+    /// one opened for it, and `cb` runs on that loop too. A request never changes thread. From
+    /// other threads the client's loops take turns.
     pub fn send(&self, req: RtRequest, cb: impl FnOnce(Result<RtResponse>) + Send + 'static) {
         if matches!(self.inner.cfg.version, crate::types::HttpVersion::Http2 | crate::types::HttpVersion::Http3) {
             let mut r = crate::types::Request::new(&req.method, req.url);
@@ -259,6 +271,15 @@ impl RtClient {
                 r.body = crate::types::Body::Bytes(req.body);
             }
             self.on_worker(Box::new(move |c| cb(c.execute(r).and_then(buffered))));
+            return;
+        }
+        if let Some(lh) = LoopHandle::current() {
+            if req.url.scheme != "http" && req.url.scheme != "https" {
+                cb(Err(Error::new(ErrorKind::InvalidUrl, format!("RtClient takes http and https URLs: {}", req.url))));
+                return;
+            }
+            let job = Job { req, cb: Box::new(cb), deadline: Instant::now() + self.inner.cfg.timeout, retried: false, redirects: 0 };
+            dispatch(&self.inner, job, lh);
             return;
         }
         let i = self.inner.next.fetch_add(1, Ordering::Relaxed) % self.inner.loops.len();
@@ -357,11 +378,18 @@ impl RtClient {
         }));
     }
 
-    /// Idle connections kept on loop `index` (for tests).
+    /// This client's idle connections kept on loop `index` (for tests).
     pub fn idle_on(&self, index: usize) -> usize {
+        let lh = self.inner.loops[index % self.inner.loops.len()].clone();
+        self.idle_on_loop(&lh)
+    }
+
+    /// This client's idle connections kept on loop `lh`, one of its own or not (for tests).
+    pub fn idle_on_loop(&self, lh: &LoopHandle) -> usize {
         let (tx, rx) = channel();
-        if !self.inner.loops[index % self.inner.loops.len()].run(move |_| {
-            let n = IDLE.with(|m| m.borrow().values().map(|v| v.len()).sum::<usize>());
+        let prefix = format!("{} ", self.inner.id);
+        if !lh.run(move |_| {
+            let n = IDLE.with(|m| m.borrow().iter().filter(|(k, _)| k.starts_with(&prefix)).map(|(_, v)| v.len()).sum::<usize>());
             let _ = tx.send(n);
         }) {
             return 0;
@@ -375,13 +403,13 @@ thread_local! {
     static IDLE: RefCell<HashMap<String, Vec<(Rc<RefCell<Shared>>, ConnHandle)>>> = RefCell::new(HashMap::new());
 }
 
-fn key_of(u: &Url) -> String {
-    u.origin()
+fn key_of(inner: &RtInner, u: &Url) -> String {
+    format!("{} {}", inner.id, u.origin())
 }
 
 /// On a loop thread: reuse an idle connection or have one opened.
 fn dispatch(inner: &Arc<RtInner>, job: Job, lh: LoopHandle) {
-    let key = key_of(&job.req.url);
+    let key = key_of(inner, &job.req.url);
     let idle = IDLE.with(|m| m.borrow_mut().get_mut(&key).and_then(|v| v.pop()));
     if let Some((shared, h)) = idle {
         {
@@ -533,7 +561,7 @@ struct RtConn {
 // `Send` and leaves with the result.
 impl RtConn {
     fn new(inner: Arc<RtInner>, job: Job, lh: LoopHandle) -> std::result::Result<RtConn, (Job, Error)> {
-        let key = key_of(&job.req.url);
+        let key = key_of(&inner, &job.req.url);
         #[cfg(feature = "tls")]
         let tls = if job.req.url.is_secure() {
             match ClientConnection::new(inner.tls.clone(), &job.req.url.host) {

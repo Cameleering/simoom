@@ -713,10 +713,12 @@ fn spawn_loop(cfg: &Config, setup: LoopSetup, pin: Option<usize>, shared: Arc<Sh
                 return;
             }
         };
+        // registered before loop 0 reports it is up, so `RuntimeHandle::loops` after the boot
+        // always has it
+        shared.register(LoopHandle { index: i, queue });
         if i == 0 {
             shared.booted(core.backend());
         }
-        shared.register(LoopHandle { index: i, queue });
         starting.done = true;
         drop(starting);
         if let Err(e) = core.run() {
@@ -770,8 +772,12 @@ impl RuntimeHandle {
     }
 
     /// The loops that run, by index, to run tasks on them. With [`Config::lazy_loops`] that is
-    /// loop 0 until three connections were open at once, then each loop as it starts.
+    /// loop 0 until three connections were open at once, then each loop as it starts (this
+    /// waits until loop 0 is up, well under a millisecond after [`Builder::start`]).
     pub fn loops(&self) -> Vec<LoopHandle> {
+        if self.lazy {
+            let _ = self.boot();
+        }
         self.shared.handles()
     }
 
