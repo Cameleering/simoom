@@ -722,3 +722,54 @@ fn few_connections_spread_one_per_loop() {
         }
     }
 }
+
+// Messages for one connection that arrive in one batch (replies of HTTP/2 streams finished on
+// other threads) leave in one write: the early flush (K4) waits for the connection's last message
+// of the batch instead of writing after each (32 replies once cost 32 system calls).
+#[test]
+fn a_batch_of_messages_for_one_connection_is_written_once() {
+    struct Replies(Arc<Mutex<Option<simoom_rt::ConnHandle>>>);
+    impl Connection for Replies {
+        fn on_data(&mut self, cx: &mut Ctx<'_>, data: &[u8]) -> usize {
+            *self.0.lock().unwrap() = Some(cx.handle());
+            data.len()
+        }
+        fn on_message(&mut self, cx: &mut Ctx<'_>, msg: Message) {
+            cx.send(*msg.downcast::<Vec<u8>>().unwrap());
+        }
+    }
+    for b in [simoom_rt::Backend::Epoll] {
+        if !cfg!(target_os = "linux") {
+            break;
+        }
+        let handle = Arc::new(Mutex::new(None));
+        let h2 = handle.clone();
+        let rt = builder(b, 1).listen("127.0.0.1:0", move |_: &ConnInfo| Some(Box::new(Replies(h2.clone())) as Box<dyn Connection>)).start().unwrap();
+        let mut c = TcpStream::connect(rt.local_addrs()[0]).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(b"go").unwrap();
+        assert!(wait_until(5, || handle.lock().unwrap().is_some()));
+        let h = handle.lock().unwrap().clone().unwrap();
+        let sent = |rt: &simoom_rt::RuntimeHandle| rt.stats().loops[0].driver.send_calls;
+        assert!(wait_until(5, || rt.stats().loops[0].accepted == 1));
+        let before = sent(&rt);
+        // keep the loop busy while 32 replies queue up, so it takes them in one batch
+        let (busy_tx, busy_rx) = mpsc::channel();
+        assert!(rt.loops()[0].run(move |_| {
+            busy_tx.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+        }));
+        busy_rx.recv().unwrap();
+        for i in 0..32u8 {
+            assert!(h.send(Box::new(vec![b'a' + i % 26; 10])));
+        }
+        let mut got = vec![0u8; 320];
+        c.read_exact(&mut got).unwrap();
+        assert!(wait_until(5, || sent(&rt) > before));
+        std::thread::sleep(Duration::from_millis(20));
+        let writes = sent(&rt) - before;
+        assert!(writes <= 2, "{b:?}: 32 replies in {writes} send calls");
+        rt.stop(Duration::from_secs(1));
+        rt.join();
+    }
+}

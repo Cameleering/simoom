@@ -447,6 +447,13 @@ impl Core {
         self.flush_conn(key);
     }
 
+    /// [`Core::deliver`] without the early flush, for a message followed by another one for the
+    /// same connection in this batch: the connection's output then goes out with the last one,
+    /// in one write.
+    fn deliver_held(&mut self, key: u64, msg: Message) {
+        self.with_conn(key, |h, cx| h.on_message(cx, msg));
+    }
+
     pub(crate) fn deliver_udp(&mut self, idx: usize, msg: Message) {
         self.with_udp(idx, |h, cx| h.on_message(cx, msg));
     }
@@ -1415,6 +1422,8 @@ impl Core {
         self.start_io()?;
         let mut events = Vec::with_capacity(256);
         let mut tasks: Vec<Item> = Vec::new();
+        // the last message of each connection in a batch of messages (see the early flush below)
+        let mut last_msg: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
         let mut stop_at: Option<u64> = None;
         let mut aborted = false;
         let recv_size = self.cfg.buffer_classes[0];
@@ -1468,10 +1477,23 @@ impl Core {
             if woke {
                 self.queue.take(&mut tasks);
                 let n = tasks.len();
+                // The early flush (K4) writes a connection's output after its message; for a
+                // multiplexed connection that gets several messages in one batch (replies of
+                // HTTP/2 streams finished on other threads) it waits for the last one, so the
+                // replies leave in one write instead of one system call each.
+                if n >= FLUSH_EARLY_BATCH {
+                    last_msg.clear();
+                    for (i, t) in tasks.iter().enumerate() {
+                        if let Item::Conn(key, _) = t {
+                            last_msg.insert(*key, i);
+                        }
+                    }
+                }
                 for (i, t) in tasks.drain(..).enumerate() {
                     self.batch_left = n - i;
                     match t {
                         Item::Task(t) => t(&mut LoopCtx { core: self }),
+                        Item::Conn(key, msg) if n >= FLUSH_EARLY_BATCH && last_msg.get(&key).is_some_and(|&l| l > i) => self.deliver_held(key, msg),
                         Item::Conn(key, msg) => self.deliver(key, msg),
                         Item::Udp(idx, msg) => self.deliver_udp(idx, msg),
                     }
