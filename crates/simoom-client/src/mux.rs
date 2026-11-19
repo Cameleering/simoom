@@ -194,6 +194,9 @@ pub(crate) struct State {
     any_waiting: u32,
     /// Output waiting to be written once the lock is released (stream transports).
     wbuf: Vec<u8>,
+    /// Streams with a waiting thread that got news, woken once the lock is released (each at
+    /// most once per lock section, however many events it got).
+    wake: Vec<Arc<Slot>>,
 }
 
 type SlotMap = HashMap<u64, Arc<Slot>, std::hash::BuildHasherDefault<crate::pool::FxHasher>>;
@@ -225,6 +228,8 @@ pub(crate) struct Mux {
     what: String,
     /// A weak reference to the `Arc` this connection lives in, for the pump thread.
     me: std::sync::OnceLock<std::sync::Weak<Mux>>,
+    /// Waiting threads woken with news of their stream (a counter for tests).
+    wakes: AtomicUsize,
 }
 
 impl std::fmt::Debug for Mux {
@@ -241,7 +246,7 @@ impl Mux {
         Mux {
             io,
             version,
-            state: Mutex::new(State { proto, reading: false, dead: None, pongs: 0, requests: 0, evs: Vec::new(), any_waiting: 0, wbuf: Vec::new() }),
+            state: Mutex::new(State { proto, reading: false, dead: None, pongs: 0, requests: 0, evs: Vec::new(), any_waiting: 0, wbuf: Vec::new(), wake: Vec::new() }),
             cv: Condvar::new(),
             slots: RwLock::new(SlotMap::default()),
             active: AtomicUsize::new(0),
@@ -256,6 +261,7 @@ impl Mux {
             wlock: Mutex::new(()),
             what,
             me: std::sync::OnceLock::new(),
+            wakes: AtomicUsize::new(0),
         }
     }
 
@@ -424,8 +430,8 @@ impl Mux {
                 }
                 let wake = s.waiting;
                 drop(s);
-                if wake {
-                    slot.cv.notify_all();
+                if wake && !st.wake.iter().any(|w| Arc::ptr_eq(w, &slot)) {
+                    st.wake.push(slot);
                 }
             }
         }
@@ -926,6 +932,20 @@ impl Guard<'_> {
 impl Drop for Guard<'_> {
     fn drop(&mut self) {
         let Some(mut g) = self.g.take() else { return };
+        if !g.wake.is_empty() {
+            // wake after unlocking: a woken thread that needs the connection lock finds it free
+            let mut wake = std::mem::take(&mut g.wake);
+            let write = if g.wbuf.is_empty() { None } else { self.mux.wlock.try_lock().ok().map(|w| (w, std::mem::take(&mut g.wbuf))) };
+            drop(g);
+            self.mux.wakes.fetch_add(wake.len(), Ordering::Relaxed);
+            for slot in wake.drain(..) {
+                slot.cv.notify_all();
+            }
+            if let Some((w, buf)) = write {
+                self.mux.write_out(w, buf);
+            }
+            return;
+        }
         if g.wbuf.is_empty() {
             return;
         }
@@ -960,4 +980,87 @@ pub(crate) fn request_fields(headers: &Headers, body_len: Option<u64>, method: &
         None => {}
     }
     (host, out)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// An engine that answers every read with the head, a body chunk and the end of stream 1:
+    /// three events for one stream in one input.
+    struct ThreeEvents {
+        next: u64,
+    }
+
+    impl Proto for ThreeEvents {
+        fn version(&self) -> Version {
+            Version::Http2
+        }
+        fn open(&mut self, _: &ReqHead<'_>, _: bool) -> Result<u64> {
+            self.next += 2;
+            Ok(self.next - 2)
+        }
+        fn send_data(&mut self, _: u64, d: &[u8], _: bool) -> Result<usize> {
+            Ok(d.len())
+        }
+        fn capacity(&self, _: u64) -> usize {
+            usize::MAX
+        }
+        fn send_trailers(&mut self, _: u64, _: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
+            Ok(())
+        }
+        fn cancel(&mut self, _: u64) {}
+        fn forget(&mut self, _: u64) {}
+        fn take_body(&mut self, _: u64, out: &mut Vec<u8>, _: usize, _: Instant, _: &mut Vec<MuxEvent>) -> usize {
+            out.extend_from_slice(b"ok");
+            2
+        }
+        fn input(&mut self, _: &mut [u8], _: Option<SocketAddr>, _: Instant, _: &MuxIo, ev: &mut Vec<MuxEvent>) {
+            ev.push(MuxEvent::Head { id: 1, status: 200, headers: Headers::new() });
+            ev.push(MuxEvent::Readable(1));
+            ev.push(MuxEvent::End(1));
+        }
+        fn flush(&mut self, _: &MuxIo, _: Instant) -> io::Result<()> {
+            Ok(())
+        }
+        fn deadline(&mut self) -> Option<Instant> {
+            None
+        }
+        fn timeout(&mut self, _: Instant, _: &mut Vec<MuxEvent>) {}
+        fn ping(&mut self) -> bool {
+            false
+        }
+        fn can_open(&self) -> bool {
+            true
+        }
+        fn is_done(&self) -> bool {
+            false
+        }
+        fn close(&mut self, _: Instant) {}
+    }
+
+    // A waiting thread is woken once per batch of news for its stream, after the connection lock
+    // is released, however many events the batch held (each wake is a system call and a context
+    // switch; three per response cost the client a third of its time).
+    #[test]
+    fn a_waiting_thread_is_woken_once_per_batch() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let tcp = std::net::TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = l.accept().unwrap();
+        let m = Mux::new(MuxIo::Tcp(crate::transport::Duplex::plain(tcp)), Box::new(ThreeEvents { next: 1 }), "test".into()).into_arc();
+        let head = ReqHead { method: "GET", scheme: "http", authority: "x", path: "/", fields: Vec::new() };
+        // two open streams: the pump reads, the requesting threads wait
+        let a = m.open(&head, true, None).unwrap();
+        let _b = m.open(&head, true, None).unwrap();
+        assert_eq!(a, 1);
+        let m2 = m.clone();
+        let waiter = std::thread::spawn(move || m2.head(1, Some(Instant::now() + Duration::from_secs(10)), TimeoutKind::ResponseHead).map(|(s, _)| s));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(m.pump.load(Ordering::Acquire), "the pump reads");
+        peer.write_all(b"x").unwrap();
+        assert_eq!(waiter.join().unwrap().unwrap(), 200);
+        assert_eq!(m.wakes.load(Ordering::Relaxed), 1, "one wake for three events");
+    }
 }
