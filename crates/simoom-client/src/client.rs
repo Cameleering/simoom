@@ -1244,7 +1244,11 @@ impl Client {
         let head = ReqHead { method: &req.method, scheme: if url.is_secure() { "https" } else { "http" }, authority: &authority, path: &target, fields };
         let end = req.body.is_empty();
         let open_deadline = earliest(deadline, cfg.pool_timeout.map(|t| Instant::now() + t));
-        let id = m.open(&head, end, open_deadline)?;
+        // a body in memory leaves with the head, in one write
+        let (id, early) = match &req.body {
+            Body::Bytes(b) => m.open_with_body(&head, b, true, open_deadline)?,
+            _ => (m.open(&head, end, open_deadline)?, 0),
+        };
         let mut body = MuxBody { mux: m.clone(), id, idle: cfg.read_timeout, deadline, done: false };
         let wdl = || earliest(deadline, cfg.write_timeout.map(|t| Instant::now() + t));
         // A server may answer and close the stream before the body is all sent (RFC 9113
@@ -1252,7 +1256,8 @@ impl Client {
         let sent = (|| -> Result<()> {
             match &mut req.body {
             Body::Empty => {}
-            Body::Bytes(b) => m.write(id, b, true, wdl())?,
+            Body::Bytes(b) if early < b.len() => m.write(id, &b[early..], true, wdl())?,
+            Body::Bytes(_) => {}
             Body::Reader { reader, len } => {
                 let mut chunk = vec![0u8; 16 * 1024];
                 let mut sent = 0u64;
@@ -1332,6 +1337,15 @@ impl Client {
     /// stream at the same time (gRPC-style). HTTP/1.1 origins are refused.
     #[cfg(any(feature = "client-h2", feature = "client-h3"))]
     pub fn call(&self, method: &str, url: &str, headers: &Headers) -> Result<crate::call::Call> {
+        self.call_with_body(method, url, headers, &[], false)
+    }
+
+    /// [`Client::call`] with the first request body bytes, sent with the head in one write; `end`
+    /// also ends the request body (a unary gRPC call: head, message and end of stream in one
+    /// packet instead of three writes). Bytes that flow control holds back are sent before this
+    /// returns, waiting at most the write timeout.
+    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    pub fn call_with_body(&self, method: &str, url: &str, headers: &Headers, body: &[u8], end: bool) -> Result<crate::call::Call> {
         let url = Url::parse(url)?;
         let cfg = &self.inner.cfg;
         let mut mode = cfg.version;
@@ -1346,7 +1360,11 @@ impl Client {
         let authority = host.unwrap_or_else(|| url.host_header());
         let target = url.request_target();
         let head = ReqHead { method: &req.method, scheme: if url.is_secure() { "https" } else { "http" }, authority: &authority, path: &target, fields };
-        let id = m.open(&head, false, cfg.pool_timeout.map(|t| Instant::now() + t))?;
+        let open_deadline = cfg.pool_timeout.map(|t| Instant::now() + t);
+        let (id, sent) = if body.is_empty() && !end { (m.open(&head, false, open_deadline)?, 0) } else { m.open_with_body(&head, body, end, open_deadline)? };
+        if sent < body.len() {
+            m.write(id, &body[sent..], end, cfg.write_timeout.map(|t| Instant::now() + t))?;
+        }
         let mut call = crate::call::Call::new(m, id, cfg.read_timeout, cfg.write_timeout);
         if self.has_interceptors() {
             // interceptors see the response head when the caller asks for it (the body streams,

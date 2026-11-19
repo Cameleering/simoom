@@ -666,6 +666,33 @@ impl Mux {
         })
     }
 
+    /// Opens a stream with a request body known up front: the head and as much of the body as
+    /// flow control allows leave in one write (one system call, one packet for a small request,
+    /// instead of a write for the HEADERS and another for the DATA). Returns the stream and the
+    /// body bytes sent; the caller sends the rest with [`Mux::write`]. `end` ends the request
+    /// body once all of `body` is sent.
+    pub(crate) fn open_with_body(&self, head: &ReqHead<'_>, body: &[u8], end: bool, deadline: Option<Instant>) -> Result<(u64, usize)> {
+        self.wait_conn(deadline, TimeoutKind::Pool, |st| {
+            if st.dead.is_some() {
+                return None;
+            }
+            if st.proto.is_done() {
+                return Some(Err(Error::new(ErrorKind::Closed, format!("connection is going away: {}", self.what))));
+            }
+            if !st.proto.ready() || !st.proto.can_open() {
+                return None;
+            }
+            let r = st.proto.open(head, end && body.is_empty());
+            Some(r.map(|id| {
+                self.register(st, id);
+                // an error here (the stream was refused) surfaces in the caller's write
+                let sent = if body.is_empty() { 0 } else { st.proto.send_data(id, body, end).unwrap_or(0) };
+                self.flush(st);
+                (id, sent)
+            }))
+        })
+    }
+
     /// Opens an extended CONNECT stream (WebSocket over HTTP/2), once the peer's SETTINGS
     /// say it may.
     #[cfg(feature = "client-ws")]
