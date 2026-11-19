@@ -73,6 +73,12 @@ impl Queue {
         if self.closed.load(Ordering::Acquire) {
             return false;
         }
+        if OWN_QUEUE.with(|q| q.get()) == self as *const Queue as usize {
+            // pushed by this loop's own thread (a reply or a task from one of its callbacks):
+            // delivered in the same loop turn, with no wake-up and no extra turn
+            LOCAL.with(|l| l.borrow_mut().push(t));
+            return true;
+        }
         self.items.push(t);
         self.waker.post();
         // Closed meanwhile: the item is dropped with the queue (or by `close`).
@@ -90,7 +96,17 @@ impl Queue {
     }
 }
 
-/// A handle to one loop, usable from any thread: run closures on the loop thread.
+thread_local! {
+    /// The loop this thread runs, while it runs it.
+    static CURRENT: std::cell::RefCell<Option<LoopHandle>> = const { std::cell::RefCell::new(None) };
+    /// The address of that loop's queue (0 on other threads): [`Queue::push`] compares it.
+    static OWN_QUEUE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Items the loop's own thread queued for itself, delivered within the current turn.
+    static LOCAL: std::cell::RefCell<Vec<Item>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A handle to one loop, usable from any thread: run closures on the loop thread. Two handles
+/// compare equal when they name the same loop.
 #[derive(Clone)]
 pub struct LoopHandle {
     pub(crate) index: usize,
@@ -109,11 +125,30 @@ impl LoopHandle {
         self.index
     }
 
-    /// Runs `f` on the loop thread at its next turn. Returns `false` if the loop has exited.
+    /// Runs `f` on the loop thread at its next turn (in the current turn, after the running
+    /// callback, when called on that loop's thread). Returns `false` if the loop has exited.
     pub fn run(&self, f: impl FnOnce(&mut LoopCtx<'_>) + Send + 'static) -> bool {
         self.queue.push(Item::Task(Box::new(f)))
     }
+
+    /// The loop the calling thread runs, when it is a loop thread (of any runtime).
+    pub fn current() -> Option<LoopHandle> {
+        CURRENT.with(|c| c.borrow().clone())
+    }
+
+    /// Whether the calling thread is this loop's thread.
+    pub fn is_current(&self) -> bool {
+        OWN_QUEUE.with(|q| q.get()) == Arc::as_ptr(&self.queue) as usize
+    }
 }
+
+impl PartialEq for LoopHandle {
+    fn eq(&self, other: &LoopHandle) -> bool {
+        Arc::ptr_eq(&self.queue, &other.queue)
+    }
+}
+
+impl Eq for LoopHandle {}
 
 /// A handle to one connection, usable from any thread. Messages to a closed connection are
 /// dropped.
@@ -485,7 +520,7 @@ impl Core {
     /// our last bytes and a FIN), then read and drop input until the peer closes, the linger
     /// time passes or `linger_bytes` were dropped, and only then close. Closing a socket with
     /// unread input makes the kernel send a reset, which can destroy the response at the peer
-    /// before it reads it (RFC 9112 §9.6). Holds no buffer: what arrives goes straight back to
+    /// before it reads it (RFC 9112 Â§9.6). Holds no buffer: what arrives goes straight back to
     /// the pool.
     fn linger(&mut self, key: u64) {
         let linger = self.cfg.linger;
@@ -1419,6 +1454,39 @@ impl Core {
 
     /// Runs the loop until the runtime stops and every connection is gone.
     pub(crate) fn run(&mut self) -> io::Result<()> {
+        let me = LoopHandle { index: self.index, queue: self.queue.clone() };
+        OWN_QUEUE.with(|q| q.set(Arc::as_ptr(&me.queue) as usize));
+        CURRENT.with(|c| *c.borrow_mut() = Some(me));
+        let r = self.run_loop();
+        OWN_QUEUE.with(|q| q.set(0));
+        CURRENT.with(|c| *c.borrow_mut() = None);
+        LOCAL.with(|l| l.borrow_mut().clear());
+        r
+    }
+
+    /// Delivers what this loop's thread queued for itself, and the redeliveries and drains that
+    /// causes, until nothing is left.
+    fn settle(&mut self) {
+        loop {
+            let items = LOCAL.with(|l| std::mem::take(&mut *l.borrow_mut()));
+            let n = items.len();
+            for (i, t) in items.into_iter().enumerate() {
+                self.batch_left = n - i;
+                match t {
+                    Item::Task(t) => t(&mut LoopCtx { core: self }),
+                    Item::Conn(key, msg) => self.deliver(key, msg),
+                    Item::Udp(idx, msg) => self.deliver_udp(idx, msg),
+                }
+            }
+            self.batch_left = 0;
+            self.after_callbacks();
+            if LOCAL.with(|l| l.borrow().is_empty()) {
+                return;
+            }
+        }
+    }
+
+    fn run_loop(&mut self) -> io::Result<()> {
         self.start_io()?;
         let mut events = Vec::with_capacity(256);
         let mut tasks: Vec<Item> = Vec::new();
@@ -1430,7 +1498,7 @@ impl Core {
         loop {
             self.now_ns = simoom_sys::time::now_ns();
             self.fire_timers();
-            self.after_callbacks();
+            self.settle();
             // A timer may have finished the last piece of work of a stop (a QUIC endpoint
             // that went idle): check before blocking.
             if stop_at.is_some() && self.stop_done(aborted) {
@@ -1520,7 +1588,7 @@ impl Core {
                 self.want_grow = false;
                 self.grow_next = true;
             }
-            self.after_callbacks();
+            self.settle();
             self.publish();
 
             if stop_at.is_none() && self.shared.stop.load(Ordering::Acquire) {

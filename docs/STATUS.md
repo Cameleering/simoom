@@ -171,3 +171,15 @@ At 64 in flight over 4 connections (WSL2): the blocking `Client` 36 us of CPU an
 loop client with an async caller 3.2-4.8 us and 513k-606k req/s, a blocking facade over it 24 us
 and 212k-239k req/s. Tests: `crates/simoom-client/tests/rt_h2.rs` (18). Next: the blocking
 `Client`'s HTTP/2 path as a facade over it (steps in the design note).
+
+## Proxied requests on the server's own loop (branch `rt-same-loop`, carried here; not released)
+
+_2026-11-19._ For async routes in Cameleer (a platform-http request forwarded by `RtClient`):
+`LoopHandle::current()`, `LoopHandle::is_current()` and `PartialEq` for `LoopHandle` (simoom-rt);
+`ServerHandle::loops()` and `simoom::LoopHandle` (simoom); `RtClient::send` on a loop thread
+dispatches inline on that loop, and `RtClient::idle_on_loop` (simoom-client). Items a loop queues for
+itself are delivered in the same turn (they cost one extra loop turn each before: 1002 OS waits
+for 1000 self-queued tasks, now under 20). Idle `RtClient` connections are pooled per client and
+origin (were per origin, so two clients on shared loops could take each other's). Tests:
+`crates/simoom-rt/tests/current.rs`, `crates/simoom-client/tests/rt.rs` (sending from a foreign
+loop, a server handler proxying on its own loop).

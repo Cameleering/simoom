@@ -772,3 +772,37 @@ fn redirects_on_the_loop() {
     assert_eq!(r.status, 200);
     assert!(String::from_utf8(r.body).unwrap().starts_with("H2 GET /echo q=9"));
 }
+
+#[test]
+fn http2_requests_and_calls_sent_on_a_loop_thread_stay_on_that_loop() {
+    let h = plain();
+    let c = RtClient::spawn(1, h2cfg()).unwrap();
+    let other = simoom_rt::Runtime::builder().threads(1).start().unwrap();
+    let lh = other.loops()[0].clone();
+    for _ in 0..3 {
+        let (tx, rx) = channel();
+        let (c2, u, l2) = (c.clone(), url(&h, "/echo"), lh.clone());
+        lh.run(move |_| {
+            let (t1, l3) = (tx.clone(), l2.clone());
+            c2.send(RtRequest::get(&u).unwrap(), move |r| {
+                t1.send((r.map(|r| r.version), simoom_rt::LoopHandle::current() == Some(l3))).unwrap();
+            });
+            struct Here(Sender<(Result<Version>, bool)>, simoom_rt::LoopHandle);
+            impl CallHandler for Here {
+                fn on_end(&mut self, r: Result<Headers>) {
+                    let _ = self.0.send((r.map(|_| Version::Http2), simoom_rt::LoopHandle::current().as_ref() == Some(&self.1)));
+                }
+            }
+            c2.call(RtRequest::get(&u).unwrap(), CallOptions::default(), Here(tx, l2)).finish();
+        });
+        for _ in 0..2 {
+            let (v, same) = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+            assert_eq!(v.unwrap(), Version::Http2);
+            assert!(same, "completed on the loop that sent");
+        }
+    }
+    assert_eq!(c.h2_connections_on(0), 0, "nothing on the client's own loop");
+    drop(c);
+    other.stop(Duration::from_millis(100));
+    other.join();
+}

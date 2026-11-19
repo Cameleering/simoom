@@ -6,7 +6,7 @@ use crate::reply::{Reply, Target};
 use crate::request::Request;
 use crate::service::Service;
 use simoom_rt::offload::{OffloadConfig, OffloadStats};
-use simoom_rt::{Backend, ConnInfo, Connection, Runtime, RuntimeHandle};
+use simoom_rt::{Backend, ConnInfo, Connection, LoopHandle, Runtime, RuntimeHandle};
 use std::io;
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -797,6 +797,15 @@ impl ServerHandle {
     pub fn local_addr(&self) -> SocketAddr {
         self.rt.local_addrs().first().or(self.rt.udp_addrs().first()).copied().unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], 0)))
     }
+
+    /// The server's event loops, to run other loop-driven work on them (for example
+    /// `simoom_client::rt::RtClient::new(server.loops(), cfg)`, so a request a handler sends
+    /// on its connection's loop, and its answer, never change thread). With lazy loops, the
+    /// loops started so far.
+    pub fn loops(&self) -> Vec<LoopHandle> {
+        self.rt.loops()
+    }
+
 
     /// Every bound TCP address, in the order of the `listen` calls.
     pub fn local_addrs(&self) -> &[SocketAddr] {

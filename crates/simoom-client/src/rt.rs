@@ -200,7 +200,6 @@ enum ConnectReq {
 
 struct RtInner {
     /// Tells this client's pooled connections apart from another client's on shared loops.
-    #[cfg_attr(not(feature = "client-h2"), allow(dead_code))]
     id: u64,
     loops: Vec<LoopHandle>,
     next: AtomicUsize,
@@ -301,8 +300,13 @@ impl RtClient {
     }
 
     /// Sends a request; `cb` gets the response or the error. HTTP/1.1 and HTTP/2 run on the
-    /// loops; with `version` `Http3` it runs on a worker thread. Called from one of the
-    /// client's loop threads (inside a callback), the request stays on that loop.
+    /// loops; with `version` `Http3` it runs on a worker thread.
+    ///
+    /// Called on a simoom-rt loop thread (in a server handler, or in another request's
+    /// callback), the request runs on that loop, whether or not it is one of the client's
+    /// loops: it is dispatched right there, takes a connection kept on that loop or has one
+    /// opened for it, and `cb` runs on that loop too. A request never changes thread. From
+    /// other threads the client's loops take turns.
     pub fn send(&self, req: RtRequest, cb: impl FnOnce(Result<RtResponse>) + Send + 'static) {
         let v = self.inner.cfg.version;
         if v == crate::types::HttpVersion::Http3 || (v == crate::types::HttpVersion::Http2 && !cfg!(feature = "client-h2")) {
@@ -314,19 +318,36 @@ impl RtClient {
             self.on_worker(Box::new(move |c| cb(c.execute(r).and_then(buffered))));
             return;
         }
+        if let Some(lh) = LoopHandle::current() {
+            if req.url.scheme != "http" && req.url.scheme != "https" {
+                cb(Err(Error::new(ErrorKind::InvalidUrl, format!("RtClient takes http and https URLs: {}", req.url))));
+                return;
+            }
+            let h2 = self.h2_mode(None);
+            let job = Job { req, cb: Box::new(cb), deadline: Instant::now() + self.inner.cfg.timeout, retried: false, redirects: 0, h2, attempts: 0 };
+            self.run_here(job, lh);
+            return;
+        }
         let i = self.pick();
         self.send_on(i, req, cb);
     }
 
-    /// The loop for a new request: the current one when called on one of this client's loops
-    /// (a callback submitting the next request), else round robin.
+    /// The loop for a request sent from a thread that is not a loop: the client's loops in turn.
     fn pick(&self) -> usize {
-        if let Some((id, pos)) = CURRENT.with(|c| c.get()) {
-            if id == self.inner.id && pos < self.inner.loops.len() {
-                return pos;
-            }
-        }
         self.inner.next.fetch_add(1, Ordering::Relaxed) % self.inner.loops.len()
+    }
+
+    /// Runs a job on loop `lh`, the calling thread's loop: inline, or through the outbox when
+    /// it comes from a callback of one of this client's HTTP/2 connections (the connection
+    /// routes it when its callback returns, so its frames leave in the same write as the rest
+    /// of the turn's output).
+    fn run_here(&self, job: Job, lh: LoopHandle) {
+        #[cfg(feature = "client-h2")]
+        if job.h2 && CURRENT.with(|c| c.get()).is_some_and(|(id, _)| id == self.inner.id) {
+            OUTBOX.with(|o| o.borrow_mut().push(job));
+            return;
+        }
+        route(&self.inner, job, lh);
     }
 
     /// Whether requests of this version run as HTTP/2 streams on the loops.
@@ -345,17 +366,13 @@ impl RtClient {
         self.submit(index, job);
     }
 
-    /// Queues a job to loop `index`.
+    /// Queues a job to loop `index` (run at once when that is the calling thread's loop).
     fn submit(&self, index: usize, job: Job) {
-        #[cfg(feature = "client-h2")]
-        if job.h2 && CURRENT.with(|c| c.get()) == Some((self.inner.id, index % self.inner.loops.len())) {
-            // sent from a callback of this client's HTTP/2 connection on this very loop: the
-            // connection routes it when the callback returns, so its frames leave in the same
-            // write as the rest of the turn's output (no task, no second loop turn)
-            OUTBOX.with(|o| o.borrow_mut().push(job));
+        let lh = self.inner.loops[index % self.inner.loops.len()].clone();
+        if lh.is_current() {
+            self.run_here(job, lh);
             return;
         }
-        let lh = self.inner.loops[index % self.inner.loops.len()].clone();
         let inner = self.inner.clone();
         let lh2 = lh.clone();
         let mut job = Some(job);
@@ -410,7 +427,10 @@ impl RtClient {
             };
             let rq = RtRequest { method: req.method, url: req.url, headers: req.headers, body };
             let job = Job { req: rq, cb: Box::new(cb), deadline: Instant::now() + self.inner.cfg.timeout, retried: false, redirects: 0, h2, attempts: 0 };
-            self.submit(self.pick(), job);
+            match LoopHandle::current() {
+                Some(lh) => self.run_here(job, lh),
+                None => self.submit(self.pick(), job),
+            }
             return;
         }
         self.on_worker(Box::new(move |c| cb(c.execute(req).and_then(buffered))));
@@ -423,7 +443,8 @@ impl RtClient {
     /// request body, the streamed response and the full-duplex call (gRPC streaming) in one.
     #[cfg(feature = "client-h2")]
     pub fn call(&self, req: RtRequest, opts: CallOptions, handler: impl CallHandler) -> RtCall {
-        h2::start_call(&self.inner, self.pick(), req, opts, Box::new(handler))
+        let lh = LoopHandle::current().unwrap_or_else(|| self.inner.loops[self.pick()].clone());
+        h2::start_call(&self.inner, lh, req, opts, Box::new(handler))
     }
 
     /// Streams a response: `on_head` with status and headers, `on_data` per piece of body as
@@ -499,11 +520,18 @@ impl RtClient {
         rx.recv_timeout(Duration::from_secs(5)).unwrap_or(0)
     }
 
-    /// Idle connections kept on loop `index` (for tests).
+    /// This client's idle connections kept on loop `index` (for tests).
     pub fn idle_on(&self, index: usize) -> usize {
+        let lh = self.inner.loops[index % self.inner.loops.len()].clone();
+        self.idle_on_loop(&lh)
+    }
+
+    /// This client's idle connections kept on loop `lh`, one of its own or not (for tests).
+    pub fn idle_on_loop(&self, lh: &LoopHandle) -> usize {
         let (tx, rx) = channel();
-        if !self.inner.loops[index % self.inner.loops.len()].run(move |_| {
-            let n = IDLE.with(|m| m.borrow().values().map(|v| v.len()).sum::<usize>());
+        let prefix = format!("{} ", self.inner.id);
+        if !lh.run(move |_| {
+            let n = IDLE.with(|m| m.borrow().iter().filter(|(k, _)| k.starts_with(&prefix)).map(|(_, v)| v.len()).sum::<usize>());
             let _ = tx.send(n);
         }) {
             return 0;
@@ -524,15 +552,15 @@ thread_local! {
     static IDLE: RefCell<HashMap<String, Vec<(Rc<RefCell<Shared>>, ConnHandle)>>> = RefCell::new(HashMap::new());
 }
 
-fn key_of(u: &Url) -> String {
-    u.origin()
+fn key_of(inner: &RtInner, u: &Url) -> String {
+    format!("{} {}", inner.id, u.origin())
 }
 
 /// On a loop thread: an HTTP/2 stream or an HTTP/1.1 exchange.
 fn route(inner: &Arc<RtInner>, job: Job, lh: LoopHandle) {
     #[cfg(feature = "client-h2")]
     if job.h2 {
-        let pos = inner.loops.iter().position(|l| l.index() == lh.index()).unwrap_or(0);
+        let pos = inner.loops.iter().position(|l| l == &lh).unwrap_or(0);
         h2::dispatch(inner, h2::Work::Unary(job), &lh, pos);
         return;
     }
@@ -541,7 +569,7 @@ fn route(inner: &Arc<RtInner>, job: Job, lh: LoopHandle) {
 
 /// On a loop thread: reuse an idle connection or have one opened.
 fn dispatch(inner: &Arc<RtInner>, job: Job, lh: LoopHandle) {
-    let key = key_of(&job.req.url);
+    let key = key_of(inner, &job.req.url);
     let idle = IDLE.with(|m| m.borrow_mut().get_mut(&key).and_then(|v| v.pop()));
     if let Some((shared, h)) = idle {
         {
@@ -708,7 +736,7 @@ struct RtConn {
 // `Send` and leaves with the result.
 impl RtConn {
     fn new(inner: Arc<RtInner>, job: Job, lh: LoopHandle) -> std::result::Result<RtConn, (Job, Error)> {
-        let key = key_of(&job.req.url);
+        let key = key_of(&inner, &job.req.url);
         #[cfg(feature = "tls")]
         let tls = if job.req.url.is_secure() {
             match ClientConnection::new(inner.tls.clone(), &job.req.url.host) {

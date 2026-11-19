@@ -129,6 +129,7 @@ pub use service::{blocking, Blocking, Outcome, Service};
 pub use service::WatchRef;
 pub use simoom_rt::offload::OffloadStats;
 pub use simoom_rt::Backend;
+pub use simoom_rt::LoopHandle;
 pub use types::{Body, Response, StaticReply, Version};
 pub use util::percent_decode;
 #[cfg(feature = "websocket")]

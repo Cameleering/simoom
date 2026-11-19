@@ -275,7 +275,7 @@ pub(crate) struct CallJob {
 }
 
 /// Starts a call on loop `index` (see [`super::RtClient::call`]).
-pub(crate) fn start_call(inner: &Arc<RtInner>, index: usize, req: RtRequest, opts: CallOptions, mut handler: Box<dyn CallHandler>) -> RtCall {
+pub(crate) fn start_call(inner: &Arc<RtInner>, lh: LoopHandle, req: RtRequest, opts: CallOptions, mut handler: Box<dyn CallHandler>) -> RtCall {
     let ctl = Arc::new(CallShared { st: Mutex::new(CallSt::default()), buffered: AtomicUsize::new(0), high: opts.high_water.max(1) });
     let call = RtCall { ctl: ctl.clone() };
     if req.url.scheme != "http" && req.url.scheme != "https" {
@@ -284,12 +284,15 @@ pub(crate) fn start_call(inner: &Arc<RtInner>, index: usize, req: RtRequest, opt
         return call;
     }
     let job = CallJob { req, handler, ctl, deadline: opts.timeout.map(|t| Instant::now() + t), manual: opts.manual_release, attempts: 0 };
-    let lh = inner.loops[index % inner.loops.len()].clone();
+    let pos = inner.loops.iter().position(|l| l == &lh).unwrap_or(0);
+    if lh.is_current() {
+        dispatch(inner, Work::Call(job), &lh, pos);
+        return call;
+    }
     let slot = Arc::new(Mutex::new(Some(job)));
     let (s2, inner2, lh2) = (slot.clone(), inner.clone(), lh.clone());
     let ok = lh.run(move |_| {
         if let Some(j) = s2.lock().unwrap_or_else(|p| p.into_inner()).take() {
-            let pos = inner2.loops.iter().position(|l| l.index() == lh2.index()).unwrap_or(0);
             dispatch(&inner2, Work::Call(j), &lh2, pos);
         }
     });
