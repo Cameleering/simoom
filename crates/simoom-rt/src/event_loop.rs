@@ -24,6 +24,9 @@ const INITIAL_RECV_BUFFERS: usize = 8;
 /// Unconsumed input up to this size is kept in its own exact-size allocation rather than in a
 /// pooled receive buffer ([`Core::call_data`]).
 const COMPACT_INPUT: usize = 512;
+/// Up to this many open connections per loop, a connection accepted by a loop that holds more than
+/// the least loaded one is handed to that one ([`Core::balance_target`]).
+const BALANCE_FEW_PER_LOOP: usize = 4;
 /// How long loop 0 balances its accepts after the lazy loops started.
 const BALANCE_AFTER_GROWTH_NS: u64 = 1_000_000_000;
 /// A loop that saw no I/O for this long after a burst gives the buffers its pool cached back to
@@ -1041,6 +1044,38 @@ impl Core {
         (self.peers[p].index != self.index).then_some(p)
     }
 
+    /// Placement for a connection the kernel handed to this loop (`SO_REUSEPORT` picks a loop by a
+    /// hash of the four-tuple, so a few long-lived connections can land three on one loop): while
+    /// the server has few connections per loop, and this loop holds more than the least loaded
+    /// one, the connection goes to the least loaded loop. With many connections the hash evens
+    /// out and a hand-off per accept would only cost a wake-up. Returns a position in `peers`.
+    fn balance_target(&mut self) -> Option<usize> {
+        if self.shared.started.load(Ordering::Acquire) != self.peers.len() {
+            self.peers = self.shared.handles();
+        }
+        let n = self.peers.len();
+        if n <= 1 || self.shared.active.load(Ordering::Relaxed) > n * BALANCE_FEW_PER_LOOP {
+            return None;
+        }
+        let load = |i: usize| self.shared.loop_active[i].load(Ordering::Relaxed) + self.shared.loop_pending[i].load(Ordering::Relaxed);
+        let mine = self.conns.len + self.shared.loop_pending[self.index].load(Ordering::Relaxed);
+        // start at a rotating position so equal loops share the connections
+        self.rr = (self.rr + 1) % n;
+        let (mut best, mut best_load) = (None, mine);
+        for k in 0..n {
+            let p = (self.rr + k) % n;
+            if self.peers[p].index == self.index {
+                continue;
+            }
+            let l = load(self.peers[p].index);
+            if l < best_load {
+                best = Some(p);
+                best_load = l;
+            }
+        }
+        best
+    }
+
     fn dispatch(&mut self, ev: Event) {
         match ev {
             Event::Accepted { key, socket, peer } => {
@@ -1053,11 +1088,18 @@ impl Core {
                     return;
                 }
                 let handoff = self.listeners.get(li).is_some_and(|l| l.handoff) || self.now_ns < self.handoff_until;
-                match if handoff { self.pick_loop() } else { None } {
+                match if handoff { self.pick_loop() } else { self.balance_target() } {
                     None => self.adopt(socket, peer, li),
                     Some(p) => {
-                        let ok = self.peers[p].run(move |lcx| lcx.core.adopt(socket, peer, li));
+                        let target = self.peers[p].index;
+                        self.shared.loop_pending[target].fetch_add(1, Ordering::AcqRel);
+                        let shared = self.shared.clone();
+                        let ok = self.peers[p].run(move |lcx| {
+                            lcx.core.adopt(socket, peer, li);
+                            shared.loop_pending[target].fetch_sub(1, Ordering::AcqRel);
+                        });
                         if !ok {
+                            self.shared.loop_pending[target].fetch_sub(1, Ordering::AcqRel);
                             self.rejected += 1;
                         }
                     }

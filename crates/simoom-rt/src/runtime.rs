@@ -199,6 +199,8 @@ pub(crate) struct Shared {
     pub(crate) grace_ns: AtomicU64,
     pub(crate) active: AtomicUsize,
     pub(crate) loop_active: Vec<AtomicUsize>,
+    /// Connections handed to a loop that it has not adopted yet (placement counts them).
+    pub(crate) loop_pending: Vec<AtomicUsize>,
     pub(crate) loops: Vec<LoopStats>,
     /// The loops that run, by index.
     handles: Mutex<Vec<LoopHandle>>,
@@ -549,6 +551,7 @@ impl Builder {
             grace_ns: AtomicU64::new(0),
             active: AtomicUsize::new(0),
             loop_active: (0..n).map(|_| AtomicUsize::new(0)).collect(),
+            loop_pending: (0..n).map(|_| AtomicUsize::new(0)).collect(),
             loops: (0..n).map(|_| LoopStats::default()).collect(),
             handles: Mutex::new(Vec::with_capacity(n)),
             started: AtomicUsize::new(0),

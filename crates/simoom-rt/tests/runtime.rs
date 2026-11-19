@@ -699,3 +699,26 @@ fn lingering_close_delivers_the_last_response() {
         assert!(wait_until(5, || rt.stats().active == 0), "{b:?}");
     }
 }
+
+// A few long-lived connections are placed on the least loaded loop, not where the kernel's
+// SO_REUSEPORT hash puts them (which could be three of four on one loop): with 4 loops and 4
+// connections every loop gets one, every time.
+#[test]
+fn few_connections_spread_one_per_loop() {
+    for b in backends() {
+        for round in 0..10 {
+            let rt = builder(b, 4).listen("127.0.0.1:0", echo()).start().unwrap();
+            let addr = rt.local_addrs()[0];
+            let mut conns: Vec<TcpStream> = (0..4).map(|_| TcpStream::connect(addr).unwrap()).collect();
+            for c in conns.iter_mut() {
+                ping(c);
+            }
+            assert!(wait_until(5, || rt.stats().loops.iter().map(|l| l.accepted).sum::<u64>() == 4));
+            let per_loop: Vec<u64> = rt.stats().loops.iter().map(|l| l.accepted).collect();
+            assert!(per_loop.iter().all(|&n| n == 1), "{b:?} round {round}: connections per loop {per_loop:?}");
+            drop(conns);
+            rt.stop(Duration::from_secs(2));
+            rt.join();
+        }
+    }
+}
