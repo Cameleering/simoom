@@ -149,7 +149,7 @@ WebSocket over HTTP/2 or HTTP/3.
 | `auth`, `auth-digest`, `auth-ntlm` | Basic and Bearer challenges, Digest, NTLMv2 |
 | `multipart`, `encode` | `multipart/form-data`, form bodies and compressed request bodies |
 | `retry`, `happy-eyeballs`, `dns-timeout`, `socks` | retries with backoff, address racing, a resolver timeout, SOCKS5 proxies |
-| `rt` | a non-blocking client on simoom's event loops, with completion callbacks |
+| `rt` | a non-blocking client on simoom's event loops, with completion callbacks: HTTP/1.1, and HTTP/2 with streamed bodies and full-duplex calls (`RtClient::call`) |
 | `full` | all of the above |
 
 HTTP proxies (`CONNECT` tunnels, the `*_PROXY` environment variables, `NO_PROXY`) work with the

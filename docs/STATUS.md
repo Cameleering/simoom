@@ -160,3 +160,14 @@ Cold start is within 5% or faster everywhere, plain memory on Linux is 2% lower.
 Reproduce: `target-bugs/` scripts are not committed; the commands are `simoom-bench coldstart
 --addr 127.0.0.1:18080 --repeat 20 [--ready ready] -- BIN --addr 127.0.0.1:18080 [--tls-addr
 127.0.0.1:18443 --cert C --key K]`, and PSS from `/proc/PID/smaps_rollup`.
+
+## An event-driven HTTP/2 client (branch `h2-event-client`, not released)
+
+_2026-11-19._ `rt::RtClient` runs HTTP/2 on the loops (`version: Http2`): connections live on a
+loop, requests are queued to it from any thread, each response is completed by callback on the
+loop that read it; `RtClient::call` gives streamed bodies and full-duplex calls. Design, the
+properties kept from the blocking client and the measurements: [design/rt-h2-client.md](design/rt-h2-client.md).
+At 64 in flight over 4 connections (WSL2): the blocking `Client` 36 us of CPU and 88k req/s, the
+loop client with an async caller 3.2-4.8 us and 513k-606k req/s, a blocking facade over it 24 us
+and 212k-239k req/s. Tests: `crates/simoom-client/tests/rt_h2.rs` (18). Next: the blocking
+`Client`'s HTTP/2 path as a facade over it (steps in the design note).
