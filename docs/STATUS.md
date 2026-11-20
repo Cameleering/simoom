@@ -161,7 +161,7 @@ Reproduce: `target-bugs/` scripts are not committed; the commands are `simoom-be
 --addr 127.0.0.1:18080 --repeat 20 [--ready ready] -- BIN --addr 127.0.0.1:18080 [--tls-addr
 127.0.0.1:18443 --cert C --key K]`, and PSS from `/proc/PID/smaps_rollup`.
 
-## An event-driven HTTP/2 client (branch `h2-event-client`, not released)
+## An event-driven HTTP/2 client (branch `h2-event-client`, merged into `main` 2026-11-20; not released)
 
 _2026-11-19._ `rt::RtClient` runs HTTP/2 on the loops (`version: Http2`): connections live on a
 loop, requests are queued to it from any thread, each response is completed by callback on the
@@ -172,7 +172,7 @@ loop client with an async caller 3.2-4.8 us and 513k-606k req/s, a blocking faca
 and 212k-239k req/s. Tests: `crates/simoom-client/tests/rt_h2.rs` (18). Next: the blocking
 `Client`'s HTTP/2 path as a facade over it (steps in the design note).
 
-## Proxied requests on the server's own loop (branch `rt-same-loop`, carried here; not released)
+## Proxied requests on the server's own loop (branch `rt-same-loop`, merged into `main` 2026-11-20; not released)
 
 _2026-11-19._ For async routes in Cameleer (a platform-http request forwarded by `RtClient`):
 `LoopHandle::current()`, `LoopHandle::is_current()` and `PartialEq` for `LoopHandle` (simoom-rt);
@@ -184,7 +184,7 @@ origin (were per origin, so two clients on shared loops could take each other's)
 `crates/simoom-rt/tests/current.rs`, `crates/simoom-client/tests/rt.rs` (sending from a foreign
 loop, a server handler proxying on its own loop).
 
-## The blocking client's HTTP/2 runs on event loops (branch `h2-event-client`, not released)
+## The blocking client's HTTP/2 runs on event loops (branch `h2-event-client`, merged into `main` 2026-11-20; not released)
 
 _2026-11-20._ `Client` opens an HTTP/2 connection on the calling thread as before, then hands the
 socket and TLS session to a loop of a private `RtClient` (`loopmux.rs`, `Mux` is now an enum); a
