@@ -13,11 +13,12 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 #[cfg(any(feature = "auth-digest", feature = "auth-ntlm"))]
-use {
-    common::read_n,
-    simoom_client::{Body, ProxyAddr, ProxyConfig},
-    std::net::TcpStream,
-};
+use {common::read_n, std::net::TcpStream};
+#[cfg(feature = "auth-digest")]
+use simoom_client::Body;
+// the proxy tests need both schemes
+#[cfg(all(feature = "auth-digest", feature = "auth-ntlm"))]
+use simoom_client::{ProxyAddr, ProxyConfig};
 #[cfg(feature = "auth-digest")]
 use {std::collections::HashMap, std::sync::Mutex};
 

@@ -1,7 +1,7 @@
 //! HTTP/3 client streams: simoom-quic's client endpoint and simoom-h3 behind [`Proto`].
 
 use crate::error::{Error, ErrorKind, Result, TimeoutKind};
-use crate::mux::{Mux, MuxEvent, MuxIo, Proto, ReqHead};
+use crate::mux::{EngineMux, MuxEvent, MuxIo, Proto, ReqHead};
 use crate::types::{Headers, Version};
 use simoom_h3::{H3Event, Http3, SendError};
 use simoom_quic::tls::TlsProvider;
@@ -237,7 +237,7 @@ impl Proto for H3Proto {
 }
 
 /// Opens an HTTP/3 connection to `host:port` and waits for the handshake and SETTINGS.
-pub(crate) fn connect(tls: Arc<ClientConfig>, host: &str, port: u16, server_name: &str, deadline: Option<Instant>, what: &str) -> Result<Mux> {
+pub(crate) fn connect(tls: Arc<ClientConfig>, host: &str, port: u16, server_name: &str, deadline: Option<Instant>, what: &str) -> Result<EngineMux> {
     let addr = crate::transport::resolve(host, port)?[0];
     let bind: SocketAddr = if addr.is_ipv4() { "0.0.0.0:0".parse().unwrap_or_else(|_| unreachable!()) } else { "[::]:0".parse().unwrap_or_else(|_| unreachable!()) };
     let sock = UdpSocket::bind(bind).map_err(|e| Error::io(&e, what))?;
@@ -245,7 +245,7 @@ pub(crate) fn connect(tls: Arc<ClientConfig>, host: &str, port: u16, server_name
     let mut ep = Endpoint::new(Arc::new(cfg), false);
     let h = ep.connect(Instant::now(), addr, server_name, &[]).map_err(|e| Error::new(ErrorKind::Connect, format!("QUIC connect failed ({e:?}): {what}")))?;
     let proto = H3Proto { ep, h, h3: Http3::new(false, simoom_h3::Config::default()), tx: Vec::new(), resp: Vec::new(), goaway: false, closed: false, what: what.to_string() };
-    let m = Mux::new(MuxIo::Udp(sock), Box::new(proto), what.to_string());
+    let m = EngineMux::new(MuxIo::Udp(sock), Box::new(proto), what.to_string());
     m.kick();
     m.wait_ready(deadline, TimeoutKind::Connect)?;
     Ok(m)

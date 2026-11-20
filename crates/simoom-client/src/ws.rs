@@ -122,7 +122,7 @@ type DeflateCfg = ();
 /// extended CONNECT (RFC 8441).
 enum WsIo {
     Tcp(Duplex),
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     H2 { sender: crate::call::CallSender, call: Mutex<crate::call::Call> },
 }
 
@@ -130,7 +130,7 @@ impl std::fmt::Debug for WsIo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             WsIo::Tcp(d) => d.fmt(f),
-            #[cfg(feature = "client-h2")]
+            #[cfg(feature = "h2")]
             WsIo::H2 { sender, .. } => sender.fmt(f),
         }
     }
@@ -140,7 +140,7 @@ impl WsIo {
     fn write_all(&self, data: &[u8]) -> io::Result<()> {
         match self {
             WsIo::Tcp(d) => d.write_all(data),
-            #[cfg(feature = "client-h2")]
+            #[cfg(feature = "h2")]
             WsIo::H2 { sender, .. } => sender.send(data).map_err(io::Error::from),
         }
     }
@@ -148,7 +148,7 @@ impl WsIo {
     fn read(&self, buf: &mut [u8], timeout: Option<Duration>) -> io::Result<usize> {
         match self {
             WsIo::Tcp(d) => d.read(buf, timeout),
-            #[cfg(feature = "client-h2")]
+            #[cfg(feature = "h2")]
             WsIo::H2 { call, .. } => {
                 let mut c = call.lock().unwrap_or_else(|p| p.into_inner());
                 c.read_until(buf, timeout.map(|t| Instant::now() + t)).map_err(io::Error::from)
@@ -159,7 +159,7 @@ impl WsIo {
     fn close(&self) {
         match self {
             WsIo::Tcp(d) => d.close(),
-            #[cfg(feature = "client-h2")]
+            #[cfg(feature = "h2")]
             WsIo::H2 { sender, .. } => {
                 let _ = sender.finish();
             }
@@ -375,7 +375,7 @@ impl WsBuilder {
 }
 
 impl WsBuilder {
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     fn connect_h2(self) -> Result<WebSocket> {
         let url = self.url?;
         let cfg = &self.client.inner.cfg;
@@ -442,7 +442,7 @@ impl WsBuilder {
         })
     }
 
-    #[cfg(not(feature = "client-h2"))]
+    #[cfg(not(feature = "h2"))]
     fn connect_h2(self) -> Result<WebSocket> {
         Err(Error::new(ErrorKind::Unsupported, "WebSocket over HTTP/2 needs the `client-h2` feature of simoom-client"))
     }

@@ -157,7 +157,7 @@ fn refused_and_broken_handshakes() {
     assert!(e.message.contains("Masked"), "{e}");
 }
 
-#[cfg(feature = "client-h2")]
+#[cfg(feature = "h2")]
 #[test]
 fn websocket_over_http2() {
     let h = server();

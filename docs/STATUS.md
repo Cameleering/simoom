@@ -160,3 +160,47 @@ Cold start is within 5% or faster everywhere, plain memory on Linux is 2% lower.
 Reproduce: `target-bugs/` scripts are not committed; the commands are `simoom-bench coldstart
 --addr 127.0.0.1:18080 --repeat 20 [--ready ready] -- BIN --addr 127.0.0.1:18080 [--tls-addr
 127.0.0.1:18443 --cert C --key K]`, and PSS from `/proc/PID/smaps_rollup`.
+
+## An event-driven HTTP/2 client (branch `h2-event-client`, merged into `main` 2026-11-20; not released)
+
+_2026-11-19._ `rt::RtClient` runs HTTP/2 on the loops (`version: Http2`): connections live on a
+loop, requests are queued to it from any thread, each response is completed by callback on the
+loop that read it; `RtClient::call` gives streamed bodies and full-duplex calls. Design, the
+properties kept from the blocking client and the measurements: [design/rt-h2-client.md](design/rt-h2-client.md).
+At 64 in flight over 4 connections (WSL2): the blocking `Client` 36 us of CPU and 88k req/s, the
+loop client with an async caller 3.2-4.8 us and 513k-606k req/s, a blocking facade over it 24 us
+and 212k-239k req/s. Tests: `crates/simoom-client/tests/rt_h2.rs` (18). Next: the blocking
+`Client`'s HTTP/2 path as a facade over it (steps in the design note).
+
+## Proxied requests on the server's own loop (branch `rt-same-loop`, merged into `main` 2026-11-20; not released)
+
+_2026-11-19._ For async routes in Cameleer (a platform-http request forwarded by `RtClient`):
+`LoopHandle::current()`, `LoopHandle::is_current()` and `PartialEq` for `LoopHandle` (simoom-rt);
+`ServerHandle::loops()` and `simoom::LoopHandle` (simoom); `RtClient::send` on a loop thread
+dispatches inline on that loop, and `RtClient::idle_on_loop` (simoom-client). Items a loop queues for
+itself are delivered in the same turn (they cost one extra loop turn each before: 1002 OS waits
+for 1000 self-queued tasks, now under 20). Idle `RtClient` connections are pooled per client and
+origin (were per origin, so two clients on shared loops could take each other's). Tests:
+`crates/simoom-rt/tests/current.rs`, `crates/simoom-client/tests/rt.rs` (sending from a foreign
+loop, a server handler proxying on its own loop).
+
+## The blocking client's HTTP/2 runs on event loops (branch `h2-event-client`, merged into `main` 2026-11-20; not released)
+
+_2026-11-20._ `Client` opens an HTTP/2 connection on the calling thread as before, then hands the
+socket and TLS session to a loop of a private `RtClient` (`loopmux.rs`, `Mux` is now an enum); a
+response wakes its caller once, from the loop. The old engine (`EngineMux`) stays for HTTP/3 and
+h2c `Upgrade`. All existing HTTP/2, WebSocket-over-HTTP/2, call, auth and cookie tests pass
+unchanged. At 64 threads (WSL2): one connection 89k -> 94k req/s and 34.8 -> 22.4 us per request;
+four connections 161k-203k -> 236k-243k req/s and 30-32 -> 25 us. Size (dist, x86-64): the
+default client 1,099,128 -> 1,425,288 bytes (+326 KB, simoom-rt and the loop client), next to
+the server +153 KB. Details in [design/rt-h2-client.md](design/rt-h2-client.md). The digest
+`nextnonce` test flake (whole-second nonces) is fixed.
+
+## `client-h2-engine`: HTTP/2 without event loops for small builds (branch `h2-event-client`)
+
+_2026-11-20._ `client-h2` (default) runs HTTP/2 on the loops; `client-h2-engine` keeps the
+engine (requesting threads, no simoom-rt) for size-sensitive builds; both sit on an internal `h2`
+feature, and with both the loops win. Small build `default-features = false, features =
+["client-h1", "client-h2-engine", "tls", ...]`: 1,099,560 bytes with ws and compress, the default
+before the loops (1,099,128); the default is 1,425,288. Tests run on both paths.
+

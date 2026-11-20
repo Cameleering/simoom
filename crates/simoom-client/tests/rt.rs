@@ -112,6 +112,7 @@ fn redirects_proxies_and_decompression_on_the_loop() {
     // through an HTTP proxy (absolute form) and a CONNECT tunnel to https
     let p = common::proxy(None);
     let pc = simoom_client::ProxyConfig::new(simoom_client::ProxyAddr::new("127.0.0.1", p.addr.port()));
+    #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
     let mut cfg = RtConfig { proxy: Some(pc), ..RtConfig::default() };
     #[cfg(feature = "tls")]
     {
@@ -173,4 +174,85 @@ fn http2_streamed_bodies_and_streamed_responses_on_workers() {
         got.push_str(&m);
     }
     assert_eq!(got, "head 200part0;part1;part2;part3;");
+}
+
+/// The thread a callback ran on, and whether it was the loop `lh`.
+fn on(lh: Option<&simoom_rt::LoopHandle>) -> (std::thread::ThreadId, bool) {
+    (std::thread::current().id(), lh.is_some_and(|l| simoom_rt::LoopHandle::current().as_ref() == Some(l)))
+}
+
+#[test]
+fn a_request_sent_on_a_loop_thread_stays_on_that_loop() {
+    let h = common::plain();
+    let mine = simoom_rt::Runtime::builder().threads(1).start().unwrap();
+    let own = mine.loops()[0].clone();
+    let c = RtClient::new(mine.loops(), RtConfig::default());
+    // a loop of another runtime, not one of the client's
+    let other = simoom_rt::Runtime::builder().threads(1).start().unwrap();
+    let lh = other.loops()[0].clone();
+    for _ in 0..3 {
+        let (tx, rx) = channel();
+        let (c2, u, l2) = (c.clone(), common::url(&h, "/echo"), lh.clone());
+        lh.run(move |_| {
+            let sent_on = std::thread::current().id();
+            c2.send(RtRequest::get(&u).unwrap(), move |r| {
+                let (thread, same) = on(Some(&l2));
+                tx.send((r.map(|r| r.status), thread == sent_on, same)).unwrap();
+            });
+        });
+        let (status, same_thread, same_loop) = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        assert_eq!(status.unwrap(), 200);
+        assert!(same_thread && same_loop, "the callback ran on the loop that sent");
+    }
+    assert_eq!(c.idle_on_loop(&lh), 1, "one connection, kept on the sending loop and reused");
+    assert_eq!(c.idle_on(0), 0, "nothing ran on the client's own loop");
+    // from a plain thread: the client's own loop, as before
+    let (tx, rx) = channel();
+    c.send(RtRequest::get(&common::url(&h, "/echo")).unwrap(), move |r| tx.send((r.is_ok(), on(Some(&own)).1)).unwrap());
+    assert_eq!(rx.recv_timeout(Duration::from_secs(20)).unwrap(), (true, true));
+    assert_eq!(c.idle_on(0), 1);
+    drop(c);
+    other.stop(Duration::from_millis(100));
+    other.join();
+    mine.stop(Duration::from_millis(100));
+    mine.join();
+}
+
+#[test]
+fn a_server_handler_proxies_on_its_own_loop() {
+    use std::sync::{Arc, OnceLock};
+    let upstream = common::plain();
+    let client: Arc<OnceLock<RtClient>> = Arc::new(OnceLock::new());
+    let threads: Arc<std::sync::Mutex<Vec<bool>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (c2, t2, u) = (client.clone(), threads.clone(), common::url(&upstream, "/echo"));
+    let proxy = simoom::Server::builder()
+        .listen("127.0.0.1:0")
+        .threads(2)
+        .service(move |_req: &mut simoom::Request<'_>, reply: simoom::Reply<'_>| {
+            let responder = reply.defer();
+            let handler = std::thread::current().id();
+            let t3 = t2.clone();
+            c2.get().unwrap().send(RtRequest::get(&u).unwrap(), move |r| {
+                t3.lock().unwrap().push(std::thread::current().id() == handler);
+                match r {
+                    Ok(r) => responder.send(simoom::Response::new(r.status).body(r.body)),
+                    Err(e) => responder.send(simoom::Response::new(502).body(e.to_string())),
+                };
+            });
+            simoom::Outcome::Deferred
+        })
+        .start()
+        .unwrap();
+    let loops = proxy.loops();
+    assert!(!loops.is_empty());
+    let _ = client.set(RtClient::new(loops, RtConfig::default()));
+    let c = common::client().build();
+    for _ in 0..5 {
+        let r = c.get(&format!("http://127.0.0.1:{}/", proxy.local_addr().port())).send().unwrap();
+        assert_eq!(r.status(), 200);
+        assert!(r.text().unwrap().starts_with("Http11 GET /echo"));
+    }
+    let t = threads.lock().unwrap();
+    assert_eq!(t.len(), 5);
+    assert!(t.iter().all(|&same| same), "every upstream answer came back on the handler's thread");
 }

@@ -12,7 +12,7 @@ use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 use crate::mux::Mux;
 
 /// What a pooled connection is for.
@@ -64,7 +64,7 @@ struct Origin {
     key: Option<Arc<OriginKey>>,
     idle: Vec<H1Conn>,
     live: usize,
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     mux: Vec<Arc<Mux>>,
 }
 
@@ -75,11 +75,11 @@ pub(crate) struct Limits {
     pub max_idle_per_origin: usize,
     pub idle_timeout: Duration,
     pub max_requests: Option<u32>,
-    #[cfg_attr(not(any(feature = "client-h2", feature = "client-h3")), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "h2", feature = "client-h3")), allow(dead_code))]
     pub max_mux_per_origin: usize,
     /// Streams per multiplexed connection before another connection is opened (when
     /// `max_mux_per_origin` allows).
-    #[cfg_attr(not(any(feature = "client-h2", feature = "client-h3")), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "h2", feature = "client-h3")), allow(dead_code))]
     pub streams_per_mux: usize,
 }
 
@@ -96,7 +96,7 @@ pub(crate) struct Pool {
     /// Multiplexed connections in the pool (lets HTTP/1.1 requests skip the lookup).
     mux_count: AtomicUsize,
     /// Threads' cached connections, for the evictor.
-    #[cfg(any(feature = "evict", feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "evict", feature = "h2", feature = "client-h3"))]
     locals: Mutex<Vec<(std::sync::Weak<Mutex<Option<H1Conn>>>, Arc<OriginKey>)>>,
     #[cfg(feature = "evict")]
     evictor: std::sync::Once,
@@ -190,7 +190,7 @@ impl Slot {
                     return None;
                 }
                 let cell: Cell = Arc::new(Mutex::new(Some(conn)));
-                #[cfg(any(feature = "evict", feature = "client-h2", feature = "client-h3"))]
+                #[cfg(any(feature = "evict", feature = "h2", feature = "client-h3"))]
                 p.locals.lock().unwrap_or_else(|e| e.into_inner()).push((Arc::downgrade(&cell), k.clone()));
                 *l = Some(Local { pool: Arc::downgrade(p), id: p.id, gen, key: k.clone(), cell });
                 None
@@ -214,7 +214,7 @@ impl Pool {
             gen: AtomicU64::new(0),
             local_idle: AtomicUsize::new(0),
             mux_count: AtomicUsize::new(0),
-            #[cfg(any(feature = "evict", feature = "client-h2", feature = "client-h3"))]
+            #[cfg(any(feature = "evict", feature = "h2", feature = "client-h3"))]
             locals: Mutex::new(Vec::new()),
             #[cfg(feature = "evict")]
             evictor: std::sync::Once::new(),
@@ -352,7 +352,7 @@ impl Pool {
 
     /// A shared connection for `key` that can take a new stream (or any live one when all are
     /// busy and `any` is set; its `open` then waits for a free stream).
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     pub(crate) fn mux(&self, key: &OriginKey, any: bool) -> Option<Arc<Mux>> {
         if self.mux_count.load(Ordering::Relaxed) == 0 {
             return None;
@@ -384,13 +384,13 @@ impl Pool {
         found
     }
 
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     pub(crate) fn add_mux(&self, key: OriginKey, m: Arc<Mux>) {
         self.lock().entry(key).or_default().mux.push(m);
         self.mux_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     pub(crate) fn remove_mux(&self, key: &OriginKey, m: &Arc<Mux>) {
         if let Some(o) = self.lock().get_mut(key) {
             let before = o.mux.len();
@@ -400,7 +400,7 @@ impl Pool {
     }
 
     /// Every shared connection.
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     pub(crate) fn all_mux(&self) -> Vec<(OriginKey, Arc<Mux>)> {
         let st = self.lock();
         st.iter().flat_map(|(k, o)| o.mux.iter().map(move |m| (k.clone(), m.clone()))).collect()
@@ -423,7 +423,7 @@ impl Pool {
     }
 
     /// Closes idle HTTP/1.1 connections past the idle timeout.
-    #[cfg(any(feature = "evict", feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "evict", feature = "h2", feature = "client-h3"))]
     pub(crate) fn evict(&self) {
         let lim = self.lim.idle_timeout;
         let mut gone = Vec::new();
@@ -474,9 +474,9 @@ impl Pool {
     pub(crate) fn counts(&self) -> (usize, usize) {
         let st = self.lock();
         let live = st.values().map(|o| o.live).sum();
-        #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+        #[cfg(any(feature = "h2", feature = "client-h3"))]
         let mux = st.values().map(|o| o.mux.len()).sum();
-        #[cfg(not(any(feature = "client-h2", feature = "client-h3")))]
+        #[cfg(not(any(feature = "h2", feature = "client-h3")))]
         let mux = 0;
         (live, mux)
     }
@@ -499,7 +499,7 @@ impl Pool {
             for c in o.idle {
                 c.io.close();
             }
-            #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+            #[cfg(any(feature = "h2", feature = "client-h3"))]
             for m in o.mux {
                 m.close();
             }

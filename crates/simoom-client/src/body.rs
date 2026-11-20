@@ -1,7 +1,7 @@
 //! Responses and streamed response bodies.
 
 use crate::error::{Error, ErrorKind, Result, StatusError};
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 use crate::error::TimeoutKind;
 use crate::h1::H1Conn;
 use crate::pool::Slot;
@@ -11,7 +11,7 @@ use simoom_http1::BodyDecoder;
 use std::io::{self, Read};
 use std::time::{Duration, Instant};
 
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 use crate::mux::Mux;
 use std::sync::Arc;
 
@@ -55,7 +55,7 @@ impl Drop for H1Body {
     }
 }
 
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 pub(crate) struct MuxBody {
     pub mux: Arc<Mux>,
     pub id: u64,
@@ -64,7 +64,7 @@ pub(crate) struct MuxBody {
     pub done: bool,
 }
 
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 impl Drop for MuxBody {
     fn drop(&mut self) {
         self.mux.finish(self.id);
@@ -75,7 +75,7 @@ pub(crate) enum Inner {
     Empty,
     Bytes(Vec<u8>, usize),
     H1(Box<H1Body>),
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     Mux(Box<MuxBody>),
     #[cfg(feature = "compress")]
     Decoded(Box<dyn Read + Send>),
@@ -150,7 +150,7 @@ impl ResponseBody {
                 }
                 n
             }
-            #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+            #[cfg(any(feature = "h2", feature = "client-h3"))]
             Inner::Mux(m) => {
                 if m.done {
                     return Ok(0);
@@ -336,7 +336,7 @@ impl Response {
 }
 
 /// The standard reason phrase of a status.
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 pub(crate) fn reason_of(status: u16) -> std::borrow::Cow<'static, str> {
     std::borrow::Cow::Borrowed(simoom_http1::write::reason(status))
 }

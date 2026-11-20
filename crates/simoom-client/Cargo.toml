@@ -32,8 +32,14 @@ default = ["client-h1", "client-h2", "client-ws", "tls", "compress"]
 # HTTP/1.1: keep-alive pool, chunked bodies, 100-continue, CONNECT proxies, redirects.
 client-h1 = []
 # HTTP/2: h2c with prior knowledge and h2 through ALPN, one multiplexed connection per origin,
-# PING keepalive.
-client-h2 = ["dep:simoom-h2"]
+# PING keepalive. The connections run on simoom-rt event loops (`rt`).
+client-h2 = ["h2", "rt"]
+# HTTP/2 for small builds: the connections are driven by the requesting threads (a reader thread
+# while several streams are in flight) instead of event loops, so simoom-rt is not compiled in.
+# Same features as `client-h2`; with both, `client-h2` (the loops) wins.
+client-h2-engine = ["h2"]
+# The HTTP/2 protocol under both: not meant to be enabled directly.
+h2 = ["dep:simoom-h2"]
 # HTTP/3 over QUIC, forced or through `Alt-Svc` (needs TLS).
 client-h3 = ["tls", "dep:simoom-quic", "dep:simoom-h3"]
 # The WebSocket client (RFC 6455), `ws://` and `wss://`.
@@ -80,7 +86,7 @@ retry = []
 # HTTP/1.1 pipelining (`Client::pipeline`).
 pipeline = []
 # h2c through an HTTP/1.1 `Upgrade` (`Config::h2c_upgrade`).
-h2c-upgrade = ["client-h2"]
+h2c-upgrade = ["h2"]
 # Brotli and zstd request-body compression (`encode::Coding::Brotli`, `Coding::Zstd`).
 compress-br = ["encode", "simoom-compress/brotli"]
 compress-zstd = ["encode", "simoom-compress/zstd"]

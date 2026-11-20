@@ -1,7 +1,7 @@
 //! WebSocket over HTTP/3 (RFC 9220) between simoom-client and the simoom server, plain and
 //! with permessage-deflate.
 
-#![cfg(all(feature = "client-h3", feature = "client-h2", feature = "client-ws"))]
+#![cfg(all(feature = "client-h3", feature = "h2", feature = "client-ws"))]
 
 mod common;
 

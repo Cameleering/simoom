@@ -24,6 +24,9 @@ const INITIAL_RECV_BUFFERS: usize = 8;
 /// Unconsumed input up to this size is kept in its own exact-size allocation rather than in a
 /// pooled receive buffer ([`Core::call_data`]).
 const COMPACT_INPUT: usize = 512;
+/// Up to this many open connections per loop, a connection accepted by a loop that holds more than
+/// the least loaded one is handed to that one ([`Core::balance_target`]).
+const BALANCE_FEW_PER_LOOP: usize = 4;
 /// How long loop 0 balances its accepts after the lazy loops started.
 const BALANCE_AFTER_GROWTH_NS: u64 = 1_000_000_000;
 /// A loop that saw no I/O for this long after a burst gives the buffers its pool cached back to
@@ -70,6 +73,12 @@ impl Queue {
         if self.closed.load(Ordering::Acquire) {
             return false;
         }
+        if OWN_QUEUE.with(|q| q.get()) == self as *const Queue as usize {
+            // pushed by this loop's own thread (a reply or a task from one of its callbacks):
+            // delivered in the same loop turn, with no wake-up and no extra turn
+            LOCAL.with(|l| l.borrow_mut().push(t));
+            return true;
+        }
         self.items.push(t);
         self.waker.post();
         // Closed meanwhile: the item is dropped with the queue (or by `close`).
@@ -87,7 +96,17 @@ impl Queue {
     }
 }
 
-/// A handle to one loop, usable from any thread: run closures on the loop thread.
+thread_local! {
+    /// The loop this thread runs, while it runs it.
+    static CURRENT: std::cell::RefCell<Option<LoopHandle>> = const { std::cell::RefCell::new(None) };
+    /// The address of that loop's queue (0 on other threads): [`Queue::push`] compares it.
+    static OWN_QUEUE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Items the loop's own thread queued for itself, delivered within the current turn.
+    static LOCAL: std::cell::RefCell<Vec<Item>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A handle to one loop, usable from any thread: run closures on the loop thread. Two handles
+/// compare equal when they name the same loop.
 #[derive(Clone)]
 pub struct LoopHandle {
     pub(crate) index: usize,
@@ -106,11 +125,30 @@ impl LoopHandle {
         self.index
     }
 
-    /// Runs `f` on the loop thread at its next turn. Returns `false` if the loop has exited.
+    /// Runs `f` on the loop thread at its next turn (in the current turn, after the running
+    /// callback, when called on that loop's thread). Returns `false` if the loop has exited.
     pub fn run(&self, f: impl FnOnce(&mut LoopCtx<'_>) + Send + 'static) -> bool {
         self.queue.push(Item::Task(Box::new(f)))
     }
+
+    /// The loop the calling thread runs, when it is a loop thread (of any runtime).
+    pub fn current() -> Option<LoopHandle> {
+        CURRENT.with(|c| c.borrow().clone())
+    }
+
+    /// Whether the calling thread is this loop's thread.
+    pub fn is_current(&self) -> bool {
+        OWN_QUEUE.with(|q| q.get()) == Arc::as_ptr(&self.queue) as usize
+    }
 }
+
+impl PartialEq for LoopHandle {
+    fn eq(&self, other: &LoopHandle) -> bool {
+        Arc::ptr_eq(&self.queue, &other.queue)
+    }
+}
+
+impl Eq for LoopHandle {}
 
 /// A handle to one connection, usable from any thread. Messages to a closed connection are
 /// dropped.
@@ -444,6 +482,13 @@ impl Core {
         self.flush_conn(key);
     }
 
+    /// [`Core::deliver`] without the early flush, for a message followed by another one for the
+    /// same connection in this batch: the connection's output then goes out with the last one,
+    /// in one write.
+    fn deliver_held(&mut self, key: u64, msg: Message) {
+        self.with_conn(key, |h, cx| h.on_message(cx, msg));
+    }
+
     pub(crate) fn deliver_udp(&mut self, idx: usize, msg: Message) {
         self.with_udp(idx, |h, cx| h.on_message(cx, msg));
     }
@@ -475,7 +520,7 @@ impl Core {
     /// our last bytes and a FIN), then read and drop input until the peer closes, the linger
     /// time passes or `linger_bytes` were dropped, and only then close. Closing a socket with
     /// unread input makes the kernel send a reset, which can destroy the response at the peer
-    /// before it reads it (RFC 9112 §9.6). Holds no buffer: what arrives goes straight back to
+    /// before it reads it (RFC 9112 Â§9.6). Holds no buffer: what arrives goes straight back to
     /// the pool.
     fn linger(&mut self, key: u64) {
         let linger = self.cfg.linger;
@@ -1041,6 +1086,38 @@ impl Core {
         (self.peers[p].index != self.index).then_some(p)
     }
 
+    /// Placement for a connection the kernel handed to this loop (`SO_REUSEPORT` picks a loop by a
+    /// hash of the four-tuple, so a few long-lived connections can land three on one loop): while
+    /// the server has few connections per loop, and this loop holds more than the least loaded
+    /// one, the connection goes to the least loaded loop. With many connections the hash evens
+    /// out and a hand-off per accept would only cost a wake-up. Returns a position in `peers`.
+    fn balance_target(&mut self) -> Option<usize> {
+        if self.shared.started.load(Ordering::Acquire) != self.peers.len() {
+            self.peers = self.shared.handles();
+        }
+        let n = self.peers.len();
+        if n <= 1 || self.shared.active.load(Ordering::Relaxed) > n * BALANCE_FEW_PER_LOOP {
+            return None;
+        }
+        let load = |i: usize| self.shared.loop_active[i].load(Ordering::Relaxed) + self.shared.loop_pending[i].load(Ordering::Relaxed);
+        let mine = self.conns.len + self.shared.loop_pending[self.index].load(Ordering::Relaxed);
+        // start at a rotating position so equal loops share the connections
+        self.rr = (self.rr + 1) % n;
+        let (mut best, mut best_load) = (None, mine);
+        for k in 0..n {
+            let p = (self.rr + k) % n;
+            if self.peers[p].index == self.index {
+                continue;
+            }
+            let l = load(self.peers[p].index);
+            if l < best_load {
+                best = Some(p);
+                best_load = l;
+            }
+        }
+        best
+    }
+
     fn dispatch(&mut self, ev: Event) {
         match ev {
             Event::Accepted { key, socket, peer } => {
@@ -1053,11 +1130,18 @@ impl Core {
                     return;
                 }
                 let handoff = self.listeners.get(li).is_some_and(|l| l.handoff) || self.now_ns < self.handoff_until;
-                match if handoff { self.pick_loop() } else { None } {
+                match if handoff { self.pick_loop() } else { self.balance_target() } {
                     None => self.adopt(socket, peer, li),
                     Some(p) => {
-                        let ok = self.peers[p].run(move |lcx| lcx.core.adopt(socket, peer, li));
+                        let target = self.peers[p].index;
+                        self.shared.loop_pending[target].fetch_add(1, Ordering::AcqRel);
+                        let shared = self.shared.clone();
+                        let ok = self.peers[p].run(move |lcx| {
+                            lcx.core.adopt(socket, peer, li);
+                            shared.loop_pending[target].fetch_sub(1, Ordering::AcqRel);
+                        });
                         if !ok {
+                            self.shared.loop_pending[target].fetch_sub(1, Ordering::AcqRel);
                             self.rejected += 1;
                         }
                     }
@@ -1370,16 +1454,51 @@ impl Core {
 
     /// Runs the loop until the runtime stops and every connection is gone.
     pub(crate) fn run(&mut self) -> io::Result<()> {
+        let me = LoopHandle { index: self.index, queue: self.queue.clone() };
+        OWN_QUEUE.with(|q| q.set(Arc::as_ptr(&me.queue) as usize));
+        CURRENT.with(|c| *c.borrow_mut() = Some(me));
+        let r = self.run_loop();
+        OWN_QUEUE.with(|q| q.set(0));
+        CURRENT.with(|c| *c.borrow_mut() = None);
+        LOCAL.with(|l| l.borrow_mut().clear());
+        r
+    }
+
+    /// Delivers what this loop's thread queued for itself, and the redeliveries and drains that
+    /// causes, until nothing is left.
+    fn settle(&mut self) {
+        loop {
+            let items = LOCAL.with(|l| std::mem::take(&mut *l.borrow_mut()));
+            let n = items.len();
+            for (i, t) in items.into_iter().enumerate() {
+                self.batch_left = n - i;
+                match t {
+                    Item::Task(t) => t(&mut LoopCtx { core: self }),
+                    Item::Conn(key, msg) => self.deliver(key, msg),
+                    Item::Udp(idx, msg) => self.deliver_udp(idx, msg),
+                }
+            }
+            self.batch_left = 0;
+            self.after_callbacks();
+            if LOCAL.with(|l| l.borrow().is_empty()) {
+                return;
+            }
+        }
+    }
+
+    fn run_loop(&mut self) -> io::Result<()> {
         self.start_io()?;
         let mut events = Vec::with_capacity(256);
         let mut tasks: Vec<Item> = Vec::new();
+        // the last message of each connection in a batch of messages (see the early flush below)
+        let mut last_msg: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
         let mut stop_at: Option<u64> = None;
         let mut aborted = false;
         let recv_size = self.cfg.buffer_classes[0];
         loop {
             self.now_ns = simoom_sys::time::now_ns();
             self.fire_timers();
-            self.after_callbacks();
+            self.settle();
             // A timer may have finished the last piece of work of a stop (a QUIC endpoint
             // that went idle): check before blocking.
             if stop_at.is_some() && self.stop_done(aborted) {
@@ -1426,10 +1545,23 @@ impl Core {
             if woke {
                 self.queue.take(&mut tasks);
                 let n = tasks.len();
+                // The early flush (K4) writes a connection's output after its message; for a
+                // multiplexed connection that gets several messages in one batch (replies of
+                // HTTP/2 streams finished on other threads) it waits for the last one, so the
+                // replies leave in one write instead of one system call each.
+                if n >= FLUSH_EARLY_BATCH {
+                    last_msg.clear();
+                    for (i, t) in tasks.iter().enumerate() {
+                        if let Item::Conn(key, _) = t {
+                            last_msg.insert(*key, i);
+                        }
+                    }
+                }
                 for (i, t) in tasks.drain(..).enumerate() {
                     self.batch_left = n - i;
                     match t {
                         Item::Task(t) => t(&mut LoopCtx { core: self }),
+                        Item::Conn(key, msg) if n >= FLUSH_EARLY_BATCH && last_msg.get(&key).is_some_and(|&l| l > i) => self.deliver_held(key, msg),
                         Item::Conn(key, msg) => self.deliver(key, msg),
                         Item::Udp(idx, msg) => self.deliver_udp(idx, msg),
                     }
@@ -1456,7 +1588,7 @@ impl Core {
                 self.want_grow = false;
                 self.grow_next = true;
             }
-            self.after_callbacks();
+            self.settle();
             self.publish();
 
             if stop_at.is_none() && self.shared.stop.load(Ordering::Acquire) {

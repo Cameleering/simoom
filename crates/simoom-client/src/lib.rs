@@ -2,9 +2,11 @@
 //!
 //! Built on simoom's sans-io protocol crates (simoom-http1, simoom-h2, simoom-quic +
 //! simoom-h3, simoom-tls). No async runtime: the blocking [`Client`] runs requests on the
-//! caller's threads, and HTTP/2 and HTTP/3 connections are shared between threads (a reader
-//! thread runs only while several streams are in flight). With the `rt` feature,
-//! `rt::RtClient` (feature `rt`) runs requests on simoom-rt event loops instead, with completion callbacks.
+//! caller's threads, and HTTP/2 and HTTP/3 connections are shared between threads. An HTTP/2
+//! connection is opened on the calling thread and then run by one of the client's simoom-rt
+//! event loops (started with the first one), which wakes each waiting caller once its response
+//! is in. HTTP/3 has a reader thread while several streams are in flight. `rt::RtClient`
+//! (feature `rt`) runs requests on simoom-rt event loops with completion callbacks instead.
 //!
 //! ```no_run
 //! use simoom_client::Client;
@@ -43,7 +45,8 @@
 //! | feature | adds |
 //! |---|---|
 //! | `client-h1` (default) | HTTP/1.1 |
-//! | `client-h2` (default) | HTTP/2 (h2c and h2) |
+//! | `client-h2` (default) | HTTP/2 (h2c and h2), its connections run on simoom-rt event loops (pulls in `rt`) |
+//! | `client-h2-engine` | HTTP/2 for small builds: the connections are driven by the requesting threads, no simoom-rt (about 320 KB smaller); with `client-h2` too, the loops win |
 //! | `client-ws` (default) | the WebSocket client |
 //! | `tls` (default) | `https` and `wss` (TLS 1.3: X25519, P-256, RSA, AES-GCM) |
 //! | `tls-extra` | P-384 and Ed25519 certificates, ChaCha20-Poly1305 |
@@ -93,21 +96,26 @@ mod transport;
 mod types;
 mod url;
 
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 mod call;
-#[cfg(feature = "client-h2")]
+// The engine's HTTP/2 protocol: connections that start as HTTP/1.1 (`Upgrade: h2c`), and every
+// HTTP/2 connection with `client-h2-engine` alone; with `client-h2` the others run on the event
+// loops (`loopmux`, `rt::h2`).
+#[cfg(any(feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2"))))]
 mod h2;
 #[cfg(feature = "client-h3")]
 mod h3;
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 mod mux;
+#[cfg(feature = "client-h2")]
+mod loopmux;
 #[cfg(feature = "rt")]
 pub mod rt;
 #[cfg(feature = "client-ws")]
 mod ws;
 
 pub use body::{Response, ResponseBody};
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 pub use call::{Call, CallSender};
 pub use client::{Client, ClientBuilder, Config, PoolStats, RequestBuilder};
 pub use error::{Error, ErrorKind, Result, StatusError, TimeoutKind};

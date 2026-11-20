@@ -1,7 +1,7 @@
 //! TLS and HTTP/2: ALPN, h2c, multiplexing, flow control, trailers, duplex calls, resets,
 //! GOAWAY, keepalive, certificate checks.
 
-#![cfg(all(feature = "client-h2", feature = "tls"))]
+#![cfg(all(feature = "h2", feature = "tls"))]
 
 mod common;
 
@@ -452,4 +452,145 @@ fn more_connections_past_a_stream_threshold() {
     }
     let n = c.pool_stats().multiplexed;
     assert!((2..=8).contains(&n), "{n} connections");
+}
+
+/// An h2 echo server (like `h2_server`) that also logs, for every socket read, the frames in it:
+/// (read number, frame type, flags, stream).
+fn h2_frame_log_server(log: Arc<std::sync::Mutex<Vec<(usize, u8, u8, u32)>>>) -> std::net::SocketAddr {
+    let r = raw(move |mut s: TcpStream, _| {
+        let mut conn = Connection::server(Config::default());
+        let mut buf = vec![0u8; 65536];
+        let mut pending: Vec<u8> = Vec::new();
+        let mut stream_bytes: Vec<u8> = Vec::new();
+        let mut parsed = 0usize;
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        for read_no in 0.. {
+            let n = match s.read(&mut buf) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => n,
+            };
+            pending.extend_from_slice(&buf[..n]);
+            // log the frames completed by this read
+            stream_bytes.extend_from_slice(&buf[..n]);
+            if parsed == 0 && stream_bytes.len() >= 24 && stream_bytes.starts_with(b"PRI ") {
+                parsed = 24;
+            }
+            while parsed > 0 && parsed + 9 <= stream_bytes.len() {
+                let d = &stream_bytes[parsed..];
+                let len = ((d[0] as usize) << 16) | ((d[1] as usize) << 8) | d[2] as usize;
+                if d.len() < 9 + len {
+                    break;
+                }
+                let id = u32::from_be_bytes([d[5] & 0x7f, d[6], d[7], d[8]]);
+                log.lock().unwrap().push((read_no, d[3], d[4], id));
+                parsed += 9 + len;
+            }
+            let mut evs = Vec::new();
+            let used = conn.recv(&pending, 0, &mut |ev| match ev {
+                Event::Headers { stream, end_stream, .. } => evs.push((stream, Vec::new(), true, end_stream)),
+                Event::Data { stream, data, end_stream } => evs.push((stream, data.to_vec(), false, end_stream)),
+                _ => {}
+            });
+            pending.drain(..used);
+            for (id, d, head, end) in evs {
+                conn.release(id, d.len());
+                if head {
+                    conn.send_response(id, 200, &[], false).unwrap();
+                }
+                if !d.is_empty() {
+                    conn.send_data(id, &d, false).unwrap();
+                }
+                if end {
+                    conn.send_data(id, &[], true).unwrap();
+                }
+            }
+            let out = conn.output().to_vec();
+            conn.advance_output(out.len());
+            if s.write_all(&out).is_err() {
+                return;
+            }
+        }
+    });
+    r.addr
+}
+
+/// Whether one socket read carried the HEADERS of `stream` and its DATA with END_STREAM.
+fn head_and_body_in_one_read(log: &[(usize, u8, u8, u32)], stream: u32) -> bool {
+    let head = log.iter().find(|f| f.1 == 1 && f.3 == stream).map(|f| f.0);
+    let end = log.iter().find(|f| f.1 == 0 && f.2 & 1 == 1 && f.3 == stream).map(|f| f.0);
+    head.is_some() && head == end
+}
+
+// A request with a body in memory leaves as one write: HEADERS and DATA with END_STREAM arrive
+// in one read at the server (two writes cost the client a second system call per request).
+#[test]
+fn a_small_request_body_leaves_with_the_head() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let srv = h2_frame_log_server(log.clone());
+    let c = Client::builder().version(HttpVersion::Http2).build();
+    for _ in 0..5 {
+        let r = c.post(&format!("http://{srv}/")).body(b"{\"orderId\":1}".to_vec()).send().unwrap();
+        assert_eq!(r.text().unwrap(), "{\"orderId\":1}");
+    }
+    let log = log.lock().unwrap();
+    for stream in [1u32, 3, 5, 7, 9] {
+        assert!(head_and_body_in_one_read(&log, stream), "stream {stream}: {log:?}");
+    }
+}
+
+// `call_with_body` with `end`: a unary call's head, message and end of stream in one write; a body
+// larger than the peer's window is sent in part with the head and the rest as credit arrives.
+#[test]
+fn call_with_body_sends_the_head_message_and_end_together() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let srv = h2_frame_log_server(log.clone());
+    let c = Client::builder().version(HttpVersion::Http2).build();
+    // the first request opens the connection (its first bytes go out with the preface anyway)
+    assert_eq!(c.get(&format!("http://{srv}/")).send().unwrap().status(), 200);
+    let mut call = c.call_with_body("POST", &format!("http://{srv}/svc/Say"), &Headers::new(), b"\0\0\0\0\x03abc", true).unwrap();
+    assert_eq!(call.response().unwrap().0, 200);
+    let mut got = Vec::new();
+    let mut buf = [0u8; 64];
+    loop {
+        let k = call.read(&mut buf).unwrap();
+        if k == 0 {
+            break;
+        }
+        got.extend_from_slice(&buf[..k]);
+    }
+    assert_eq!(got, b"\0\0\0\0\x03abc");
+    assert!(head_and_body_in_one_read(&log.lock().unwrap(), 3), "{:?}", log.lock().unwrap());
+
+    // 200,000 bytes: more than the initial 65,535-byte window
+    let big: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    let mut call = c.call_with_body("POST", &format!("http://{srv}/svc/Big"), &Headers::new(), &big, true).unwrap();
+    assert_eq!(call.response().unwrap().0, 200);
+    let mut got = Vec::new();
+    let mut buf = vec![0u8; 16384];
+    loop {
+        let k = call.read(&mut buf).unwrap();
+        if k == 0 {
+            break;
+        }
+        got.extend_from_slice(&buf[..k]);
+    }
+    assert_eq!(got.len(), big.len());
+    assert!(got == big, "the echoed body differs");
+
+    // without `end` the call stays open for more messages
+    let mut call = c.call_with_body("POST", &format!("http://{srv}/svc/Stream"), &Headers::new(), b"one", false).unwrap();
+    let sender = call.sender();
+    assert_eq!(call.response().unwrap().0, 200);
+    sender.send(b"two").unwrap();
+    sender.finish().unwrap();
+    let mut got = Vec::new();
+    let mut buf = [0u8; 64];
+    loop {
+        let k = call.read(&mut buf).unwrap();
+        if k == 0 {
+            break;
+        }
+        got.extend_from_slice(&buf[..k]);
+    }
+    assert_eq!(got, b"onetwo");
 }

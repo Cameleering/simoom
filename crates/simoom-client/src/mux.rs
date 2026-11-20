@@ -12,6 +12,10 @@
 //! the write lock; others leave their bytes for it (`Guard`), so frames ready together go out
 //! in one write.
 
+// The engine (`EngineMux`, `Proto`) runs HTTP/3, HTTP/2 after an h2c `Upgrade`, and HTTP/2 with
+// `client-h2-engine` alone; otherwise only `Mux`, `ReqHead` and `request_fields` are used.
+#![cfg_attr(not(any(feature = "client-h3", feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2")))), allow(dead_code))]
+
 use crate::error::{Error, ErrorKind, Result, TimeoutKind};
 use crate::transport::{earliest, is_timeout};
 use crate::types::{Headers, Version};
@@ -31,7 +35,7 @@ pub(crate) enum MuxEvent {
     End(u64),
     Reset { id: u64, code: u64 },
     Writable(u64),
-    #[cfg_attr(not(feature = "client-h2"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2")))), allow(dead_code))]
     Pong,
     GoAway,
     Closed(Error),
@@ -115,7 +119,7 @@ pub(crate) trait Proto: Send {
 
 /// The transport of a multiplexed connection.
 pub(crate) enum MuxIo {
-    #[cfg_attr(not(feature = "client-h2"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2")))), allow(dead_code))]
     Tcp(crate::transport::Duplex),
     #[cfg(feature = "client-h3")]
     Udp(std::net::UdpSocket),
@@ -194,12 +198,16 @@ pub(crate) struct State {
     any_waiting: u32,
     /// Output waiting to be written once the lock is released (stream transports).
     wbuf: Vec<u8>,
+    /// Streams with a waiting thread that got news, woken once the lock is released (each at
+    /// most once per lock section, however many events it got).
+    wake: Vec<Arc<Slot>>,
 }
 
 type SlotMap = HashMap<u64, Arc<Slot>, std::hash::BuildHasherDefault<crate::pool::FxHasher>>;
 
-/// A multiplexed connection.
-pub(crate) struct Mux {
+/// A multiplexed connection driven by the requesting threads and a pump thread (HTTP/3, and
+/// HTTP/2 after an h2c `Upgrade`).
+pub(crate) struct EngineMux {
     io: MuxIo,
     state: Mutex<State>,
     cv: Condvar,
@@ -224,24 +232,26 @@ pub(crate) struct Mux {
     version: Version,
     what: String,
     /// A weak reference to the `Arc` this connection lives in, for the pump thread.
-    me: std::sync::OnceLock<std::sync::Weak<Mux>>,
+    me: std::sync::OnceLock<std::sync::Weak<EngineMux>>,
+    /// Waiting threads woken with news of their stream (a counter for tests).
+    wakes: AtomicUsize,
 }
 
-impl std::fmt::Debug for Mux {
+impl std::fmt::Debug for EngineMux {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Mux").field("what", &self.what).finish()
+        f.debug_struct("EngineMux").field("what", &self.what).finish()
     }
 }
 
-impl Mux {
-    pub(crate) fn new(io: MuxIo, proto: Box<dyn Proto>, what: String) -> Mux {
+impl EngineMux {
+    pub(crate) fn new(io: MuxIo, proto: Box<dyn Proto>, what: String) -> EngineMux {
         let now = Instant::now();
         let rlen = if io.is_stream() { 64 * 1024 } else { 65536 };
         let version = proto.version();
-        Mux {
+        EngineMux {
             io,
             version,
-            state: Mutex::new(State { proto, reading: false, dead: None, pongs: 0, requests: 0, evs: Vec::new(), any_waiting: 0, wbuf: Vec::new() }),
+            state: Mutex::new(State { proto, reading: false, dead: None, pongs: 0, requests: 0, evs: Vec::new(), any_waiting: 0, wbuf: Vec::new(), wake: Vec::new() }),
             cv: Condvar::new(),
             slots: RwLock::new(SlotMap::default()),
             active: AtomicUsize::new(0),
@@ -256,14 +266,21 @@ impl Mux {
             wlock: Mutex::new(()),
             what,
             me: std::sync::OnceLock::new(),
+            wakes: AtomicUsize::new(0),
         }
     }
 
     /// The connection in an `Arc`, able to start its pump thread.
-    pub(crate) fn into_arc(self) -> Arc<Mux> {
+    pub(crate) fn into_engine(self) -> Arc<EngineMux> {
         let a = Arc::new(self);
         let _ = a.me.set(Arc::downgrade(&a));
         a
+    }
+
+    /// The connection as a shared [`Mux`].
+    #[cfg(any(feature = "client-h3", feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2"))))]
+    pub(crate) fn into_arc(self) -> Arc<Mux> {
+        Arc::new(Mux::Engine(self.into_engine()))
     }
 
     fn lock(&self) -> Guard<'_> {
@@ -424,8 +441,8 @@ impl Mux {
                 }
                 let wake = s.waiting;
                 drop(s);
-                if wake {
-                    slot.cv.notify_all();
+                if wake && !st.wake.iter().any(|w| Arc::ptr_eq(w, &slot)) {
+                    st.wake.push(slot);
                 }
             }
         }
@@ -666,6 +683,33 @@ impl Mux {
         })
     }
 
+    /// Opens a stream with a request body known up front: the head and as much of the body as
+    /// flow control allows leave in one write (one system call, one packet for a small request,
+    /// instead of a write for the HEADERS and another for the DATA). Returns the stream and the
+    /// body bytes sent; the caller sends the rest with [`Mux::write`]. `end` ends the request
+    /// body once all of `body` is sent.
+    pub(crate) fn open_with_body(&self, head: &ReqHead<'_>, body: &[u8], end: bool, deadline: Option<Instant>) -> Result<(u64, usize)> {
+        self.wait_conn(deadline, TimeoutKind::Pool, |st| {
+            if st.dead.is_some() {
+                return None;
+            }
+            if st.proto.is_done() {
+                return Some(Err(Error::new(ErrorKind::Closed, format!("connection is going away: {}", self.what))));
+            }
+            if !st.proto.ready() || !st.proto.can_open() {
+                return None;
+            }
+            let r = st.proto.open(head, end && body.is_empty());
+            Some(r.map(|id| {
+                self.register(st, id);
+                // an error here (the stream was refused) surfaces in the caller's write
+                let sent = if body.is_empty() { 0 } else { st.proto.send_data(id, body, end).unwrap_or(0) };
+                self.flush(st);
+                (id, sent)
+            }))
+        })
+    }
+
     /// Opens an extended CONNECT stream (WebSocket over HTTP/2), once the peer's SETTINGS
     /// say it may.
     #[cfg(feature = "client-ws")]
@@ -865,13 +909,118 @@ impl Mux {
     }
 }
 
+/// A shared HTTP/2 or HTTP/3 connection of the blocking client: HTTP/2 runs on an event loop
+/// ([`crate::loopmux::LoopMux`]), HTTP/3 and HTTP/2 after an h2c `Upgrade` on the engine driven
+/// by the requesting threads ([`EngineMux`]).
+#[derive(Debug)]
+pub(crate) enum Mux {
+    #[cfg(any(feature = "client-h3", feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2"))))]
+    Engine(Arc<EngineMux>),
+    #[cfg(feature = "client-h2")]
+    Loop(crate::loopmux::LoopMux),
+}
+
+macro_rules! fwd {
+    ($self:ident, $m:ident => $e:expr) => {
+        match $self {
+            #[cfg(any(feature = "client-h3", feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2"))))]
+            Mux::Engine($m) => $e,
+            #[cfg(feature = "client-h2")]
+            Mux::Loop($m) => $e,
+        }
+    };
+}
+
+#[cfg_attr(not(feature = "h2"), allow(dead_code))]
+impl Mux {
+    pub(crate) fn version(&self) -> Version {
+        fwd!(self, m => m.version())
+    }
+
+    /// For the pool: (finished for good or idle past `idle_limit`, can open a stream now).
+    pub(crate) fn usable(&self, idle_limit: Duration) -> (bool, bool) {
+        fwd!(self, m => m.usable(idle_limit))
+    }
+
+    /// Whether the connection is finished for good.
+    pub(crate) fn is_dead(&self) -> bool {
+        fwd!(self, m => m.is_dead())
+    }
+
+    /// Streams open on this connection.
+    pub(crate) fn active(&self) -> usize {
+        fwd!(self, m => m.active())
+    }
+
+    pub(crate) fn idle_for(&self) -> Option<Duration> {
+        fwd!(self, m => m.idle_for())
+    }
+
+    #[cfg(feature = "h2c-upgrade")]
+    pub(crate) fn adopt(&self, id: u64, input: &[u8]) {
+        #[allow(irrefutable_let_patterns)]
+        if let Mux::Engine(m) = self {
+            m.adopt(id, input);
+        }
+    }
+
+    /// Opens a stream.
+    pub(crate) fn open(&self, head: &ReqHead<'_>, end: bool, deadline: Option<Instant>) -> Result<u64> {
+        fwd!(self, m => m.open(head, end, deadline))
+    }
+
+    /// Opens a stream with its request body (see [`EngineMux::open_with_body`]).
+    pub(crate) fn open_with_body(&self, head: &ReqHead<'_>, body: &[u8], end: bool, deadline: Option<Instant>) -> Result<(u64, usize)> {
+        fwd!(self, m => m.open_with_body(head, body, end, deadline))
+    }
+
+    /// Opens an extended CONNECT stream (WebSocket over HTTP/2 or HTTP/3).
+    #[cfg(feature = "client-ws")]
+    pub(crate) fn open_extended(&self, protocol: &str, head: &ReqHead<'_>, deadline: Option<Instant>) -> Result<u64> {
+        fwd!(self, m => m.open_extended(protocol, head, deadline))
+    }
+
+    /// Sends body bytes, waiting for flow-control credit.
+    pub(crate) fn write(&self, id: u64, data: &[u8], end: bool, deadline: Option<Instant>) -> Result<()> {
+        fwd!(self, m => m.write(id, data, end, deadline))
+    }
+
+    pub(crate) fn send_trailers(&self, id: u64, trailers: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
+        fwd!(self, m => m.send_trailers(id, trailers))
+    }
+
+    /// Waits for the response head.
+    pub(crate) fn head(&self, id: u64, deadline: Option<Instant>, kind: TimeoutKind) -> Result<(u16, Headers)> {
+        fwd!(self, m => m.head(id, deadline, kind))
+    }
+
+    /// Reads body bytes; `Ok(0)` at the end, with the trailers.
+    pub(crate) fn read(&self, id: u64, out: &mut [u8], deadline: Option<Instant>, kind: TimeoutKind) -> Result<(usize, Option<Headers>)> {
+        fwd!(self, m => m.read(id, out, deadline, kind))
+    }
+
+    /// Forgets a stream (cancelling it if it is still open).
+    pub(crate) fn finish(&self, id: u64) {
+        fwd!(self, m => m.finish(id))
+    }
+
+    /// Sends a PING and waits for its answer.
+    pub(crate) fn ping(&self, timeout: Duration) -> Result<Duration> {
+        fwd!(self, m => m.ping(timeout))
+    }
+
+    pub(crate) fn close(&self) {
+        fwd!(self, m => m.close())
+    }
+}
+
 /// The connection lock. Output queued under it ([`State::wbuf`]) is written after it is
 /// released by whichever thread holds the write lock; a thread that finds the write lock taken
 /// leaves its bytes for that thread (batched writes, and the system call never runs under the
 /// connection lock).
 pub(crate) struct Guard<'a> {
     g: Option<MutexGuard<'a, State>>,
-    mux: &'a Mux,
+    mux: &'a EngineMux,
 }
 
 impl std::ops::Deref for Guard<'_> {
@@ -899,6 +1048,20 @@ impl Guard<'_> {
 impl Drop for Guard<'_> {
     fn drop(&mut self) {
         let Some(mut g) = self.g.take() else { return };
+        if !g.wake.is_empty() {
+            // wake after unlocking: a woken thread that needs the connection lock finds it free
+            let mut wake = std::mem::take(&mut g.wake);
+            let write = if g.wbuf.is_empty() { None } else { self.mux.wlock.try_lock().ok().map(|w| (w, std::mem::take(&mut g.wbuf))) };
+            drop(g);
+            self.mux.wakes.fetch_add(wake.len(), Ordering::Relaxed);
+            for slot in wake.drain(..) {
+                slot.cv.notify_all();
+            }
+            if let Some((w, buf)) = write {
+                self.mux.write_out(w, buf);
+            }
+            return;
+        }
         if g.wbuf.is_empty() {
             return;
         }
@@ -933,4 +1096,87 @@ pub(crate) fn request_fields(headers: &Headers, body_len: Option<u64>, method: &
         None => {}
     }
     (host, out)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// An engine that answers every read with the head, a body chunk and the end of stream 1:
+    /// three events for one stream in one input.
+    struct ThreeEvents {
+        next: u64,
+    }
+
+    impl Proto for ThreeEvents {
+        fn version(&self) -> Version {
+            Version::Http2
+        }
+        fn open(&mut self, _: &ReqHead<'_>, _: bool) -> Result<u64> {
+            self.next += 2;
+            Ok(self.next - 2)
+        }
+        fn send_data(&mut self, _: u64, d: &[u8], _: bool) -> Result<usize> {
+            Ok(d.len())
+        }
+        fn capacity(&self, _: u64) -> usize {
+            usize::MAX
+        }
+        fn send_trailers(&mut self, _: u64, _: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
+            Ok(())
+        }
+        fn cancel(&mut self, _: u64) {}
+        fn forget(&mut self, _: u64) {}
+        fn take_body(&mut self, _: u64, out: &mut Vec<u8>, _: usize, _: Instant, _: &mut Vec<MuxEvent>) -> usize {
+            out.extend_from_slice(b"ok");
+            2
+        }
+        fn input(&mut self, _: &mut [u8], _: Option<SocketAddr>, _: Instant, _: &MuxIo, ev: &mut Vec<MuxEvent>) {
+            ev.push(MuxEvent::Head { id: 1, status: 200, headers: Headers::new() });
+            ev.push(MuxEvent::Readable(1));
+            ev.push(MuxEvent::End(1));
+        }
+        fn flush(&mut self, _: &MuxIo, _: Instant) -> io::Result<()> {
+            Ok(())
+        }
+        fn deadline(&mut self) -> Option<Instant> {
+            None
+        }
+        fn timeout(&mut self, _: Instant, _: &mut Vec<MuxEvent>) {}
+        fn ping(&mut self) -> bool {
+            false
+        }
+        fn can_open(&self) -> bool {
+            true
+        }
+        fn is_done(&self) -> bool {
+            false
+        }
+        fn close(&mut self, _: Instant) {}
+    }
+
+    // A waiting thread is woken once per batch of news for its stream, after the connection lock
+    // is released, however many events the batch held (each wake is a system call and a context
+    // switch; three per response cost the client a third of its time).
+    #[test]
+    fn a_waiting_thread_is_woken_once_per_batch() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let tcp = std::net::TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = l.accept().unwrap();
+        let m = EngineMux::new(MuxIo::Tcp(crate::transport::Duplex::plain(tcp)), Box::new(ThreeEvents { next: 1 }), "test".into()).into_engine();
+        let head = ReqHead { method: "GET", scheme: "http", authority: "x", path: "/", fields: Vec::new() };
+        // two open streams: the pump reads, the requesting threads wait
+        let a = m.open(&head, true, None).unwrap();
+        let _b = m.open(&head, true, None).unwrap();
+        assert_eq!(a, 1);
+        let m2 = m.clone();
+        let waiter = std::thread::spawn(move || m2.head(1, Some(Instant::now() + Duration::from_secs(10)), TimeoutKind::ResponseHead).map(|(s, _)| s));
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(m.pump.load(Ordering::Acquire), "the pump reads");
+        peer.write_all(b"x").unwrap();
+        assert_eq!(waiter.join().unwrap().unwrap(), 200);
+        assert_eq!(m.wakes.load(Ordering::Relaxed), 1, "one wake for three events");
+    }
 }

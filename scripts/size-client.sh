@@ -20,8 +20,10 @@ client-h1 (plain HTTP/1.1)|--no-default-features --features client-h1
 client-h1,tls|--no-default-features --features client-h1,tls
 client-h1,tls,compress|--no-default-features --features client-h1,tls,compress
 client-h1,client-h2,tls|--no-default-features --features client-h1,client-h2,tls
+client-h1,client-h2-engine,tls|--no-default-features --features client-h1,client-h2-engine,tls
 client-h1,client-ws,tls|--no-default-features --features client-h1,client-ws,tls
 default (h1,h2,ws,tls,compress)|--features default
+small h2 (h1,h2-engine,ws,tls,compress)|--no-default-features --features client-h1,client-h2-engine,client-ws,tls,compress
 client-h3 (h1,h3,tls)|--no-default-features --features client-h1,client-h3
 rt (h1 on event loops, tls)|--no-default-features --features client-h1,tls,rt
 default,cookies|--features cookies
