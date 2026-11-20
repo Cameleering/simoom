@@ -16,7 +16,7 @@ documentation = "https://docs.rs/simoom-rt"
 workspace = true
 
 [dependencies]
-simoom-sys = { path = "../simoom-sys", version = "0.1.0", default-features = false }
+simoom-sys = { path = "../simoom-sys", version = "0.2.0", default-features = false }
 
 [features]
 default = ["io-uring", "udp", "idle-trim"]

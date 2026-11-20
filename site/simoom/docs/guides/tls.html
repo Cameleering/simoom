@@ -85,7 +85,7 @@
 There is nothing to install and nothing to link. This page covers certificates, several names on
 one server, rotation without restart, and client certificates.</p>
 <h2 id="turn-it-on">Turn it on<a class="anchor" href="#turn-it-on" aria-hidden="true" tabindex="-1"></a></h2>
-<div class="codeblock"><div class="code-head"><span>toml</span><button class="copy" type="button">Copy</button></div><pre><code class="language-toml">simoom = { version = &quot;0.1&quot;, features = [&quot;tls&quot;] }   # or &quot;full&quot; for TLS and HTTP/3</code></pre></div>
+<div class="codeblock"><div class="code-head"><span>toml</span><button class="copy" type="button">Copy</button></div><pre><code class="language-toml">simoom = { version = &quot;0.2&quot;, features = [&quot;tls&quot;] }   # or &quot;full&quot; for TLS and HTTP/3</code></pre></div>
 <p><code>tls</code> supports X25519 and P-256 key exchange, ECDSA P-256 and RSA certificates, and AES-GCM.
 <code>tls-extra</code> adds P-384 and Ed25519 certificates and ChaCha20-Poly1305.</p>
 <h2 id="a-self-signed-certificate-for-local-testing">A self-signed certificate for local testing<a class="anchor" href="#a-self-signed-certificate-for-local-testing" aria-hidden="true" tabindex="-1"></a></h2>
@@ -155,7 +155,7 @@ fn reload(server: &amp;ServerHandle) -&gt; Result&lt;(), Box&lt;dyn std::error::
 the new configuration shares the old one&#x27;s <code>ticketer</code>.</p>
 <h2 id="client-certificates-mutual-tls">Client certificates (mutual TLS)<a class="anchor" href="#client-certificates-mutual-tls" aria-hidden="true" tabindex="-1"></a></h2>
 <p>Require or request client certificates with <code>ServerConfig::client_auth</code>. The <code>ClientAuth</code> and
-<code>RootStore</code> types live in <code>simoom-tls</code>, which <code>simoom</code> doesn&#x27;t re-export in 0.1.0, so add it
+<code>RootStore</code> types live in <code>simoom-tls</code>, which <code>simoom</code> doesn&#x27;t re-export in 0.2.0, so add it
 next to simoom (<code>cargo add simoom-tls</code>, same version):</p>
 <div class="codeblock"><div class="code-head"><span>rust</span><button class="copy" type="button">Copy</button></div><pre><code class="language-rust">use simoom::tls::ServerConfig;
 use simoom::{Outcome, Reply, Request};

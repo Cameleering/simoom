@@ -18,14 +18,14 @@ or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-simoom = "0.1"
+simoom = "0.2"
 ```
 
 The default features give you HTTP/1.1, HTTP/2 without TLS (h2c), WebSocket and the io_uring back
 end. For TLS and HTTP/3 turn on `full`:
 
 ```toml
-simoom = { version = "0.1", features = ["full"] }
+simoom = { version = "0.2", features = ["full"] }
 ```
 
 There is nothing else to install: no C compiler, no OpenSSL headers, no async runtime.

@@ -170,7 +170,7 @@ simoom is new, small and focused. Pick the alternative when it fits better:
 |---|---|---|
 | A web server that runs from a config file, serves static files or proxies to other servers | nginx, Caddy or h2o | simoom is a library you build into a program; it has no config file, no static-file server and no reverse proxy. |
 | A large ecosystem of middleware, extractors and integrations, and many people who already know the API | axum or actix-web | simoom's API is small and young. It has a router and optional helpers, not an ecosystem. |
-| A low-level HTTP library inside the tokio world, or one with years of production use | hyper | hyper is mature and battle-tested. simoom is at version 0.1.0. |
+| A low-level HTTP library inside the tokio world, or one with years of production use | hyper | hyper is mature and battle-tested. simoom is at version 0.2.0. |
 | The very simplest blocking server for a tool or a test | tiny_http | It is tiny and easy. simoom gives you more protocols and more throughput, at more API surface. |
 | A general-purpose QUIC transport, raw QUIC streams, or 0-RTT | quinn or s2n-quic | simoom's QUIC exists to carry HTTP/3. It refuses 0-RTT by design and has no ECN yet. |
 | An independent security audit of the TLS stack | rustls with ring or aws-lc | simoom's TLS and crypto have been tested hard but not independently audited yet. |
@@ -187,7 +187,7 @@ or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-simoom = "0.1"
+simoom = "0.2"
 ```
 
 The client is a separate crate: `cargo add simoom-client`. The API documentation is on
@@ -373,7 +373,7 @@ Certificate verification is always on.
 Turn off everything but HTTP/1.1:
 
 ```toml
-simoom = { version = "0.1", default-features = false, features = ["http1"] }
+simoom = { version = "0.2", default-features = false, features = ["http1"] }
 ```
 
 ## Pay only for what you use
@@ -546,7 +546,7 @@ in [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Status and limits
 
-- **Version 0.1.0.** The API can still change.
+- **Version 0.2.0.** The API can still change.
 - **No independent security audit yet.** The testing above was done by the project itself.
 - **QUIC:** no 0-RTT (refused by design), no ECN, no migration to a preferred address.
 - **Platforms:** the test suite runs on Windows and Linux. macOS (kqueue) and the ARM SIMD and

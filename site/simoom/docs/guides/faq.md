@@ -78,7 +78,7 @@ a handler yourself ([Streaming](streaming-and-sse.md)).
 
 ### Is simoom production ready?
 
-It is version 0.1.0, the first release, and the API can still change. It has been tested hard:
+It is version 0.2.0, and the API can still change. It has been tested hard:
 h2spec 146/146, the QUIC Interop Runner, HTTP Garden with no desyncs, testssl.sh, fuzzing of every
 parser, and a test suite of several hundred tests on Windows and Linux. It has not had an
 independent security audit, macOS and ARM are compile-checked only, and the benchmarks ran on

@@ -19,7 +19,7 @@ embedded runtime can be another.
 | `simoom-h3` | HTTP/3 (RFC 9114) on top of `simoom-quic` streams |
 | `simoom-compress` | DEFLATE, zlib, gzip, Brotli and zstd, streaming and bounded |
 
-Each is published on crates.io at 0.1.0 and has no dependencies outside simoom's own crates.
+Each is published on crates.io at 0.2.0 and has no dependencies outside simoom's own crates.
 The only `unsafe` code is in `simoom-sys`, which some of them use for SIMD scanning and hardware
 crypto.
 

@@ -16,7 +16,7 @@ documentation = "https://docs.rs/simoom-h2"
 workspace = true
 
 [dependencies]
-simoom-hpack = { path = "../simoom-hpack", version = "0.1.0" }
+simoom-hpack = { path = "../simoom-hpack", version = "0.2.0" }
 
 [features]
 default = ["connect-protocol", "keepalive"]

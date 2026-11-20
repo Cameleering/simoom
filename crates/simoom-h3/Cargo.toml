@@ -16,8 +16,8 @@ documentation = "https://docs.rs/simoom-h3"
 workspace = true
 
 [dependencies]
-simoom-qpack = { path = "../simoom-qpack", version = "0.1.0" }
-simoom-quic = { path = "../simoom-quic", version = "0.1.0", default-features = false }
+simoom-qpack = { path = "../simoom-qpack", version = "0.2.0" }
+simoom-quic = { path = "../simoom-quic", version = "0.2.0", default-features = false }
 
 [dev-dependencies]
 simoom-quic = { path = "../simoom-quic" }

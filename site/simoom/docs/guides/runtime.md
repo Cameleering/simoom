@@ -101,6 +101,19 @@ fn run() -> std::io::Result<()> {
 }
 ```
 
+## Running other work on the server's loops
+
+`ServerHandle::loops()` returns the server's event loops (`simoom::LoopHandle`). Pass them to a
+loop-driven client, `simoom_client::rt::RtClient::new(server.loops(), cfg)`, and a request a
+handler sends upstream runs on the handler's own loop: `RtClient::send` called on a loop thread
+dispatches there (any simoom-rt loop, one of the client's or not), and its callback, which sends
+the deferred reply, runs there too. `LoopHandle::current()` names the loop the calling thread
+runs (`None` elsewhere); handles compare equal when they name the same loop.
+
+A message or task a loop queues for itself from one of its callbacks (`Responder::send` from a
+handler or callback on the connection's own loop, `LoopHandle::run` on the current loop) is
+delivered in the same loop turn, after the running callback: no wake-up and no extra turn.
+
 ## Low-level runtime settings
 
 `Builder::runtime` gives access to the runtime configuration: CPU pinning, buffer sizes, thread

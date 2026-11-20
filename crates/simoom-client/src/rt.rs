@@ -80,9 +80,9 @@ pub struct RtConfig {
     /// Proxies: HTTP (absolute form for `http`, `CONNECT` for `https`) and SOCKS5. The tunnel
     /// is set up on the connector thread; the request runs on the loop.
     pub proxy: Option<crate::proxy::ProxyConfig>,
-    /// `Http2` or `Http3` (or `Auto` with requests that ask for them) run on the client's
-    /// worker threads through the blocking engine, which multiplexes them; HTTP/1.1 runs on
-    /// the loops.
+    /// HTTP/1.1 and `Http2` run on the loops (HTTP/2 connections are multiplexed there, see
+    /// `h2_connections`); `Http3` (or `Auto` with requests that ask for it) runs on the client's
+    /// worker threads through the blocking engine.
     pub version: crate::types::HttpVersion,
     /// Worker threads for HTTP/3, streamed HTTP/1.1 request bodies and streamed responses.
     pub workers: usize,
