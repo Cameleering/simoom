@@ -4,7 +4,9 @@
 
 The client is a separate crate, so a server that never makes requests doesn't compile it. Like
 the server, it uses only the standard library and needs no async runtime: requests run on the
-calling thread, and HTTP/2 and HTTP/3 connections are shared between threads.
+calling thread, and HTTP/2 and HTTP/3 connections are shared between threads. An HTTP/2
+connection is opened on the calling thread and then run by an event loop of the client (threads
+`simoom-client-h2-N`, `ClientBuilder::h2_loops`), which wakes each caller once its response is in.
 
 ```sh
 cargo add simoom-client

@@ -49,7 +49,7 @@ use std::time::{Duration, Instant};
 use simoom_tls::{ClientConfig, ClientConnection};
 
 #[cfg(feature = "client-h2")]
-mod h2;
+pub(crate) mod h2;
 #[cfg(feature = "client-h2")]
 pub use h2::{CallHandler, CallOptions, RtCall};
 
@@ -97,6 +97,20 @@ pub struct RtConfig {
 
 impl Default for RtConfig {
     fn default() -> Self {
+        #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
+        let mut c = RtConfig::default_without_roots();
+        #[cfg(feature = "tls")]
+        {
+            c.tls = crate::client::TlsOptions::default();
+        }
+        c
+    }
+}
+
+impl RtConfig {
+    /// The defaults with an empty root store (the caller sets its own; loading the system
+    /// roots is file I/O).
+    pub(crate) fn default_without_roots() -> Self {
         RtConfig {
             connect_timeout: Duration::from_secs(30),
             timeout: Duration::from_secs(60),
@@ -105,7 +119,7 @@ impl Default for RtConfig {
             max_idle_per_origin: 64,
             user_agent: None,
             #[cfg(feature = "tls")]
-            tls: crate::client::TlsOptions::default(),
+            tls: crate::client::TlsOptions { roots: simoom_tls::x509::RootStore::empty(), client_cert: None, server_name: None, resumption: true },
             follow_redirects: false,
             max_redirects: 10,
             decompress: true,
@@ -293,7 +307,12 @@ impl RtClient {
     /// A client with a runtime of its own (`threads` loops; 0 = one per CPU), stopped when the
     /// last clone is dropped.
     pub fn spawn(threads: usize, cfg: RtConfig) -> std::io::Result<RtClient> {
-        let rt = simoom_rt::Runtime::builder().threads(threads).start()?;
+        RtClient::spawn_named(threads, cfg, "simoom-loop")
+    }
+
+    /// [`RtClient::spawn`] with loop threads named `name-N`.
+    pub(crate) fn spawn_named(threads: usize, cfg: RtConfig, name: &str) -> std::io::Result<RtClient> {
+        let rt = simoom_rt::Runtime::builder().threads(threads).configure(|c| c.thread_name = name.to_string()).start()?;
         let c = RtClient::new(rt.loops(), cfg);
         *c.inner.runtime.lock().unwrap_or_else(|p| p.into_inner()) = Some(rt);
         Ok(c)
@@ -537,6 +556,32 @@ impl RtClient {
             return 0;
         }
         rx.recv_timeout(Duration::from_secs(5)).unwrap_or(0)
+    }
+}
+
+/// For the blocking client's HTTP/2 facade ([`crate::loopmux::LoopMux`]).
+#[cfg(feature = "client-h2")]
+impl RtClient {
+    /// Hands a connected transport to one of the client's loops as pinned HTTP/2 connection
+    /// `pin`; returns that loop.
+    pub(crate) fn adopt_h2(&self, d: crate::transport::Duplex, url: &Url, pin: String, state: Arc<h2::PinState>) -> Result<LoopHandle> {
+        let lh = self.inner.loops[self.pick()].clone();
+        let (tcp, tls, leftover) = d.into_parts();
+        #[cfg(not(feature = "tls"))]
+        let _ = tls;
+        let c = h2::Connected {
+            #[cfg(feature = "tls")]
+            tls,
+            leftover,
+            url: url.clone(),
+        };
+        h2::adopt_connected(&self.inner, &lh, tcp, c, pin, state)?;
+        Ok(lh)
+    }
+
+    /// Starts a call on a pinned connection.
+    pub(crate) fn call_pinned(&self, lh: &LoopHandle, state: &h2::PinState, req: RtRequest, opts: CallOptions, handler: Box<dyn CallHandler>, ext: h2::Ext) -> RtCall {
+        h2::call_pinned(&self.inner, lh.clone(), state, req, opts, handler, ext)
     }
 }
 

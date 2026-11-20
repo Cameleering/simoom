@@ -32,8 +32,8 @@ default = ["client-h1", "client-h2", "client-ws", "tls", "compress"]
 # HTTP/1.1: keep-alive pool, chunked bodies, 100-continue, CONNECT proxies, redirects.
 client-h1 = []
 # HTTP/2: h2c with prior knowledge and h2 through ALPN, one multiplexed connection per origin,
-# PING keepalive.
-client-h2 = ["dep:simoom-h2"]
+# PING keepalive. The connections run on simoom-rt event loops (`rt`).
+client-h2 = ["dep:simoom-h2", "rt"]
 # HTTP/3 over QUIC, forced or through `Alt-Svc` (needs TLS).
 client-h3 = ["tls", "dep:simoom-quic", "dep:simoom-h3"]
 # The WebSocket client (RFC 6455), `ws://` and `wss://`.

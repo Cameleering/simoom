@@ -146,28 +146,83 @@ For Cameleer, whose routing engine is synchronous (`spi::Processor::process`), t
 an HTTP/2 producer gets without engine changes (24 against 36 us); an asynchronous producer path
 would bring it to about 5 us per request, which is the measured value of an `AsyncProcessor`.
 
-## Should the blocking `Client` become a facade over it?
+## The blocking `Client` is a facade over it (2026-11-20)
 
-**Yes, for HTTP/2**, on these numbers: the facade is cheaper on every count the blocking engine
-pays for (1.5x CPU, 2.6x throughput at 64 in flight), it keeps the single wake a blocking API
-needs and nothing more, and it would retire `Mux`'s pump thread and its locking for HTTP/2. Not
-done on this branch, because `Client` exposes more than unary calls over HTTP/2 and each needs its
-own piece on the loop side first:
+Decided on the numbers above and built: every HTTP/2 connection of the blocking `Client` now runs
+on an event loop. Code: `crates/simoom-client/src/loopmux.rs` (`LoopMux`), `rt/h2.rs`
+(`adopt_connected`, pinned connections, `PinWork`, `defer`), `mux.rs` (`Mux` is now an enum).
 
-1. **Streamed response bodies** (`ResponseBody::read_chunk`, `Call::read`): a `CallHandler` that
-   fills a bounded per-stream buffer and wakes the reader, with `manual_release` so credit returns
-   as the caller reads (flow control stays end to end, as `Mux`'s `SLOT_CAP` does today).
-2. **Streamed request bodies** (`Body::Reader`): the caller's thread reads its `Read` and sends
-   through `RtCall::send`, waiting on `on_writable` when `is_full`.
-3. **`Call`/`CallSender`** on top of 1 and 2; `call_with_body` maps to `RtClient::call` with the
-   first bytes.
-4. **Pool and lifecycle**: `Client` owns an `RtClient` with its own loops (spawned on first HTTP/2
-   use; one or two loops are enough for a client), `PoolStats` and the keepalive come from the loop
-   pool, extended CONNECT for WebSocket over HTTP/2 needs `send_extended_connect` on the loop
-   connection, and h2c through `Upgrade` adopts its stream 1 there.
-5. **The waiter**: today's facade prototype uses `thread::park` plus a mutex slot (2 futex calls per
-   request); a one-shot slot with an atomic state and park/unpark is the cheapest blocking hand-off
-   std offers.
+**Connecting stays on the caller's thread.** `Client::connect` still resolves (with the resolver
+timeout and Happy Eyeballs), tunnels through proxies (with `CONNECT` authentication), runs TLS
+with the ALPN offer of the request's version, and picks HTTP/1.1 or HTTP/2 from the answer. Only
+then is an HTTP/2 connection handed over: `Duplex::into_parts` gives the socket, the TLS session
+(handshake done) and any bytes already read, and `adopt_connected` registers them on one of the
+client's loops as a *pinned* connection (its own pool key, so nothing else is routed to it). The
+loops are a private `RtClient` started with the first HTTP/2 connection
+(`Config::h2_loops`, default `max_multiplexed_per_origin` capped by the CPUs; threads
+`simoom-client-h2-N`).
 
-HTTP/3 stays on `Mux` until a QUIC endpoint runs on the loops. Each step is measured against the
-current engine with this benchmark before the old path goes.
+**A request** is an `RtCall` on that connection with the head exactly as `Client` built it
+(`Ext::raw`), its body in memory as the first bytes, `END_STREAM` on the HEADERS when there is no
+body (`Ext::end`), and `manual_release`. Once the connection is registered the call reaches it in
+one message (`PinWork`, no loop task); a message that cannot be delivered fails the call instead
+of losing it. Response events fill a per-stream slot (`loopmux::Slot`); the requesting thread
+waits on the slot's condition variable.
+
+**One wake per response.** The loop does not wake a waiter for each event: a head, its body and
+its end that arrive in one read are put in place first and the waiter is woken once when the
+connection's callback returns (`rt::h2::defer`, run in `H2Conn::leave`). A first version woke at
+each event: the waiter woke on the head, found no body yet and slept again, and its read sent a
+credit release back to the loop, 2.03 context switches and 5.02 futex calls per request and 52k
+req/s (slower than the old engine); batching brought it to 1.02 and 2.02, the one wait and one
+wake a blocking caller needs.
+
+**Unchanged behaviour**, all through the existing tests (`tests/http2.rs`, `websocket.rs`,
+`server_auth.rs`, `auth.rs`, `cookies.rs` run unchanged against the facade): streamed response
+bodies (`ResponseBody`, credit returned as the caller reads, in batches of 64 KiB or when the slot
+drains), streamed request bodies (`Body::Reader`, the writer waits while the call's send buffer is
+full), `Call`/`CallSender`/`call_with_body`, trailers both ways, refused streams retried, GOAWAY
+(the connection reports itself going away to the pool), `PoolStats`, PING keepalive (the
+keepalive thread's `ping` is a `PingMsg` to the connection, answered by its PONG), closing idle
+connections, WebSocket over HTTP/2 (extended CONNECT sent once the server's SETTINGS allow it,
+`CallOptions::protocol`), interceptors, every timeout (they are the waiting thread's deadlines; a
+timed-out wait cancels the stream). Unit test `client::tests::http2_connections_run_on_event_loops`
+checks that the pool holds loop connections.
+
+**What stays on the old engine (`EngineMux`)**: HTTP/3 (QUIC is not on the loops) and HTTP/2
+after an h2c `Upgrade` (feature `h2c-upgrade`: the connection starts as HTTP/1.1 and its stream 1
+is adopted by the engine). Without those features the engine is not compiled into use, and
+`H2Proto` only with `h2c-upgrade`.
+
+### Measured (WSL2, host idle, bench_server on CPUs 0-3, client on 4-11, 64 threads, 3 rounds interleaved)
+
+`client_bench --h2 --threads 64`; "before" is the same example built from `0199bd9`. With
+`--conns 4` alone the pool keeps one connection (a second one opens only when the first is full),
+so four connections need `--streams 16`; the 36 us baseline of Cameleer's round was one connection.
+
+| | req/s before | req/s after | CPU us/req before | after | ctx sw/req before / after | futex/req before / after | send syscalls/req before / after |
+|---|---:|---:|---:|---:|---|---|---|
+| 1 connection | 88,063-89,824 | 93,834-94,528 | 34.7-35.1 | 22.4-22.6 | 1.04 / 1.02 | 2.05 / 2.02 | 0.73 / 0.03 |
+| 4 connections (`--streams 16`) | 160,627-202,910 | 235,532-243,316 | 29.7-32.2 | 24.8-25.4 | 1.46-1.49 / 1.18 | 2.45-2.48 / 2.09 | 0.46-0.56 / 0.16 |
+
+CPU per request falls by 36% on one connection and 20% on four; throughput rises 5% on one
+connection (it is bound by the server's single connection) and 20-50% on four. Raw output:
+`side-session-notes/.../h2-client-bench/facade-results-3.txt`.
+
+### Size
+
+`scripts/size-client.sh` (stripped `dist` binaries, x86-64 Linux; before = the same script on
+`rt-same-loop`, the same base with the engine):
+
+| build | before | after | change |
+|---|---:|---:|---:|
+| default (h1, h2, ws, tls, compress) | 1,099,128 | 1,425,288 | +326,160 |
+| client-h1, client-h2, tls | 1,003,600 | 1,328,912 | +325,312 |
+| server + client (default), client's share | 278,824 | 431,920 | +153,096 |
+
+The extra is simoom-rt (the loop, its driver, timers, buffer pools) and the loop client; next to
+the server, which has simoom-rt already, it is about half. The old engine is compiled only with
+`client-h3` or `h2c-upgrade` (gating its `Mux` variant took 40 KB off the first measurement). This
+is the price of the facade in binary size; the owner decides whether it is worth 36% less CPU per
+request and up to 50% more throughput. If not, the engine path could come back behind a feature
+for size-sensitive builds.

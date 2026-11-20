@@ -39,6 +39,26 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "tls")]
 use simoom_tls::{ClientConfig, ClientConnection};
 
+/// Work to run once the running callback of a connection is over: waking the threads of the
+/// blocking client's facade once per batch of news (a head, its body and its end read together
+/// wake their caller once, after all of them are in place).
+pub(crate) trait Deferred: Send + Sync {
+    fn run(&self);
+}
+
+thread_local! {
+    static DEFERRED: RefCell<Vec<Arc<dyn Deferred>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Runs `d` when the connection callback running on this thread returns (at once outside one).
+pub(crate) fn defer(d: Arc<dyn Deferred>) {
+    if CURRENT.with(|c| c.get()).is_some() {
+        DEFERRED.with(|v| v.borrow_mut().push(d));
+    } else {
+        d.run();
+    }
+}
+
 /// Request body bytes are handed to the engine only while less than this is queued on the
 /// connection's socket (the rest waits in the stream).
 pub(crate) const SEND_HIGH: usize = 512 * 1024;
@@ -122,11 +142,16 @@ pub struct CallOptions {
     /// connection) from which [`RtCall::is_full`] says so and [`CallHandler::on_writable`] is
     /// armed.
     pub high_water: usize,
+    /// An extended CONNECT (RFC 8441) for this protocol (`websocket`): sent once the server's
+    /// SETTINGS allow it, refused with [`ErrorKind::Unsupported`] when they do not.
+    pub protocol: Option<String>,
+    /// A `content-length` for the request body, when it is known up front.
+    pub content_length: Option<u64>,
 }
 
 impl Default for CallOptions {
     fn default() -> Self {
-        CallOptions { timeout: None, manual_release: false, high_water: 256 * 1024 }
+        CallOptions { timeout: None, manual_release: false, high_water: 256 * 1024, protocol: None, content_length: None }
     }
 }
 
@@ -167,6 +192,11 @@ impl RtCall {
     /// Ends the request body with trailers.
     pub fn finish_with_trailers(&self, trailers: &[(&str, &str)]) -> bool {
         self.end(Some(trailers.iter().map(|(n, v)| (n.to_ascii_lowercase().into_bytes(), v.as_bytes().to_vec())).collect()))
+    }
+
+    /// Ends the request body with trailers already in HTTP/2 form (lower-case names).
+    pub(crate) fn finish_with_fields(&self, trailers: &[(Vec<u8>, Vec<u8>)]) -> bool {
+        self.end(Some(trailers.to_vec()))
     }
 
     fn end(&self, trailers: Option<Vec<(Vec<u8>, Vec<u8>)>>) -> bool {
@@ -272,18 +302,83 @@ pub(crate) struct CallJob {
     pub(crate) deadline: Option<Instant>,
     pub(crate) manual: bool,
     pub(crate) attempts: u8,
+    pub(crate) protocol: Option<String>,
+    pub(crate) content_length: Option<u64>,
+    pub(crate) ext: Ext,
+}
+
+/// What the blocking client's facade adds to a call ([`crate::mux::LoopMux`]).
+#[derive(Default)]
+pub(crate) struct Ext {
+    /// The request head exactly as the blocking client built it.
+    pub(crate) raw: Option<RawHead>,
+    /// The call goes to this pinned connection (and fails when it is gone).
+    pub(crate) pin: Option<String>,
+    /// The request ends with its first body bytes (END_STREAM on the HEADERS when there are
+    /// none).
+    pub(crate) end: bool,
+}
+
+/// A request head in HTTP/2 form.
+pub(crate) struct RawHead {
+    pub(crate) method: String,
+    pub(crate) scheme: String,
+    pub(crate) authority: String,
+    pub(crate) path: String,
+    pub(crate) fields: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 /// Starts a call on loop `index` (see [`super::RtClient::call`]).
-pub(crate) fn start_call(inner: &Arc<RtInner>, lh: LoopHandle, req: RtRequest, opts: CallOptions, mut handler: Box<dyn CallHandler>) -> RtCall {
-    let ctl = Arc::new(CallShared { st: Mutex::new(CallSt::default()), buffered: AtomicUsize::new(0), high: opts.high_water.max(1) });
+pub(super) fn start_call(inner: &Arc<RtInner>, lh: LoopHandle, req: RtRequest, opts: CallOptions, handler: Box<dyn CallHandler>) -> RtCall {
+    start_call_ext(inner, lh, req, opts, handler, Ext::default())
+}
+
+/// A call's handle and its job; `Err` with the handle when the call failed at once.
+fn new_call(req: RtRequest, opts: CallOptions, mut handler: Box<dyn CallHandler>, ext: Ext) -> std::result::Result<(RtCall, CallJob), RtCall> {
+    let ctl = Arc::new(CallShared { st: Mutex::new(CallSt { finished: ext.end, ..CallSt::default() }), buffered: AtomicUsize::new(0), high: opts.high_water.max(1) });
     let call = RtCall { ctl: ctl.clone() };
     if req.url.scheme != "http" && req.url.scheme != "https" {
         end_call(&ctl);
         handler.on_end(Err(Error::new(ErrorKind::InvalidUrl, format!("RtClient takes http and https URLs: {}", req.url))));
-        return call;
+        return Err(call);
     }
-    let job = CallJob { req, handler, ctl, deadline: opts.timeout.map(|t| Instant::now() + t), manual: opts.manual_release, attempts: 0 };
+    let job = CallJob { req, handler, ctl, deadline: opts.timeout.map(|t| Instant::now() + t), manual: opts.manual_release, attempts: 0, protocol: opts.protocol, content_length: opts.content_length, ext };
+    Ok((call, job))
+}
+
+/// A call for a pinned connection, delivered to it in one message (no loop task).
+pub(crate) struct PinWork(Option<CallJob>);
+
+impl Drop for PinWork {
+    fn drop(&mut self) {
+        // not delivered (the connection is gone): the call ends instead of hanging
+        if let Some(j) = self.0.take() {
+            let e = Error::new(ErrorKind::Closed, format!("HTTP/2 connection is going away: {}", j.req.url.origin()));
+            Work::Call(j).fail(e);
+        }
+    }
+}
+
+/// Starts a call on the pinned connection whose state is `state`: one message straight to it
+/// once it is registered, a task through its loop before that.
+pub(super) fn call_pinned(inner: &Arc<RtInner>, lh: LoopHandle, state: &PinState, req: RtRequest, opts: CallOptions, handler: Box<dyn CallHandler>, ext: Ext) -> RtCall {
+    let h = state.handle.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    let Some(h) = h else { return start_call_ext(inner, lh, req, opts, handler, ext) };
+    match new_call(req, opts, handler, ext) {
+        Ok((call, job)) => {
+            h.send(Box::new(PinWork(Some(job))));
+            call
+        }
+        Err(call) => call,
+    }
+}
+
+/// [`start_call`] with the facade's additions.
+pub(super) fn start_call_ext(inner: &Arc<RtInner>, lh: LoopHandle, req: RtRequest, opts: CallOptions, handler: Box<dyn CallHandler>, ext: Ext) -> RtCall {
+    let (call, job) = match new_call(req, opts, handler, ext) {
+        Ok(x) => x,
+        Err(call) => return call,
+    };
     let pos = inner.loops.iter().position(|l| l == &lh).unwrap_or(0);
     if lh.is_current() {
         dispatch(inner, Work::Call(job), &lh, pos);
@@ -307,7 +402,7 @@ pub(crate) fn start_call(inner: &Arc<RtInner>, lh: LoopHandle, req: RtRequest, o
 // ------------------------------------------------------------------------------ work
 
 /// A request waiting for or carried by an HTTP/2 stream.
-pub(crate) enum Work {
+pub(super) enum Work {
     Unary(Job),
     Call(CallJob),
 }
@@ -324,6 +419,13 @@ impl Work {
         match self {
             Work::Unary(j) => Some(j.deadline),
             Work::Call(c) => c.deadline,
+        }
+    }
+
+    fn pin(&self) -> Option<&str> {
+        match self {
+            Work::Call(c) => c.ext.pin.as_deref(),
+            Work::Unary(_) => None,
         }
     }
 
@@ -408,9 +510,35 @@ struct Kick;
 struct CallKick(Arc<CallShared>);
 
 /// On a loop thread: queues `work` on a pooled connection to its origin, opening one if needed.
-pub(crate) fn dispatch(inner: &Arc<RtInner>, work: Work, lh: &LoopHandle, pos: usize) {
+pub(super) fn dispatch(inner: &Arc<RtInner>, work: Work, lh: &LoopHandle, pos: usize) {
     if work.cancelled() {
         work.fail(Error::new(ErrorKind::Cancelled, "call cancelled"));
+        return;
+    }
+    if let Some(pin) = work.pin() {
+        let key = (inner.id, pin.to_string());
+        let entry = POOL.with(|p| p.borrow().get(&key).and_then(|v| v.first().cloned()));
+        let Some(entry) = entry else {
+            let e = Error::new(ErrorKind::Closed, format!("HTTP/2 connection is going away: {}", work.url().origin()));
+            work.fail(e);
+            return;
+        };
+        let kick = {
+            let mut e = entry.borrow_mut();
+            e.queue.push_back(work);
+            match e.handle.clone() {
+                Some(h) if !e.kicked => {
+                    e.kicked = true;
+                    Some(h)
+                }
+                _ => None,
+            }
+        };
+        if let Some(h) = kick {
+            if !h.send(Box::new(Kick)) {
+                fail_entry(&key, entry.borrow().id, Error::new(ErrorKind::Closed, "the event loop has stopped"));
+            }
+        }
         return;
     }
     let key = key_of(inner, work.url());
@@ -515,7 +643,7 @@ impl Connect {
 }
 
 /// On the connector thread: TCP (and a proxy tunnel), then the connection on its loop.
-pub(crate) fn open(inner: &Arc<RtInner>, c: Connect) {
+pub(super) fn open(inner: &Arc<RtInner>, c: Connect) {
     let (tcp, _) = match super::tcp_for(inner, &c.url, c.deadline, true) {
         Ok(t) => t,
         Err(e) => {
@@ -545,6 +673,64 @@ pub(crate) fn open(inner: &Arc<RtInner>, c: Connect) {
     if !ok {
         drop(cell);
     }
+}
+
+/// The state of a pinned connection that the blocking client's facade reads.
+#[derive(Default)]
+pub(crate) struct PinState {
+    pub(crate) dead: std::sync::atomic::AtomicBool,
+    pub(crate) going_away: std::sync::atomic::AtomicBool,
+    /// The peer's concurrent-stream limit, as last seen.
+    pub(crate) limit: AtomicUsize,
+    /// PING answers received, and a condition variable for [`crate::mux::LoopMux::ping`].
+    pub(crate) pongs: Mutex<u64>,
+    pub(crate) pong_cv: std::sync::Condvar,
+    pub(crate) handle: Mutex<Option<ConnHandle>>,
+}
+
+/// Asks a pinned connection for a PING.
+pub(crate) struct PingMsg;
+/// Closes a pinned connection.
+pub(crate) struct CloseMsg;
+
+/// A transport the blocking client connected (TCP, proxy tunnel, TLS with ALPN `h2` done),
+/// handed to a loop as a pinned HTTP/2 connection.
+pub(crate) struct Connected {
+    #[cfg(feature = "tls")]
+    pub(crate) tls: Option<ClientConnection>,
+    /// Bytes read from the socket and not yet processed.
+    pub(crate) leftover: Vec<u8>,
+    pub(crate) url: Url,
+}
+
+/// Registers a connected transport as pinned connection `pin` on loop `lh` (from any thread).
+/// Calls sent to `pin` after this returns reach it in order.
+pub(super) fn adopt_connected(inner: &Arc<RtInner>, lh: &LoopHandle, tcp: std::net::TcpStream, c: Connected, pin: String, state: Arc<PinState>) -> Result<()> {
+    tcp.set_nonblocking(true).map_err(|e| Error::io(&e, &c.url.origin()))?;
+    let pos = inner.loops.iter().position(|l| l == lh).unwrap_or(0);
+    let (set, weak, lh2, id) = (inner.h2.clone(), Arc::downgrade(inner), lh.clone(), inner.id);
+    let cell = Arc::new(Mutex::new(Some((tcp, c))));
+    let c2 = cell.clone();
+    let st2 = state.clone();
+    let ok = lh.run(move |lcx| {
+        let Some((tcp, c)) = c2.lock().unwrap_or_else(|p| p.into_inner()).take() else { return };
+        static IDS: AtomicU64 = AtomicU64::new(1 << 32);
+        let entry = Rc::new(RefCell::new(Entry { id: IDS.fetch_add(1, Ordering::Relaxed), handle: None, queue: VecDeque::new(), kicked: false, active: 0, limit: 100 }));
+        let eid = entry.borrow().id;
+        let key = (id, pin);
+        POOL.with(|p| p.borrow_mut().entry(key.clone()).or_default().push(entry.clone()));
+        let what = c.url.origin();
+        let conn = H2Conn::adopted(set, weak, lh2, pos, key.clone(), entry, c, st2.clone());
+        if let Err(e) = lcx.adopt(Socket::from(tcp), Box::new(conn)) {
+            st2.dead.store(true, Ordering::Release);
+            fail_entry(&key, eid, Error::io(&e, &what));
+        }
+    });
+    if !ok {
+        state.dead.store(true, Ordering::Release);
+        return Err(Error::new(ErrorKind::Closed, "the event loop has stopped"));
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------------------------ connection
@@ -614,6 +800,12 @@ struct H2Conn {
     handle: Option<ConnHandle>,
     what: String,
     secure: bool,
+    /// The peer's SETTINGS arrived (extended CONNECT waits for them).
+    settings_seen: bool,
+    /// A connection the blocking client connected and pinned ([`adopt_connected`]).
+    pin: Option<Arc<PinState>>,
+    /// Socket bytes read before the loop took the connection over.
+    leftover: Vec<u8>,
 }
 
 impl H2Conn {
@@ -654,7 +846,46 @@ impl H2Conn {
             handle: None,
             what: url.origin(),
             secure,
+            settings_seen: false,
+            pin: None,
+            leftover: Vec::new(),
         })
+    }
+
+    /// A connection whose transport is already up (TLS done): ready at once.
+    #[allow(clippy::too_many_arguments)]
+    fn adopted(set: Arc<Settings>, inner: Weak<RtInner>, lh: LoopHandle, pos: usize, key: Key, entry: Rc<RefCell<Entry>>, c: Connected, pin: Arc<PinState>) -> H2Conn {
+        let id = entry.borrow().id;
+        H2Conn {
+            h2: simoom_h2::Connection::client(set.h2.clone()),
+            set,
+            inner,
+            lh,
+            pos,
+            key,
+            id,
+            entry,
+            epoch: Instant::now(),
+            #[cfg(feature = "tls")]
+            secure: c.tls.is_some(),
+            #[cfg(not(feature = "tls"))]
+            secure: false,
+            #[cfg(feature = "tls")]
+            tls: c.tls,
+            input: Vec::new(),
+            streams: HashMap::default(),
+            sending: Vec::new(),
+            ready: true,
+            going_away: false,
+            dead: false,
+            engine_timer: None,
+            queue_timer: None,
+            handle: None,
+            what: c.url.origin(),
+            settings_seen: false,
+            pin: Some(pin),
+            leftover: c.leftover,
+        }
     }
 
     fn now_ms(&self) -> u64 {
@@ -752,9 +983,15 @@ impl H2Conn {
             }
             let w = self.entry.borrow_mut().queue.pop_front();
             let Some(w) = w else { break };
-            self.open(cx, w);
+            if !self.open(cx, w) {
+                break;
+            }
         }
-        self.entry.borrow_mut().limit = self.h2.peer_max_concurrent_streams() as usize;
+        let limit = self.h2.peer_max_concurrent_streams() as usize;
+        self.entry.borrow_mut().limit = limit;
+        if let Some(p) = &self.pin {
+            p.limit.store(limit, Ordering::Release);
+        }
         self.arm_queue_timer(cx);
     }
 
@@ -773,15 +1010,31 @@ impl H2Conn {
         }
     }
 
-    fn open(&mut self, cx: &mut Ctx<'_>, w: Work) {
+    /// Opens a stream for `w`; false when the queue must wait (extended CONNECT before the
+    /// peer's SETTINGS).
+    fn open(&mut self, cx: &mut Ctx<'_>, w: Work) -> bool {
         if w.cancelled() {
             w.fail(Error::new(ErrorKind::Cancelled, "call cancelled"));
-            return;
+            return true;
         }
         if w.deadline().is_some_and(|d| Instant::now() >= d) {
             let e = Error::timeout(TimeoutKind::Total, &w.url().to_string());
             w.fail(e);
-            return;
+            return true;
+        }
+        let protocol = match &w {
+            Work::Call(c) => c.protocol.clone(),
+            Work::Unary(_) => None,
+        };
+        if protocol.is_some() {
+            if !self.settings_seen {
+                self.entry.borrow_mut().queue.push_front(w);
+                return false;
+            }
+            if !self.h2.peer_connect_protocol() {
+                w.fail(Error::new(ErrorKind::Unsupported, format!("the server does not allow extended CONNECT (RFC 8441): {}", self.what)));
+                return true;
+            }
         }
         let (req, unary) = match &w {
             Work::Unary(j) => (&j.req, true),
@@ -800,36 +1053,58 @@ impl H2Conn {
                 }
             }
         }
-        let body_len = if unary { Some(req.body.len() as u64) } else { None };
-        let (host, fields) = crate::mux::request_fields(&headers, body_len, &req.method);
-        let authority = host.unwrap_or_else(|| req.url.host_header());
-        let path = req.url.request_target();
-        let scheme: &[u8] = if self.secure { b"https" } else { b"http" };
-        let f: Vec<(&[u8], &[u8])> = fields.iter().map(|(n, v)| (&n[..], &v[..])).collect();
-        let end = unary && req.body.is_empty();
-        let r = self.h2.send_request(req.method.as_bytes(), scheme, authority.as_bytes(), path.as_bytes(), &f, end);
+        let (raw, content_length, ends) = match &w {
+            Work::Call(c) => (c.ext.raw.as_ref(), c.content_length, c.ext.end),
+            Work::Unary(_) => (None, Some(req.body.len() as u64), true),
+        };
+        let end = ends && req.body.is_empty();
+        let r = match raw {
+            Some(h) => {
+                let f: Vec<(&[u8], &[u8])> = h.fields.iter().map(|(n, v)| (&n[..], &v[..])).collect();
+                match &protocol {
+                    Some(p) => self.h2.send_extended_connect(p.as_bytes(), h.scheme.as_bytes(), h.authority.as_bytes(), h.path.as_bytes(), &f),
+                    None => self.h2.send_request(h.method.as_bytes(), h.scheme.as_bytes(), h.authority.as_bytes(), h.path.as_bytes(), &f, end),
+                }
+            }
+            None => {
+                let (host, fields) = crate::mux::request_fields(&headers, content_length, &req.method);
+                let authority = host.unwrap_or_else(|| req.url.host_header());
+                let path = req.url.request_target();
+                let scheme: &[u8] = if self.secure { b"https" } else { b"http" };
+                let f: Vec<(&[u8], &[u8])> = fields.iter().map(|(n, v)| (&n[..], &v[..])).collect();
+                match &protocol {
+                    Some(p) => self.h2.send_extended_connect(p.as_bytes(), scheme, authority.as_bytes(), path.as_bytes(), &f),
+                    None => self.h2.send_request(req.method.as_bytes(), scheme, authority.as_bytes(), path.as_bytes(), &f, end),
+                }
+            }
+        };
+        let end = end && protocol.is_none();
         let id = match r {
             Ok(id) => id,
             Err(simoom_h2::Error::StreamLimit) => {
                 self.entry.borrow_mut().queue.push_front(w);
-                return;
+                return false;
             }
             Err(simoom_h2::Error::GoingAway | simoom_h2::Error::StreamIdsExhausted | simoom_h2::Error::ConnectionClosed) => {
                 self.entry.borrow_mut().queue.push_front(w);
                 self.go_away(cx);
-                return;
+                return false;
             }
             Err(simoom_h2::Error::InvalidHeader) => {
                 w.fail(Error::new(ErrorKind::InvalidRequest, format!("header not allowed in HTTP/2: {}", self.what)));
-                return;
+                return true;
             }
             Err(simoom_h2::Error::HeaderListTooLarge) => {
                 w.fail(Error::new(ErrorKind::InvalidRequest, format!("request header list larger than the server allows: {}", self.what)));
-                return;
+                return true;
+            }
+            Err(simoom_h2::Error::ConnectProtocolDisabled) => {
+                w.fail(Error::new(ErrorKind::Unsupported, format!("the server does not allow extended CONNECT (RFC 8441): {}", self.what)));
+                return true;
             }
             Err(e) => {
                 w.fail(Error::protocol(format!("HTTP/2 ({e})"), &self.what));
-                return;
+                return true;
             }
         };
         let timer = w.deadline().map(|d| cx.set_timer(d.saturating_duration_since(Instant::now()).max(Duration::from_millis(1)), id as u64));
@@ -851,7 +1126,9 @@ impl H2Conn {
                     st.kicked = false;
                     std::mem::take(&mut st.ops)
                 };
-                let mut k = Kind::Call { job, out, off: 0, fin: None, trailers: Headers::new(), unreleased: 0, want_writable: false };
+                // the request ends with its first bytes: END_STREAM goes with the last of them
+                let fin = if job.ext.end && !end { Some(None) } else { None };
+                let mut k = Kind::Call { job, out, off: 0, fin, trailers: Headers::new(), unreleased: 0, want_writable: false };
                 let mut cancel = false;
                 apply_ops(&mut k, ops, &mut self.h2, id, &mut cancel);
                 if cancel {
@@ -859,7 +1136,7 @@ impl H2Conn {
                     self.streams.insert(id, st);
                     self.h2.reset(id, ErrorCode::CANCEL);
                     self.finish(cx, id, End::Fail(Error::new(ErrorKind::Cancelled, "call cancelled")));
-                    return;
+                    return true;
                 }
                 k
             }
@@ -869,9 +1146,10 @@ impl H2Conn {
             Kind::Call { .. } => true,
         };
         self.streams.insert(id, Stream { kind, timer, local_end: end, head: false });
-        if pending {
+        if pending && !end {
             self.sending.push(id);
         }
+        true
     }
 
     /// Hands request body bytes of the waiting streams to the engine, as flow control allows.
@@ -983,6 +1261,9 @@ impl H2Conn {
             return;
         }
         self.going_away = true;
+        if let Some(p) = &self.pin {
+            p.going_away.store(true, Ordering::Release);
+        }
         unpool(&self.key, self.id);
         if let Some((t, _)) = self.queue_timer.take() {
             cx.cancel_timer(t);
@@ -1001,6 +1282,12 @@ impl H2Conn {
         }
         self.dead = true;
         self.going_away = true;
+        if let Some(p) = &self.pin {
+            p.dead.store(true, Ordering::Release);
+            p.going_away.store(true, Ordering::Release);
+            // a ping waiting for an answer gives up now
+            p.pong_cv.notify_all();
+        }
         unpool(&self.key, self.id);
         self.entry.borrow_mut().handle = None;
         let works: Vec<Work> = self.entry.borrow_mut().queue.drain(..).collect();
@@ -1045,6 +1332,8 @@ impl H2Conn {
         let mut done: Vec<(u32, End)> = Vec::new();
         let mut release: Vec<(u32, usize)> = Vec::new();
         let mut goaway = false;
+        let mut settings = false;
+        let mut pongs = 0u64;
         let mut closed: Option<Error> = None;
         let max_body = self.set.max_body;
         let what = &self.what;
@@ -1131,8 +1420,18 @@ impl H2Conn {
                 }
             }
             Event::Closed { code } => closed = Some(Error::new(ErrorKind::Protocol, format!("HTTP/2 connection error {}: {what}", code.name()))),
-            Event::Settings | Event::Pong { .. } => {}
+            Event::Settings => settings = true,
+            Event::Pong { .. } => pongs += 1,
         });
+        if settings {
+            self.settings_seen = true;
+        }
+        if pongs > 0 {
+            if let Some(p) = &self.pin {
+                *p.pongs.lock().unwrap_or_else(|e| e.into_inner()) += pongs;
+                p.pong_cv.notify_all();
+            }
+        }
         for (id, n) in release {
             if n > 0 {
                 self.h2.release(id, n);
@@ -1153,6 +1452,57 @@ impl H2Conn {
             cx.close();
         }
         used
+    }
+
+    /// Takes received bytes through TLS into the engine; returns the bytes consumed.
+    fn ingest(&mut self, cx: &mut Ctx<'_>, data: &[u8]) -> usize {
+        let consumed;
+
+        #[cfg(feature = "tls")]
+        if self.tls.is_some() {
+            let mut off = 0;
+            let was = self.handshaking();
+            loop {
+                let Some(t) = self.tls.as_mut() else { break };
+                let k = t.read_tls(&data[off..]);
+                off += k;
+                if let Err(e) = t.process_new_packets() {
+                    self.flush_tls(cx);
+                    let e = crate::transport::tls_error(&e, &self.what);
+                    self.die(e, false);
+                    cx.close();
+                    return data.len();
+                }
+                let p = t.plaintext();
+                let got = !p.is_empty();
+                if got {
+                    let n = p.len();
+                    self.input.extend_from_slice(p);
+                    t.consume_plaintext(n);
+                }
+                if !got && (k == 0 || off >= data.len()) {
+                    break;
+                }
+            }
+            self.flush_tls(cx);
+            if was && !self.handshaking() {
+                self.transport_ready(cx);
+                // the preface and SETTINGS were waiting for the handshake
+                self.flush(cx);
+            }
+            let mut input = std::mem::take(&mut self.input);
+            let used = self.feed(cx, &input);
+            input.drain(..used);
+            self.input = input;
+            consumed = off;
+        } else {
+            consumed = self.feed(cx, data);
+        }
+        #[cfg(not(feature = "tls"))]
+        {
+            consumed = self.feed(cx, data);
+        }
+        consumed
     }
 
     fn handshaking(&self) -> bool {
@@ -1212,6 +1562,10 @@ impl H2Conn {
             }
         }
         CURRENT.with(|c| c.set(None));
+        let deferred = DEFERRED.with(|v| std::mem::take(&mut *v.borrow_mut()));
+        for d in deferred {
+            d.run();
+        }
         // anything sent by the last round's callbacks goes through the loop's queue
         let jobs = OUTBOX.with(|o| std::mem::take(&mut *o.borrow_mut()));
         if let Some(inner) = self.inner.upgrade() {
@@ -1343,57 +1697,20 @@ impl Connection for H2Conn {
         if !self.handshaking() {
             self.transport_ready(cx);
         }
+        if let Some(p) = &self.pin {
+            *p.handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(cx.handle());
+            // what the blocking side read before the hand-over (and, with TLS, plaintext the
+            // session already holds)
+            self.flush(cx);
+            let left = std::mem::take(&mut self.leftover);
+            self.ingest(cx, &left);
+        }
         self.leave(cx);
     }
 
     fn on_data(&mut self, cx: &mut Ctx<'_>, data: &[u8]) -> usize {
         self.enter();
-        let consumed;
-        #[cfg(feature = "tls")]
-        if self.tls.is_some() {
-            let mut off = 0;
-            let was = self.handshaking();
-            loop {
-                let Some(t) = self.tls.as_mut() else { break };
-                let k = t.read_tls(&data[off..]);
-                off += k;
-                if let Err(e) = t.process_new_packets() {
-                    self.flush_tls(cx);
-                    let e = crate::transport::tls_error(&e, &self.what);
-                    self.die(e, false);
-                    cx.close();
-                    self.leave(cx);
-                    return data.len();
-                }
-                let p = t.plaintext();
-                let got = !p.is_empty();
-                if got {
-                    let n = p.len();
-                    self.input.extend_from_slice(p);
-                    t.consume_plaintext(n);
-                }
-                if !got && (k == 0 || off >= data.len()) {
-                    break;
-                }
-            }
-            self.flush_tls(cx);
-            if was && !self.handshaking() {
-                self.transport_ready(cx);
-                // the preface and SETTINGS were waiting for the handshake
-                self.flush(cx);
-            }
-            let mut input = std::mem::take(&mut self.input);
-            let used = self.feed(cx, &input);
-            input.drain(..used);
-            self.input = input;
-            consumed = off;
-        } else {
-            consumed = self.feed(cx, data);
-        }
-        #[cfg(not(feature = "tls"))]
-        {
-            consumed = self.feed(cx, data);
-        }
+        let consumed = self.ingest(cx, data);
         self.leave(cx);
         consumed
     }
@@ -1463,6 +1780,41 @@ impl Connection for H2Conn {
 
     fn on_message(&mut self, cx: &mut Ctx<'_>, msg: Message) {
         self.enter();
+        let msg = match msg.downcast::<PingMsg>() {
+            Ok(_) => {
+                self.h2.ping(*b"simoomka");
+                self.leave(cx);
+                return;
+            }
+            Err(m) => m,
+        };
+        let msg = match msg.downcast::<CloseMsg>() {
+            Ok(_) => {
+                self.h2.shutdown(self.now_ms());
+                self.flush(cx);
+                let e = Error::new(ErrorKind::Closed, format!("connection closed: {}", self.what));
+                self.die(e, false);
+                cx.close();
+                self.leave(cx);
+                return;
+            }
+            Err(m) => m,
+        };
+        let msg = match msg.downcast::<PinWork>() {
+            Ok(mut w) => {
+                if let Some(job) = w.0.take() {
+                    if self.going_away {
+                        let e = Error::new(ErrorKind::Closed, format!("HTTP/2 connection is going away: {}", self.what));
+                        Work::Call(job).fail(e);
+                    } else {
+                        self.entry.borrow_mut().queue.push_back(Work::Call(job));
+                    }
+                }
+                self.leave(cx);
+                return;
+            }
+            Err(m) => m,
+        };
         match msg.downcast::<Kick>() {
             Ok(_) => self.entry.borrow_mut().kicked = false,
             Err(msg) => {

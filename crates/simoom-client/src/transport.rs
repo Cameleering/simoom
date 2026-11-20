@@ -12,6 +12,12 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "tls")]
 use simoom_tls::ClientConnection;
 
+/// The TLS session of a connection (nothing without the `tls` feature).
+#[cfg(all(feature = "client-h2", feature = "tls"))]
+pub(crate) type TlsSession = ClientConnection;
+#[cfg(all(feature = "client-h2", not(feature = "tls")))]
+pub(crate) type TlsSession = ();
+
 /// The time left until `deadline`, or a timeout error.
 pub(crate) fn remaining(deadline: Option<Instant>, kind: TimeoutKind, what: impl std::fmt::Display) -> Result<Option<Duration>> {
     match deadline {
@@ -266,6 +272,19 @@ impl Duplex {
         {
             false
         }
+    }
+
+    /// The socket, the TLS session and the socket bytes read but not processed yet: for
+    /// handing the connection to an event loop.
+    #[cfg(feature = "client-h2")]
+    pub(crate) fn into_parts(self) -> (TcpStream, Option<TlsSession>, Vec<u8>) {
+        let rx = self.rx.into_inner().unwrap_or_else(|p| p.into_inner());
+        let leftover = rx.buf[rx.pos.min(rx.buf.len())..].to_vec();
+        #[cfg(feature = "tls")]
+        let tls = self.tls.map(|m| m.into_inner().unwrap_or_else(|p| p.into_inner()));
+        #[cfg(not(feature = "tls"))]
+        let tls = None;
+        (self.tcp, tls, leftover)
     }
 
     /// The negotiated ALPN protocol.

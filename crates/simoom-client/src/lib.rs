@@ -2,9 +2,11 @@
 //!
 //! Built on simoom's sans-io protocol crates (simoom-http1, simoom-h2, simoom-quic +
 //! simoom-h3, simoom-tls). No async runtime: the blocking [`Client`] runs requests on the
-//! caller's threads, and HTTP/2 and HTTP/3 connections are shared between threads (a reader
-//! thread runs only while several streams are in flight). With the `rt` feature,
-//! `rt::RtClient` (feature `rt`) runs requests on simoom-rt event loops instead, with completion callbacks.
+//! caller's threads, and HTTP/2 and HTTP/3 connections are shared between threads. An HTTP/2
+//! connection is opened on the calling thread and then run by one of the client's simoom-rt
+//! event loops (started with the first one), which wakes each waiting caller once its response
+//! is in. HTTP/3 has a reader thread while several streams are in flight. `rt::RtClient`
+//! (feature `rt`) runs requests on simoom-rt event loops with completion callbacks instead.
 //!
 //! ```no_run
 //! use simoom_client::Client;
@@ -95,12 +97,16 @@ mod url;
 
 #[cfg(any(feature = "client-h2", feature = "client-h3"))]
 mod call;
-#[cfg(feature = "client-h2")]
+// The engine's HTTP/2 protocol, for connections that start as HTTP/1.1 (`Upgrade: h2c`);
+// every other HTTP/2 connection runs on the event loops (`loopmux`, `rt::h2`).
+#[cfg(feature = "h2c-upgrade")]
 mod h2;
 #[cfg(feature = "client-h3")]
 mod h3;
 #[cfg(any(feature = "client-h2", feature = "client-h3"))]
 mod mux;
+#[cfg(feature = "client-h2")]
+mod loopmux;
 #[cfg(feature = "rt")]
 pub mod rt;
 #[cfg(feature = "client-ws")]

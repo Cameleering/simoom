@@ -109,6 +109,12 @@ pub struct Config {
     /// HTTP/2 settings and limits.
     #[cfg(feature = "client-h2")]
     pub h2: simoom_h2::Config,
+    /// Event loops that run this client's HTTP/2 connections (started on the first one; 0:
+    /// `max_multiplexed_per_origin`, at most one per CPU). The connection is opened on the
+    /// calling thread (resolution, proxy, TLS), then a loop runs its streams: a response wakes
+    /// its caller directly from the loop that read it.
+    #[cfg(feature = "client-h2")]
+    pub h2_loops: usize,
     /// Send HTTP/2 (and HTTP/3) PINGs on connections idle this long (`None`: no keepalive).
     pub keepalive_interval: Option<Duration>,
     /// A keepalive PING unanswered for this long closes the connection.
@@ -152,6 +158,8 @@ impl Default for Config {
             ok_status: None,
             #[cfg(feature = "client-h2")]
             h2: simoom_h2::Config::default(),
+            #[cfg(feature = "client-h2")]
+            h2_loops: 0,
             keepalive_interval: None,
             keepalive_timeout: Duration::from_secs(20),
         }
@@ -235,6 +243,9 @@ pub(crate) struct Inner {
     alt: Mutex<HashMap<String, AltSvc>>,
     #[cfg_attr(not(any(feature = "client-h2", feature = "client-h3")), allow(dead_code))]
     keepalive: Mutex<bool>,
+    /// The loops of the HTTP/2 connections, started with the first one.
+    #[cfg(feature = "client-h2")]
+    loops: Mutex<Option<crate::rt::RtClient>>,
 }
 
 /// A connection just opened.
@@ -389,6 +400,14 @@ impl ClientBuilder {
         self
     }
 
+    /// Event loops for HTTP/2 connections (0: `max_multiplexed_per_origin`, at most one per
+    /// CPU).
+    #[cfg(feature = "client-h2")]
+    pub fn h2_loops(mut self, n: usize) -> Self {
+        self.cfg.h2_loops = n;
+        self
+    }
+
     /// TLS settings.
     #[cfg(feature = "tls")]
     pub fn tls(mut self, t: TlsOptions) -> Self {
@@ -448,6 +467,8 @@ impl ClientBuilder {
                 #[cfg(feature = "client-h3")]
                 alt: Mutex::new(HashMap::new()),
                 keepalive: Mutex::new(false),
+                #[cfg(feature = "client-h2")]
+                loops: Mutex::new(None),
                 cfg: self.cfg,
             }),
         }
@@ -1033,7 +1054,7 @@ impl Client {
                 let d = self.tls_connect(tcp, url, alpn, deadline, &what)?;
                 #[cfg(feature = "client-h2")]
                 if d.alpn() == Some(b"h2") {
-                    return Ok(Conn::Mux(self.h2_mux(d, what)));
+                    return Ok(Conn::Mux(self.h2_mux(d, url)?));
                 }
                 if mode == HttpVersion::Http2 {
                     return Err(Error::protocol("the server did not choose ALPN h2", &what));
@@ -1055,7 +1076,7 @@ impl Client {
         }
         #[cfg(feature = "client-h2")]
         if mode == HttpVersion::Http2 {
-            return Ok(Conn::Mux(self.h2_mux(d, what)));
+            return Ok(Conn::Mux(self.h2_mux(d, url)?));
         }
         Ok(Conn::H1(H1Conn::new(d, absolute, cfg.max_head)))
     }
@@ -1117,16 +1138,38 @@ impl Client {
         }
         let leftover = conn.take_leftover();
         let proto = crate::h2::H2Proto::upgraded(cfg.h2.clone(), what.clone());
-        let m = Mux::new(crate::mux::MuxIo::Tcp(conn.io), Box::new(proto), what).into_arc();
+        let m = crate::mux::EngineMux::new(crate::mux::MuxIo::Tcp(conn.io), Box::new(proto), what).into_arc();
         m.adopt(1, &leftover);
         m.finish(1);
         Ok(Conn::Mux(m))
     }
 
     #[cfg(feature = "client-h2")]
-    fn h2_mux(&self, d: Duplex, what: String) -> Arc<Mux> {
-        let proto = crate::h2::H2Proto::new(self.inner.cfg.h2.clone(), what.clone());
-        Mux::new(crate::mux::MuxIo::Tcp(d), Box::new(proto), what).into_arc()
+    fn h2_mux(&self, d: Duplex, url: &Url) -> Result<Arc<Mux>> {
+        let rt = self.h2_loops()?;
+        let m = crate::loopmux::LoopMux::adopt(&rt, d, url)?;
+        Ok(Arc::new(Mux::Loop(m)))
+    }
+
+    /// The loops of this client's HTTP/2 connections, started on first use.
+    #[cfg(feature = "client-h2")]
+    fn h2_loops(&self) -> Result<crate::rt::RtClient> {
+        let mut g = self.inner.loops.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(rt) = g.as_ref() {
+            return Ok(rt.clone());
+        }
+        let cfg = &self.inner.cfg;
+        let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let n = if cfg.h2_loops > 0 { cfg.h2_loops } else { cfg.max_multiplexed_per_origin.clamp(1, cpus) };
+        #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
+        let mut rc = crate::rt::RtConfig { version: HttpVersion::Http2, h2: cfg.h2.clone(), h2_connections: 1, workers: 1, decompress: false, ..crate::rt::RtConfig::default_without_roots() };
+        #[cfg(feature = "tls")]
+        {
+            rc.tls = self.inner.tls.opts.clone();
+        }
+        let rt = crate::rt::RtClient::spawn_named(n, rc, "simoom-client-h2").map_err(|e| Error::new(ErrorKind::Io(e.kind()), format!("cannot start the HTTP/2 loops: {e}")))?;
+        *g = Some(rt.clone());
+        Ok(rt)
     }
 
     /// Opens an HTTP/1.1 connection outside the pool (WebSocket upgrades, pipelining): TCP,
@@ -1549,6 +1592,30 @@ mod tests {
         assert_eq!(parse_alt_svc(r#"h3=":443"; ma=3600"#), Some((None, 443, Duration::from_secs(3600))));
         assert_eq!(parse_alt_svc(r#"h3-29=":1", h3="alt.example:8443""#), Some((Some("alt.example".into()), 8443, Duration::from_secs(86400))));
         assert_eq!(parse_alt_svc(r#"h2=":443""#), None);
+    }
+
+    // HTTP/2 connections are handed to the client's event loops: no pump thread, the loop that
+    // reads a response wakes its caller.
+    #[cfg(feature = "client-h2")]
+    #[test]
+    fn http2_connections_run_on_event_loops() {
+        let srv = simoom::Server::builder().listen("127.0.0.1:0").threads(1).service(|_req: &mut simoom::Request<'_>, reply: simoom::Reply<'_>| reply.body("ok")).start().unwrap();
+        let c = Client::builder().version(HttpVersion::Http2).build();
+        let u = format!("http://127.0.0.1:{}/", srv.local_addr().port());
+        // the first request opens the connection (racing threads on a cold pool may each open one)
+        assert_eq!(c.get(&u).send().unwrap().text().unwrap(), "ok");
+        let ts: Vec<_> = (0..8).map(|_| {
+            let (c, u) = (c.clone(), u.clone());
+            std::thread::spawn(move || c.get(&u).send().unwrap().text().unwrap())
+        }).collect();
+        for t in ts {
+            assert_eq!(t.join().unwrap(), "ok");
+        }
+        let muxes = c.inner.pool.all_mux();
+        assert_eq!(muxes.len(), 1);
+        assert!(matches!(&*muxes[0].1, crate::mux::Mux::Loop(_)), "{:?}", muxes[0].1);
+        assert_eq!(muxes[0].1.version(), crate::types::Version::Http2);
+        assert_eq!(c.inner.loops.lock().unwrap().as_ref().map(|_| ()), Some(()));
     }
 }
 

@@ -112,6 +112,7 @@ fn redirects_proxies_and_decompression_on_the_loop() {
     // through an HTTP proxy (absolute form) and a CONNECT tunnel to https
     let p = common::proxy(None);
     let pc = simoom_client::ProxyConfig::new(simoom_client::ProxyAddr::new("127.0.0.1", p.addr.port()));
+    #[cfg_attr(not(feature = "tls"), allow(unused_mut))]
     let mut cfg = RtConfig { proxy: Some(pc), ..RtConfig::default() };
     #[cfg(feature = "tls")]
     {

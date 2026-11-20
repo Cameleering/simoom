@@ -78,15 +78,15 @@ fn main() {
         i += 2;
     }
     if rt {
-        #[cfg(feature = "rt")]
+        #[cfg(all(feature = "rt", feature = "client-h2"))]
         {
             rt_bench::run(&url, secs, post, conns, inflight, loops, facade.then_some(threads));
             return;
         }
-        #[cfg(not(feature = "rt"))]
+        #[cfg(not(all(feature = "rt", feature = "client-h2")))]
         {
             let _ = (facade, inflight, loops);
-            panic!("--rt needs the `rt` feature");
+            panic!("--rt needs the `rt` and `client-h2` features");
         }
     }
     let client = Client::builder().version(if h2 { HttpVersion::Http2 } else { HttpVersion::Auto }).max_multiplexed_per_origin(conns).streams_per_connection(streams).build();
@@ -123,7 +123,7 @@ fn main() {
     report(&format!("simoom-client h2={h2}"), threads, n, el, cpu0);
 }
 
-#[cfg(feature = "rt")]
+#[cfg(all(feature = "rt", feature = "client-h2"))]
 mod rt_bench {
     use super::{cpu_ms, report};
     use simoom_client::rt::{RtClient, RtConfig, RtRequest};

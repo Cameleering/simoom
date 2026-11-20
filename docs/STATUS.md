@@ -183,3 +183,16 @@ for 1000 self-queued tasks, now under 20). Idle `RtClient` connections are poole
 origin (were per origin, so two clients on shared loops could take each other's). Tests:
 `crates/simoom-rt/tests/current.rs`, `crates/simoom-client/tests/rt.rs` (sending from a foreign
 loop, a server handler proxying on its own loop).
+
+## The blocking client's HTTP/2 runs on event loops (branch `h2-event-client`, not released)
+
+_2026-11-20._ `Client` opens an HTTP/2 connection on the calling thread as before, then hands the
+socket and TLS session to a loop of a private `RtClient` (`loopmux.rs`, `Mux` is now an enum); a
+response wakes its caller once, from the loop. The old engine (`EngineMux`) stays for HTTP/3 and
+h2c `Upgrade`. All existing HTTP/2, WebSocket-over-HTTP/2, call, auth and cookie tests pass
+unchanged. At 64 threads (WSL2): one connection 89k -> 94k req/s and 34.8 -> 22.4 us per request;
+four connections 161k-203k -> 236k-243k req/s and 30-32 -> 25 us. Size (dist, x86-64): the
+default client 1,099,128 -> 1,425,288 bytes (+326 KB, simoom-rt and the loop client), next to
+the server +153 KB. Details in [design/rt-h2-client.md](design/rt-h2-client.md). The digest
+`nextnonce` test flake (whole-second nonces) is fixed.
+
