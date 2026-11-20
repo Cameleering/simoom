@@ -1,37 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://cameleer.ing/simoom/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/llms.txt</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/llms-full.txt</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/alternatives/rust-http-server-without-tokio/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/benchmarks/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/compare/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/compare/simoom-vs-hyper-axum/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/compare/simoom-vs-may-minihttp/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/compare/simoom-vs-nginx-h2o/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/use-cases/edge-iot-http-server/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/use-cases/embedded-local-server/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/use-cases/http3-server/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/use-cases/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/use-cases/integration-engine/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/use-cases/serverless-cold-start/</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/use-cases/zero-dependency-supply-chain/</loc><lastmod>2026-11-12</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/llms.txt</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/llms-full.txt</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/alternatives/rust-http-server-without-tokio/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/benchmarks/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/compare/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/compare/simoom-vs-hyper-axum/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/compare/simoom-vs-may-minihttp/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/compare/simoom-vs-nginx-h2o/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/use-cases/edge-iot-http-server/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/use-cases/embedded-local-server/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/use-cases/http3-server/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/use-cases/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/use-cases/integration-engine/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/use-cases/serverless-cold-start/</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/use-cases/zero-dependency-supply-chain/</loc><lastmod>2026-11-13</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/SECURITY.html</loc><lastmod>2026-11-12</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/guides/client.html</loc><lastmod>2026-11-12</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/guides/coding-agents.html</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/docs/guides/faq.html</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/docs/guides/features-and-size.html</loc><lastmod>2026-11-12</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/docs/guides/faq.html</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/docs/guides/features-and-size.html</loc><lastmod>2026-11-13</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/guides/getting-started.html</loc><lastmod>2026-11-12</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/guides/http2-and-http3.html</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/docs/guides/</loc><lastmod>2026-11-12</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/docs/guides/</loc><lastmod>2026-11-13</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/guides/limits-and-security.html</loc><lastmod>2026-11-12</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/guides/routing.html</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/docs/guides/runtime.html</loc><lastmod>2026-11-12</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/docs/guides/runtime.html</loc><lastmod>2026-11-13</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/guides/sans-io-crates.html</loc><lastmod>2026-11-12</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/guides/services-and-replies.html</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/docs/guides/slow-work.html</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/docs/guides/streaming-and-sse.html</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/docs/guides/tls.html</loc><lastmod>2026-11-12</lastmod></url>
-  <url><loc>https://cameleer.ing/simoom/docs/guides/websocket.html</loc><lastmod>2026-11-12</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/docs/guides/slow-work.html</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/docs/guides/streaming-and-sse.html</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/docs/guides/tls.html</loc><lastmod>2026-11-13</lastmod></url>
+  <url><loc>https://cameleer.ing/simoom/docs/guides/websocket.html</loc><lastmod>2026-11-13</lastmod></url>
   <url><loc>https://cameleer.ing/simoom/docs/</loc><lastmod>2026-11-12</lastmod></url>
 </urlset>

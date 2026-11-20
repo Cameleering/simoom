@@ -1,4 +1,4 @@
-# How do I stream bodies and send server-sent events with simoom?
+# How do I stream bodies and server-sent events with simoom?
 
 > `Reply::stream` and `Reply::sse` return a `BodySink` you write from any thread; large uploads arrive through a `BodySource` read off the loop thread.
 

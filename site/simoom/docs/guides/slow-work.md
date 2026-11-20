@@ -1,4 +1,4 @@
-# How do I call a database or another service from a simoom handler?
+# How do I call a database or a service from a simoom handler?
 
 > Never block the loop thread: wrap slow handlers in `simoom::blocking`, or use `Reply::offload`, or `Reply::defer` and answer later from your own threads.
 

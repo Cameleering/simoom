@@ -597,7 +597,7 @@ path segment.
 
 Source: https://cameleer.ing/simoom/docs/guides/slow-work.html
 
-# How do I call a database or another service from a simoom handler?
+# How do I call a database or a service from a simoom handler?
 
 > Never block the loop thread: wrap slow handlers in `simoom::blocking`, or use `Reply::offload`, or `Reply::defer` and answer later from your own threads.
 
@@ -823,7 +823,7 @@ On the pool, `OwnedRequest::read_body()` reads the whole body, and `take_body()`
 
 Source: https://cameleer.ing/simoom/docs/guides/streaming-and-sse.html
 
-# How do I stream bodies and send server-sent events with simoom?
+# How do I stream bodies and server-sent events with simoom?
 
 > `Reply::stream` and `Reply::sse` return a `BodySink` you write from any thread; large uploads arrive through a `BodySource` read off the loop thread.
 
@@ -1709,7 +1709,7 @@ No. To trust a self-signed server, add its certificate to the client's root stor
 
 Source: https://cameleer.ing/simoom/docs/guides/runtime.html
 
-# How do I configure simoom's threads, I/O back end and shutdown?
+# How do I set simoom's threads, I/O back end and shutdown?
 
 > simoom runs one event loop per CPU core by default; set `threads`, pick a `Backend`, and stop with `stop(grace)` followed by `join()`.
 

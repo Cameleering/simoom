@@ -1,4 +1,4 @@
-# How do I configure simoom's threads, I/O back end and shutdown?
+# How do I set simoom's threads, I/O back end and shutdown?
 
 > simoom runs one event loop per CPU core by default; set `threads`, pick a `Backend`, and stop with `stop(grace)` followed by `join()`.
 

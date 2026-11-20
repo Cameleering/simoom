@@ -23,18 +23,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../../../assets/site.css">
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I serve HTTPS with simoom?", "description": "Turn on the tls feature, load your certificate into a ServerConfig, and call listen_tls and tls; simoom does TLS 1.3 itself, with no OpenSSL.", "url": "https://cameleer.ing/simoom/docs/guides/tls.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@type": "Organization", "name": "simoom", "url": "https://cameleer.ing/simoom/"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-12"}</script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 2, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 3, "name": "How do I serve HTTPS with simoom?", "item": "https://cameleer.ing/simoom/docs/guides/tls.html"}]}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I serve HTTPS with simoom?", "description": "Turn on the tls feature, load your certificate into a ServerConfig, and call listen_tls and tls; simoom does TLS 1.3 itself, with no OpenSSL.", "url": "https://cameleer.ing/simoom/docs/guides/tls.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@id": "https://cameleer.ing/#org"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-13"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Cameleering", "item": "https://cameleer.ing/"}, {"@type": "ListItem", "position": 2, "name": "simoom", "item": "https://cameleer.ing/simoom/"}, {"@type": "ListItem", "position": 3, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 4, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 5, "name": "How do I serve HTTPS with simoom?", "item": "https://cameleer.ing/simoom/docs/guides/tls.html"}]}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Do I need OpenSSL, a C compiler or cmake?", "acceptedAnswer": {"@type": "Answer", "text": "No. simoom's TLS and cryptography are Rust code in the repository, so cross-compiling for another target needs only the Rust target."}}, {"@type": "Question", "name": "Can I use rustls or OpenSSL instead?", "acceptedAnswer": {"@type": "Answer", "text": "Not inside simoom's listeners. You can put a TLS terminator (nginx, haproxy, a cloud load balancer) in front of a plain simoom listener; HTTP/2 with prior knowledge (h2c) is a good protocol between them."}}, {"@type": "Question", "name": "How do I redirect HTTP to HTTPS?", "acceptedAnswer": {"@type": "Answer", "text": "Listen on both ports and answer plain requests with a redirect: if !req.is_secure() { return r.status(308).header(\"location\", url).empty(); }."}}, {"@type": "Question", "name": "Does TLS make start-up slower?", "acceptedAnswer": {"@type": "Answer", "text": "A little. In benchmark campaign 4 (2026-11-12), the full server, with TLS 1.3 and HTTP/3, gave its first answer 1.49 ms after start, against 0.94 ms for the default build without them; hyper, without TLS, took 1.48 ms on the same droplet. Part of the difference is HTTP/3, which starts every event loop at once (benchmarks)."}}]}</script>
 </head>
 <body class="docs">
 <a class="skip" href="#content">Skip to content</a>
 <header class="top scrolled" id="top">
   <div class="wrap">
-    <a class="brand" href="../../" aria-label="simoom home">
-      <img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">
-      simoom
-    </a>
+    <span class="lockup"><a class="fam" href="../../../" aria-label="Cameleering home"><img src="../../../brand/cameleering/cameleering-mark-64.png" width="22" height="22" alt="" aria-hidden="true">Cameleering</a><span class="sep" aria-hidden="true">/</span><a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a></span>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
     <nav id="main-nav" aria-label="Main">
       <a class="keep" href="../index.html">Docs</a>
@@ -42,7 +39,20 @@
       <a href="../../use-cases/">Use cases</a>
       <a href="../../benchmarks/">Benchmarks</a>
       <a href="../../compare/">Compare</a>
-      <a href="../../../cameleering/">Cameleering</a>
+      <!-- cameleering family menu v2 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
+      <div class="nav-menu">
+        <a href="../../../" aria-haspopup="true">Cameleering</a>
+        <div class="nav-sub">
+          <a href="../../../"><b>Cameleering</b><span>Carry more on less: improve it, then prove it</span></a>
+          <a href="../../../ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
+          <a href="../../../method/"><b>The method</b><span>How a gain is measured and reported</span></a>
+          <a href="../../../finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
+          <a href="../../../articles/"><b>Articles</b><span>Essays on efficiency, outages and cost, with sources</span></a>
+          <a href="../../../projects/"><b>Projects</b><span>Cameleer and simoom Cameleered; karez and ksar not yet</span></a>
+          <a href="../../../about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
+          <a href="../../../cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>
+        </div>
+      </div>
       <a class="gh" href="https://github.com/Cameleering/simoom">
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
@@ -58,7 +68,7 @@
 <ul class="nav-top">
 <li><a href="../index.html">Docs home</a></li>
 </ul>
-<details class="nav-group" open><summary>Guides <span class="n">15</span></summary><ul><li><a href="index.html">All guides</a></li><li><a href="getting-started.html">Getting started with simoom</a></li><li><a href="services-and-replies.html">How do I read requests and send responses in simoom?</a></li><li><a href="routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="slow-work.html">How do I call a database or another service from a simoom handler?</a></li><li><a href="streaming-and-sse.html">How do I stream bodies and send server-sent events with simoom?</a></li><li><a href="websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="tls.html" aria-current="page">How do I serve HTTPS with simoom?</a></li><li><a href="http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="runtime.html">How do I configure simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="sans-io-crates.html">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="faq.html">simoom FAQ</a></li></ul></details>
+<details class="nav-group" open><summary>Guides <span class="n">15</span></summary><ul><li><a href="index.html">All guides</a></li><li><a href="getting-started.html">Getting started with simoom</a></li><li><a href="services-and-replies.html">How do I read requests and send responses in simoom?</a></li><li><a href="routing.html">How do I route requests by path and method in simoom?</a></li><li><a href="slow-work.html">How do I call a database or a service from a simoom handler?</a></li><li><a href="streaming-and-sse.html">How do I stream bodies and server-sent events with simoom?</a></li><li><a href="websocket.html">How do I accept WebSocket connections with simoom?</a></li><li><a href="tls.html" aria-current="page">How do I serve HTTPS with simoom?</a></li><li><a href="http2-and-http3.html">How do I serve HTTP/2 and HTTP/3 with simoom?</a></li><li><a href="limits-and-security.html">What does simoom limit and refuse, and how do I change it?</a></li><li><a href="runtime.html">How do I set simoom&#x27;s threads, I/O back end and shutdown?</a></li><li><a href="client.html">How do I make HTTP requests with simoom-client?</a></li><li><a href="features-and-size.html">Which simoom features do I need, and how big is the build?</a></li><li><a href="sans-io-crates.html">Can I use simoom&#x27;s protocol crates in my own I/O loop?</a></li><li><a href="coding-agents.html">Rules for coding agents writing simoom code</a></li><li><a href="faq.html">simoom FAQ</a></li></ul></details>
 <details class="nav-group"><summary>Project <span class="n">1</span></summary><ul><li><a href="../SECURITY.html">Security</a></li></ul></details>
       </nav>
     </details>
@@ -208,8 +218,8 @@ event loop at once (<a href="https://cameleer.ing/simoom/benchmarks/">benchmarks
   <div class="wrap">
     <div class="credit">
       <h4>simoom</h4>
-      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../">Cameleer</a>.</p>
-      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. It is the HTTP engine of <a href="../../../cameleer/">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../">Cameleering</a> project: carry more on less, no claim without a number.</p>
       <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF.</p>
     </div>
     <div>

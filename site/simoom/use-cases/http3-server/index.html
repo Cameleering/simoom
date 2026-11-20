@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HTTP/3 server in Rust without quinn or OpenSSL | simoom</title>
-<meta name="description" content="Serve HTTP/3 over QUIC from Rust with no dependencies: same port as TLS, alt-svc, its own QUIC and TLS 1.3. Campaign 4: 1.65x the requests of quinn + h3; H2O 43% ahead.">
+<meta name="description" content="Serve HTTP/3 over QUIC from Rust with no dependencies: same port as TLS, alt-svc, its own QUIC and TLS 1.3. 1.65x the requests of quinn + h3; H2O 43% ahead.">
 <link rel="canonical" href="https://cameleer.ing/simoom/use-cases/http3-server/">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="article">
@@ -37,9 +37,7 @@
   "name": "Sudheesh PM"
  },
  "publisher": {
-  "@type": "Organization",
-  "name": "Cameleering",
-  "url": "https://cameleer.ing/cameleering/"
+  "@id": "https://cameleer.ing/#org"
  },
  "about": [
   {
@@ -72,18 +70,24 @@
   {
    "@type": "ListItem",
    "position": 1,
+   "name": "Cameleering",
+   "item": "https://cameleer.ing/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 2,
    "name": "simoom",
    "item": "https://cameleer.ing/simoom/"
   },
   {
    "@type": "ListItem",
-   "position": 2,
+   "position": 3,
    "name": "Use cases",
    "item": "https://cameleer.ing/simoom/use-cases/"
   },
   {
    "@type": "ListItem",
-   "position": 3,
+   "position": 4,
    "name": "HTTP/3"
   }
  ]
@@ -141,14 +145,27 @@
 <body>
 <header class="top" id="top">
   <div class="wrap">
-    <a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <span class="lockup"><a class="fam" href="../../../" aria-label="Cameleering home"><img src="../../../brand/cameleering/cameleering-mark-64.png" width="22" height="22" alt="" aria-hidden="true">Cameleering</a><span class="sep" aria-hidden="true">/</span><a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a></span>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
     <nav id="main-nav" aria-label="Main">
       <a class="keep" href="../../docs/">Docs</a>
       <a class="keep" href="../../use-cases/" aria-current="page">Use cases</a>
       <a href="../../benchmarks/">Benchmarks</a>
       <a href="../../compare/">Compare</a>
-      <a href="../../../cameleering/">Cameleering</a>
+      <!-- cameleering family menu v2 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
+      <div class="nav-menu">
+        <a href="../../../" aria-haspopup="true">Cameleering</a>
+        <div class="nav-sub">
+          <a href="../../../"><b>Cameleering</b><span>Carry more on less: improve it, then prove it</span></a>
+          <a href="../../../ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
+          <a href="../../../method/"><b>The method</b><span>How a gain is measured and reported</span></a>
+          <a href="../../../finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
+          <a href="../../../articles/"><b>Articles</b><span>Essays on efficiency, outages and cost, with sources</span></a>
+          <a href="../../../projects/"><b>Projects</b><span>Cameleer and simoom Cameleered; karez and ksar not yet</span></a>
+          <a href="../../../about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
+          <a href="../../../cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>
+        </div>
+      </div>
       <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
     </nav>
   </div>
@@ -272,8 +289,8 @@ curl --http3-only -k https://localhost:8443/   # with a curl built with HTTP/3</
   <div class="wrap">
     <div class="credit">
       <h4>simoom</h4>
-      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../">Cameleer</a>.</p>
-      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../cameleer/">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../">Cameleering</a> project: carry more on less, no claim without a number.</p>
       <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. AWS Lambda, Raspberry Pi and other product names are trademarks of their owners.</p>
     </div>
     <div>

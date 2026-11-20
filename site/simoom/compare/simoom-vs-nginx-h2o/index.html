@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>h2o and nginx vs simoom: TLS and HTTP/3 benchmark</title>
-<meta name="description" content="simoom vs H2O and nginx on the same droplet (campaign 4, 2026-11-12): 30% more HTTPS requests/s than H2O and 39% more full TLS handshakes; H2O leads HTTP/3 and HTTP/2, nginx leads idle memory and spikes.">
+<meta name="description" content="simoom vs H2O and nginx on the same droplet: 30% more HTTPS requests/s than H2O, 39% more full TLS handshakes; H2O leads HTTP/3 and HTTP/2.">
 <link rel="canonical" href="https://cameleer.ing/simoom/compare/simoom-vs-nginx-h2o/">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:type" content="article">
@@ -24,20 +24,68 @@
 <link rel="stylesheet" href="../../../assets/site.css">
 <link rel="stylesheet" href="../../../assets/compare.css">
 <script type="application/ld+json">
-{"@context": "https://schema.org", "@type": "TechArticle",
+{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
  "headline": "h2o and nginx vs simoom: TLS and HTTP/3 benchmark",
  "description": "simoom, H2O and nginx measured on the same DigitalOcean c-4 droplets in benchmark campaign 4 (2026-11-12): TLS 1.3 handshakes, HTTPS throughput, HTTP/3, HTTP/2, idle memory, traffic spikes and slow attackers, with the losses, and how a library and a standalone server work together.",
  "url": "https://cameleer.ing/simoom/compare/simoom-vs-nginx-h2o/",
- "inLanguage": "en", "image": "https://cameleer.ing/simoom/og.jpg",
- "author": {"@type": "Person", "name": "Sudheesh PM"},
- "publisher": {"@type": "Organization", "name": "Cameleering", "url": "https://cameleer.ing/cameleering/"},
- "about": [{"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom"}, {"@type": "SoftwareApplication", "name": "h2o"}, {"@type": "SoftwareApplication", "name": "nginx"}]}
+ "inLanguage": "en",
+ "image": "https://cameleer.ing/simoom/og.jpg",
+ "author": {
+  "@type": "Person",
+  "name": "Sudheesh PM"
+ },
+ "publisher": {
+  "@id": "https://cameleer.ing/#org"
+ },
+ "about": [
+  {
+   "@type": "SoftwareSourceCode",
+   "name": "simoom",
+   "codeRepository": "https://github.com/Cameleering/simoom"
+  },
+  {
+   "@type": "SoftwareApplication",
+   "name": "h2o"
+  },
+  {
+   "@type": "SoftwareApplication",
+   "name": "nginx"
+  }
+ ]
+}
 </script>
 <script type="application/ld+json">
-{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
- {"@type": "ListItem", "position": 1, "name": "simoom", "item": "https://cameleer.ing/simoom/"},
- {"@type": "ListItem", "position": 2, "name": "Compare", "item": "https://cameleer.ing/simoom/compare/"},
- {"@type": "ListItem", "position": 3, "name": "h2o and nginx vs simoom"}]}
+{
+ "@context": "https://schema.org",
+ "@type": "BreadcrumbList",
+ "itemListElement": [
+  {
+   "@type": "ListItem",
+   "position": 1,
+   "name": "Cameleering",
+   "item": "https://cameleer.ing/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 2,
+   "name": "simoom",
+   "item": "https://cameleer.ing/simoom/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 3,
+   "name": "Compare",
+   "item": "https://cameleer.ing/simoom/compare/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 4,
+   "name": "h2o and nginx vs simoom"
+  }
+ ]
+}
 </script>
 <script type="application/ld+json">
 {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
@@ -51,14 +99,27 @@
 <body>
 <header class="top" id="top">
   <div class="wrap">
-    <a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a>
+    <span class="lockup"><a class="fam" href="../../../" aria-label="Cameleering home"><img src="../../../brand/cameleering/cameleering-mark-64.png" width="22" height="22" alt="" aria-hidden="true">Cameleering</a><span class="sep" aria-hidden="true">/</span><a class="brand" href="../../" aria-label="simoom home"><img src="../../brand/simoom-mark.svg" width="32" height="32" alt="" aria-hidden="true">simoom</a></span>
     <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="main-nav" onclick="var t=this.closest('.top'),o=t.classList.toggle('open');this.setAttribute('aria-expanded',o)"><span class="bars" aria-hidden="true"></span>Menu</button>
     <nav id="main-nav" aria-label="Main">
       <a class="keep" href="../../docs/">Docs</a>
       <a class="keep" href="../../use-cases/">Use cases</a>
       <a href="../../benchmarks/">Benchmarks</a>
       <a href="../" aria-current="page">Compare</a>
-      <a href="../../../cameleering/">Cameleering</a>
+      <!-- cameleering family menu v2 (keep in step with cameleer scripts/build-docs.py FAMILY_MENU) -->
+      <div class="nav-menu">
+        <a href="../../../" aria-haspopup="true">Cameleering</a>
+        <div class="nav-sub">
+          <a href="../../../"><b>Cameleering</b><span>Carry more on less: improve it, then prove it</span></a>
+          <a href="../../../ledger/"><b>The ledger</b><span>Every project, its baseline and its losses</span></a>
+          <a href="../../../method/"><b>The method</b><span>How a gain is measured and reported</span></a>
+          <a href="../../../finops/"><b>Code efficiency and FinOps</b><span>What the milliseconds and megabytes cost</span></a>
+          <a href="../../../articles/"><b>Articles</b><span>Essays on efficiency, outages and cost, with sources</span></a>
+          <a href="../../../projects/"><b>Projects</b><span>Cameleer and simoom Cameleered; karez and ksar not yet</span></a>
+          <a href="../../../about/"><b>About</b><span>Who maintains it, how to get in touch</span></a>
+          <a href="../../../cameleer/"><b>Cameleer</b><span>The integration engine, in the style of Apache Camel</span></a>
+        </div>
+      </div>
       <a class="gh" href="https://github.com/Cameleering/simoom">GitHub</a>
     </nav>
   </div>
@@ -254,8 +315,8 @@
   <div class="wrap">
     <div class="credit">
       <h4>simoom</h4>
-      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../">Cameleer</a>.</p>
-      <p>simoom is a <a href="../../../cameleering/">Cameleering</a> project: carry more on less, no claim without a number.</p>
+      <p>A small, fast HTTP/1.1, HTTP/2 and HTTP/3 server engine you build into Rust programs, with its own TLS 1.3 and nothing but the Rust standard library underneath. The HTTP engine of <a href="../../../cameleer/">Cameleer</a>.</p>
+      <p>simoom is a <a href="../../../">Cameleering</a> project: carry more on less, no claim without a number.</p>
       <p>Apache License 2.0. simoom is independent of the Apache Software Foundation; Apache and Apache Camel are trademarks of the ASF. nginx and other product names are trademarks of their owners.</p>
     </div>
     <div>
