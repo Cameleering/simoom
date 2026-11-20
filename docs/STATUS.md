@@ -196,3 +196,11 @@ default client 1,099,128 -> 1,425,288 bytes (+326 KB, simoom-rt and the loop cli
 the server +153 KB. Details in [design/rt-h2-client.md](design/rt-h2-client.md). The digest
 `nextnonce` test flake (whole-second nonces) is fixed.
 
+## `client-h2-engine`: HTTP/2 without event loops for small builds (branch `h2-event-client`)
+
+_2026-11-20._ `client-h2` (default) runs HTTP/2 on the loops; `client-h2-engine` keeps the
+engine (requesting threads, no simoom-rt) for size-sensitive builds; both sit on an internal `h2`
+feature, and with both the loops win. Small build `default-features = false, features =
+["client-h1", "client-h2-engine", "tls", ...]`: 1,099,560 bytes with ws and compress, the default
+before the loops (1,099,128); the default is 1,425,288. Tests run on both paths.
+

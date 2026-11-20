@@ -3,7 +3,7 @@
 //! refused streams, resets, cancellation, deadlines, streamed bodies, full-duplex calls,
 //! trailers, keepalive and lost connections.
 
-#![cfg(all(feature = "rt", feature = "client-h2", feature = "tls"))]
+#![cfg(all(feature = "rt", feature = "h2", feature = "tls"))]
 
 mod common;
 

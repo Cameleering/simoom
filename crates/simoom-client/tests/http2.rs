@@ -1,7 +1,7 @@
 //! TLS and HTTP/2: ALPN, h2c, multiplexing, flow control, trailers, duplex calls, resets,
 //! GOAWAY, keepalive, certificate checks.
 
-#![cfg(all(feature = "client-h2", feature = "tls"))]
+#![cfg(all(feature = "h2", feature = "tls"))]
 
 mod common;
 

@@ -12,9 +12,9 @@
 //! the write lock; others leave their bytes for it (`Guard`), so frames ready together go out
 //! in one write.
 
-// The engine (`EngineMux`, `Proto`) runs HTTP/3 and HTTP/2 after an h2c `Upgrade`; without those
-// features only `Mux`, `ReqHead` and `request_fields` are used.
-#![cfg_attr(not(any(feature = "client-h3", feature = "h2c-upgrade")), allow(dead_code))]
+// The engine (`EngineMux`, `Proto`) runs HTTP/3, HTTP/2 after an h2c `Upgrade`, and HTTP/2 with
+// `client-h2-engine` alone; otherwise only `Mux`, `ReqHead` and `request_fields` are used.
+#![cfg_attr(not(any(feature = "client-h3", feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2")))), allow(dead_code))]
 
 use crate::error::{Error, ErrorKind, Result, TimeoutKind};
 use crate::transport::{earliest, is_timeout};
@@ -35,7 +35,7 @@ pub(crate) enum MuxEvent {
     End(u64),
     Reset { id: u64, code: u64 },
     Writable(u64),
-    #[cfg_attr(not(feature = "h2c-upgrade"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2")))), allow(dead_code))]
     Pong,
     GoAway,
     Closed(Error),
@@ -119,7 +119,7 @@ pub(crate) trait Proto: Send {
 
 /// The transport of a multiplexed connection.
 pub(crate) enum MuxIo {
-    #[cfg_attr(not(feature = "h2c-upgrade"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2")))), allow(dead_code))]
     Tcp(crate::transport::Duplex),
     #[cfg(feature = "client-h3")]
     Udp(std::net::UdpSocket),
@@ -278,7 +278,7 @@ impl EngineMux {
     }
 
     /// The connection as a shared [`Mux`].
-    #[cfg(any(feature = "client-h3", feature = "h2c-upgrade"))]
+    #[cfg(any(feature = "client-h3", feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2"))))]
     pub(crate) fn into_arc(self) -> Arc<Mux> {
         Arc::new(Mux::Engine(self.into_engine()))
     }
@@ -914,7 +914,7 @@ impl EngineMux {
 /// by the requesting threads ([`EngineMux`]).
 #[derive(Debug)]
 pub(crate) enum Mux {
-    #[cfg(any(feature = "client-h3", feature = "h2c-upgrade"))]
+    #[cfg(any(feature = "client-h3", feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2"))))]
     Engine(Arc<EngineMux>),
     #[cfg(feature = "client-h2")]
     Loop(crate::loopmux::LoopMux),
@@ -923,7 +923,7 @@ pub(crate) enum Mux {
 macro_rules! fwd {
     ($self:ident, $m:ident => $e:expr) => {
         match $self {
-            #[cfg(any(feature = "client-h3", feature = "h2c-upgrade"))]
+            #[cfg(any(feature = "client-h3", feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2"))))]
             Mux::Engine($m) => $e,
             #[cfg(feature = "client-h2")]
             Mux::Loop($m) => $e,
@@ -931,7 +931,7 @@ macro_rules! fwd {
     };
 }
 
-#[cfg_attr(not(feature = "client-h2"), allow(dead_code))]
+#[cfg_attr(not(feature = "h2"), allow(dead_code))]
 impl Mux {
     pub(crate) fn version(&self) -> Version {
         fwd!(self, m => m.version())

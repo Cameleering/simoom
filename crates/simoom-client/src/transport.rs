@@ -231,7 +231,7 @@ pub(crate) struct Duplex {
     rx: Mutex<Rx>,
     /// The read timeout currently set on the socket, in ns (u64::MAX: none).
     cur_timeout: AtomicU64,
-    #[cfg_attr(not(all(feature = "tls", feature = "client-h2")), allow(dead_code))]
+    #[cfg_attr(not(all(feature = "tls", feature = "h2")), allow(dead_code))]
     alpn: Option<Vec<u8>>,
 }
 
@@ -288,7 +288,7 @@ impl Duplex {
     }
 
     /// The negotiated ALPN protocol.
-    #[cfg_attr(not(all(feature = "tls", feature = "client-h2")), allow(dead_code))]
+    #[cfg_attr(not(all(feature = "tls", feature = "h2")), allow(dead_code))]
     pub(crate) fn alpn(&self) -> Option<&[u8]> {
         self.alpn.as_deref()
     }

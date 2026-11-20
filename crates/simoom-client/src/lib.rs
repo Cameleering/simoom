@@ -45,7 +45,8 @@
 //! | feature | adds |
 //! |---|---|
 //! | `client-h1` (default) | HTTP/1.1 |
-//! | `client-h2` (default) | HTTP/2 (h2c and h2) |
+//! | `client-h2` (default) | HTTP/2 (h2c and h2), its connections run on simoom-rt event loops (pulls in `rt`) |
+//! | `client-h2-engine` | HTTP/2 for small builds: the connections are driven by the requesting threads, no simoom-rt (about 320 KB smaller); with `client-h2` too, the loops win |
 //! | `client-ws` (default) | the WebSocket client |
 //! | `tls` (default) | `https` and `wss` (TLS 1.3: X25519, P-256, RSA, AES-GCM) |
 //! | `tls-extra` | P-384 and Ed25519 certificates, ChaCha20-Poly1305 |
@@ -95,15 +96,16 @@ mod transport;
 mod types;
 mod url;
 
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 mod call;
-// The engine's HTTP/2 protocol, for connections that start as HTTP/1.1 (`Upgrade: h2c`);
-// every other HTTP/2 connection runs on the event loops (`loopmux`, `rt::h2`).
-#[cfg(feature = "h2c-upgrade")]
+// The engine's HTTP/2 protocol: connections that start as HTTP/1.1 (`Upgrade: h2c`), and every
+// HTTP/2 connection with `client-h2-engine` alone; with `client-h2` the others run on the event
+// loops (`loopmux`, `rt::h2`).
+#[cfg(any(feature = "h2c-upgrade", all(feature = "h2", not(feature = "client-h2"))))]
 mod h2;
 #[cfg(feature = "client-h3")]
 mod h3;
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 mod mux;
 #[cfg(feature = "client-h2")]
 mod loopmux;
@@ -113,7 +115,7 @@ pub mod rt;
 mod ws;
 
 pub use body::{Response, ResponseBody};
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 pub use call::{Call, CallSender};
 pub use client::{Client, ClientBuilder, Config, PoolStats, RequestBuilder};
 pub use error::{Error, ErrorKind, Result, StatusError, TimeoutKind};

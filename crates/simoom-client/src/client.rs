@@ -1,11 +1,11 @@
 //! The blocking client: configuration, request building, protocol selection, redirects.
 
 use crate::body::{H1Body, Inner as BodyInner, Response, ResponseBody};
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 use crate::body::reason_of;
 use crate::decode::ContentDecoder;
 use crate::error::{Error, ErrorKind, Result};
-#[cfg(any(feature = "retry", feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "retry", feature = "h2", feature = "client-h3"))]
 use crate::error::TimeoutKind;
 use crate::h1::{H1Conn, Out};
 use crate::pool::{Limits, OriginKey, Pool, Slot};
@@ -19,9 +19,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 use crate::body::MuxBody;
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 use crate::mux::{Mux, ReqHead};
 #[cfg(feature = "tls")]
 use simoom_tls::{x509::RootStore, CertifiedKey, ClientConfig, ClientConnection, SessionCache};
@@ -107,12 +107,13 @@ pub struct Config {
     /// `okStatusCodeRange`); `None` accepts every status.
     pub ok_status: Option<Vec<(u16, u16)>>,
     /// HTTP/2 settings and limits.
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     pub h2: simoom_h2::Config,
     /// Event loops that run this client's HTTP/2 connections (started on the first one; 0:
     /// `max_multiplexed_per_origin`, at most one per CPU). The connection is opened on the
     /// calling thread (resolution, proxy, TLS), then a loop runs its streams: a response wakes
-    /// its caller directly from the loop that read it.
+    /// its caller directly from the loop that read it. Feature `client-h2` (with
+    /// `client-h2-engine` alone HTTP/2 runs on the calling threads).
     #[cfg(feature = "client-h2")]
     pub h2_loops: usize,
     /// Send HTTP/2 (and HTTP/3) PINGs on connections idle this long (`None`: no keepalive).
@@ -156,7 +157,7 @@ impl Default for Config {
             max_head: 64 * 1024,
             max_body: Some(256 * 1024 * 1024),
             ok_status: None,
-            #[cfg(feature = "client-h2")]
+            #[cfg(feature = "h2")]
             h2: simoom_h2::Config::default(),
             #[cfg(feature = "client-h2")]
             h2_loops: 0,
@@ -241,7 +242,7 @@ pub(crate) struct Inner {
     tunnel_auth: Option<Arc<crate::auth::Auth>>,
     #[cfg(feature = "client-h3")]
     alt: Mutex<HashMap<String, AltSvc>>,
-    #[cfg_attr(not(any(feature = "client-h2", feature = "client-h3")), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "h2", feature = "client-h3")), allow(dead_code))]
     keepalive: Mutex<bool>,
     /// The loops of the HTTP/2 connections, started with the first one.
     #[cfg(feature = "client-h2")]
@@ -251,7 +252,7 @@ pub(crate) struct Inner {
 /// A connection just opened.
 enum Conn {
     H1(H1Conn),
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     Mux(Arc<Mux>),
 }
 
@@ -394,14 +395,14 @@ impl ClientBuilder {
         keepalive_timeout: Duration);
 
     /// HTTP/2 settings.
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     pub fn h2_config(mut self, c: simoom_h2::Config) -> Self {
         self.cfg.h2 = c;
         self
     }
 
     /// Event loops for HTTP/2 connections (0: `max_multiplexed_per_origin`, at most one per
-    /// CPU).
+    /// CPU). Feature `client-h2`.
     #[cfg(feature = "client-h2")]
     pub fn h2_loops(mut self, n: usize) -> Self {
         self.cfg.h2_loops = n;
@@ -600,7 +601,7 @@ impl RequestBuilder {
 }
 
 /// A response head without a body, for interceptors on WebSocket handshakes and calls.
-#[cfg_attr(not(any(feature = "client-ws", feature = "client-h2", feature = "client-h3")), allow(dead_code))]
+#[cfg_attr(not(any(feature = "client-ws", feature = "h2", feature = "client-h3")), allow(dead_code))]
 pub(crate) fn head_response(status: u16, version: crate::types::Version, reason: impl Into<std::borrow::Cow<'static, str>>, headers: Headers, url: &Url) -> Response {
     Response { status, version, reason: reason.into(), headers, url: Arc::new(url.clone()), body: ResponseBody::empty() }
 }
@@ -809,7 +810,7 @@ impl Client {
 
     /// Runs every interceptor's `on_response` (each one sees the response); the result is the
     /// first `Fail`, else `Retry` if any asked for it, else `Continue`.
-    #[cfg_attr(not(any(feature = "hooks", feature = "client-ws", feature = "client-h2", feature = "client-h3")), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "hooks", feature = "client-ws", feature = "h2", feature = "client-h3")), allow(dead_code))]
     pub(crate) fn run_on_response(&self, req: &Request, resp: &Response) -> crate::hooks::Action {
         use crate::hooks::Action;
         #[cfg(not(feature = "hooks"))]
@@ -826,7 +827,7 @@ impl Client {
     }
 
     /// Whether any interceptor is installed.
-    #[cfg_attr(not(any(feature = "hooks", feature = "client-ws", feature = "client-h2", feature = "client-h3")), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "hooks", feature = "client-ws", feature = "h2", feature = "client-h3")), allow(dead_code))]
     pub(crate) fn has_interceptors(&self) -> bool {
         #[cfg(not(feature = "hooks"))]
         return false;
@@ -841,7 +842,7 @@ impl Client {
         }
     }
 
-    #[cfg_attr(not(any(feature = "client-h2", feature = "client-h3", feature = "pipeline")), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "h2", feature = "client-h3", feature = "pipeline")), allow(dead_code))]
     pub(crate) fn headers_for(&self, req: &Request) -> Headers {
         let cfg = &self.inner.cfg;
         let mut h = req.headers.clone();
@@ -921,7 +922,7 @@ impl Client {
         let proxy: Option<ProxyAddr> = cfg.proxy.as_ref().and_then(|p| p.proxy_for(&req.url)).cloned();
         // HTTP/1.1 sends the client defaults beside the request's own fields (no copy);
         // HTTP/2 and HTTP/3 need one list, built only when they are used
-        #[cfg(feature = "client-h2")]
+        #[cfg(feature = "h2")]
         let mut mux_headers: Option<Headers> = None;
 
         #[cfg(feature = "client-h3")]
@@ -944,7 +945,7 @@ impl Client {
                 if cfg!(feature = "client-h3") { format!("HTTP/3 needs an https URL and no proxy: {}", req.url) } else { "HTTP/3 needs the `client-h3` feature of simoom-client".to_string() },
             ));
         }
-        if mode == HttpVersion::Http2 && !cfg!(feature = "client-h2") {
+        if mode == HttpVersion::Http2 && !cfg!(feature = "h2") {
             return Err(Error::new(ErrorKind::Unsupported, "HTTP/2 needs the `client-h2` feature of simoom-client"));
         }
         // fast path: this thread's cached idle connection to the origin, before any key is built
@@ -962,7 +963,7 @@ impl Client {
         let mut attempt = 0;
         loop {
             attempt += 1;
-            #[cfg(feature = "client-h2")]
+            #[cfg(feature = "h2")]
             if cfg.keep_alive {
                 if let Some(m) = self.inner.pool.mux(&key, true) {
                     if mux_headers.is_none() {
@@ -987,7 +988,7 @@ impl Client {
                 Some(c) => c,
                 None => match self.connect(&req.url, proxy.as_ref(), mode, deadline)? {
                     Conn::H1(c) => c,
-                    #[cfg(feature = "client-h2")]
+                    #[cfg(feature = "h2")]
                     Conn::Mux(m) => {
                         drop(slot);
                         if cfg.keep_alive {
@@ -1048,11 +1049,11 @@ impl Client {
                 let alpn = match mode {
                     HttpVersion::Http1 => 0,
                     HttpVersion::Http2 => 2,
-                    _ if cfg!(feature = "client-h2") => 1,
+                    _ if cfg!(feature = "h2") => 1,
                     _ => 0,
                 };
                 let d = self.tls_connect(tcp, url, alpn, deadline, &what)?;
-                #[cfg(feature = "client-h2")]
+                #[cfg(feature = "h2")]
                 if d.alpn() == Some(b"h2") {
                     return Ok(Conn::Mux(self.h2_mux(d, url)?));
                 }
@@ -1069,12 +1070,12 @@ impl Client {
         }
         let d = Duplex::plain(tcp);
         d.set_write_timeout(cfg.write_timeout);
-        #[cfg(feature = "client-h2")]
+        #[cfg(feature = "h2")]
         #[cfg(feature = "h2c-upgrade")]
         if mode == HttpVersion::Http2 && cfg.h2c_upgrade && !absolute {
             return self.h2c_upgrade(d, url, deadline, what);
         }
-        #[cfg(feature = "client-h2")]
+        #[cfg(feature = "h2")]
         if mode == HttpVersion::Http2 {
             return Ok(Conn::Mux(self.h2_mux(d, url)?));
         }
@@ -1144,11 +1145,20 @@ impl Client {
         Ok(Conn::Mux(m))
     }
 
+    /// An HTTP/2 connection on one of the client's event loops.
     #[cfg(feature = "client-h2")]
     fn h2_mux(&self, d: Duplex, url: &Url) -> Result<Arc<Mux>> {
         let rt = self.h2_loops()?;
         let m = crate::loopmux::LoopMux::adopt(&rt, d, url)?;
         Ok(Arc::new(Mux::Loop(m)))
+    }
+
+    /// An HTTP/2 connection driven by the requesting threads (`client-h2-engine` alone).
+    #[cfg(all(feature = "h2", not(feature = "client-h2")))]
+    fn h2_mux(&self, d: Duplex, url: &Url) -> Result<Arc<Mux>> {
+        let what = url.origin();
+        let proto = crate::h2::H2Proto::new(self.inner.cfg.h2.clone(), what.clone());
+        Ok(crate::mux::EngineMux::new(crate::mux::MuxIo::Tcp(d), Box::new(proto), what).into_arc())
     }
 
     /// The loops of this client's HTTP/2 connections, started on first use.
@@ -1277,7 +1287,7 @@ impl Client {
     }
 
     /// A request on a shared connection.
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     fn mux_request(&self, m: &Arc<Mux>, req: &mut Request, headers: &Headers, deadline: Option<Instant>) -> Result<Response> {
         let cfg = &self.inner.cfg;
         let url = &req.url;
@@ -1343,7 +1353,7 @@ impl Client {
     }
 
     /// Starts the keepalive thread once (HTTP/2 PINGs and idle eviction).
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     fn start_keepalive(&self) {
         let Some(interval) = self.inner.cfg.keepalive_interval else { return };
         let mut started = self.inner.keepalive.lock().unwrap_or_else(|p| p.into_inner());
@@ -1378,7 +1388,7 @@ impl Client {
 
     /// Opens a full-duplex call on HTTP/2 or HTTP/3: the request body and the response body
     /// stream at the same time (gRPC-style). HTTP/1.1 origins are refused.
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     pub fn call(&self, method: &str, url: &str, headers: &Headers) -> Result<crate::call::Call> {
         self.call_with_body(method, url, headers, &[], false)
     }
@@ -1387,7 +1397,7 @@ impl Client {
     /// also ends the request body (a unary gRPC call: head, message and end of stream in one
     /// packet instead of three writes). Bytes that flow control holds back are sent before this
     /// returns, waiting at most the write timeout.
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     pub fn call_with_body(&self, method: &str, url: &str, headers: &Headers, body: &[u8], end: bool) -> Result<crate::call::Call> {
         let url = Url::parse(url)?;
         let cfg = &self.inner.cfg;
@@ -1426,7 +1436,7 @@ impl Client {
     }
 
     /// A shared connection to `url` (opened if needed).
-    #[cfg(any(feature = "client-h2", feature = "client-h3"))]
+    #[cfg(any(feature = "h2", feature = "client-h3"))]
     pub(crate) fn mux_for(&self, url: &Url, mode: HttpVersion) -> Result<Arc<Mux>> {
         let cfg = &self.inner.cfg;
         #[cfg(feature = "client-h3")]
@@ -1435,7 +1445,7 @@ impl Client {
         }
         let proxy: Option<ProxyAddr> = cfg.proxy.as_ref().and_then(|p| p.proxy_for(url)).cloned();
         let key = OriginKey { secure: url.is_secure(), host: url.host.clone(), port: url.port, proxy: proxy.clone(), mode: mode as u8 };
-        #[cfg(feature = "client-h2")]
+        #[cfg(feature = "h2")]
         {
             if let Some(m) = self.inner.pool.mux(&key, true) {
                 return Ok(m);
@@ -1452,7 +1462,7 @@ impl Client {
                 }
             }
         }
-        #[cfg(not(feature = "client-h2"))]
+        #[cfg(not(feature = "h2"))]
         {
             let _ = key;
             Err(Error::new(ErrorKind::Unsupported, "duplex calls need HTTP/2 (`client-h2`) or HTTP/3"))
@@ -1532,7 +1542,7 @@ fn retryable_error(e: &Error) -> bool {
 }
 
 /// Errors after which a request on a shared connection was certainly not processed.
-#[cfg(any(feature = "client-h2", feature = "client-h3"))]
+#[cfg(any(feature = "h2", feature = "client-h3"))]
 fn retryable_mux(e: &Error) -> bool {
     // REFUSED_STREAM (HTTP/2) and H3_REQUEST_REJECTED; a connection going away before the
     // stream was opened.
@@ -1616,6 +1626,28 @@ mod tests {
         assert!(matches!(&*muxes[0].1, crate::mux::Mux::Loop(_)), "{:?}", muxes[0].1);
         assert_eq!(muxes[0].1.version(), crate::types::Version::Http2);
         assert_eq!(c.inner.loops.lock().unwrap().as_ref().map(|_| ()), Some(()));
+    }
+
+    // With `client-h2-engine` alone (small builds) HTTP/2 runs on the requesting threads: no
+    // event loops are compiled in or started.
+    #[cfg(all(feature = "h2", not(feature = "client-h2")))]
+    #[test]
+    fn http2_connections_run_on_the_calling_threads_with_the_engine_feature() {
+        let srv = simoom::Server::builder().listen("127.0.0.1:0").threads(1).service(|_req: &mut simoom::Request<'_>, reply: simoom::Reply<'_>| reply.body("ok")).start().unwrap();
+        let c = Client::builder().version(HttpVersion::Http2).build();
+        let u = format!("http://127.0.0.1:{}/", srv.local_addr().port());
+        assert_eq!(c.get(&u).send().unwrap().text().unwrap(), "ok");
+        let ts: Vec<_> = (0..8).map(|_| {
+            let (c, u) = (c.clone(), u.clone());
+            std::thread::spawn(move || c.get(&u).send().unwrap().text().unwrap())
+        }).collect();
+        for t in ts {
+            assert_eq!(t.join().unwrap(), "ok");
+        }
+        let muxes = c.inner.pool.all_mux();
+        assert_eq!(muxes.len(), 1);
+        assert!(matches!(&*muxes[0].1, crate::mux::Mux::Engine(_)), "{:?}", muxes[0].1);
+        assert_eq!(muxes[0].1.version(), crate::types::Version::Http2);
     }
 }
 

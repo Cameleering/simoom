@@ -222,7 +222,25 @@ connection (it is bound by the server's single connection) and 20-50% on four. R
 
 The extra is simoom-rt (the loop, its driver, timers, buffer pools) and the loop client; next to
 the server, which has simoom-rt already, it is about half. The old engine is compiled only with
-`client-h3` or `h2c-upgrade` (gating its `Mux` variant took 40 KB off the first measurement). This
-is the price of the facade in binary size; the owner decides whether it is worth 36% less CPU per
-request and up to 50% more throughput. If not, the engine path could come back behind a feature
-for size-sensitive builds.
+`client-h3` or `h2c-upgrade` (gating its `Mux` variant took 40 KB off the first measurement). 
+
+### The engine for small builds: `client-h2-engine`
+
+Features are additive, so the loops cannot be switched off by a feature; the engine is its own
+feature instead. `client-h2` (default) is HTTP/2 on the loops and pulls in `rt`;
+`client-h2-engine` is HTTP/2 on the requesting threads (`EngineMux` with `H2Proto`, the path before
+this work) without simoom-rt; both sit on an internal `h2` feature (the protocol, the pool, calls,
+WebSocket over HTTP/2). With both enabled the loops win. A small build:
+`default-features = false, features = ["client-h1", "client-h2-engine", "tls"]`. The HTTP/2,
+WebSocket, auth and cookie tests run on both paths; unit tests check which one the pool holds
+(`http2_connections_run_on_event_loops`, `..._on_the_calling_threads_with_the_engine_feature`).
+
+| build (`scripts/size-client.sh`, dist, x86-64) | bytes |
+|---|---:|
+| default (h1, `client-h2`, ws, tls, compress) | 1,425,288 |
+| small: h1, `client-h2-engine`, ws, tls, compress | 1,099,560 (the default before this work: 1,099,128) |
+| client-h1, `client-h2`, tls | 1,328,912 |
+| client-h1, `client-h2-engine`, tls | 1,004,112 (before: 1,003,600) |
+
+The engine costs what it did; the loops cost 325,728 bytes more and save 36% of the CPU per
+request (34.8 against 22.4 us on one connection).

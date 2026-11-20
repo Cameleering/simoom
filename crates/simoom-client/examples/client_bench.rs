@@ -78,12 +78,12 @@ fn main() {
         i += 2;
     }
     if rt {
-        #[cfg(all(feature = "rt", feature = "client-h2"))]
+        #[cfg(all(feature = "rt", feature = "h2"))]
         {
             rt_bench::run(&url, secs, post, conns, inflight, loops, facade.then_some(threads));
             return;
         }
-        #[cfg(not(all(feature = "rt", feature = "client-h2")))]
+        #[cfg(not(all(feature = "rt", feature = "h2")))]
         {
             let _ = (facade, inflight, loops);
             panic!("--rt needs the `rt` and `client-h2` features");
@@ -123,7 +123,7 @@ fn main() {
     report(&format!("simoom-client h2={h2}"), threads, n, el, cpu0);
 }
 
-#[cfg(all(feature = "rt", feature = "client-h2"))]
+#[cfg(all(feature = "rt", feature = "h2"))]
 mod rt_bench {
     use super::{cpu_ms, report};
     use simoom_client::rt::{RtClient, RtConfig, RtRequest};

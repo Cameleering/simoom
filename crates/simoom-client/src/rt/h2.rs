@@ -22,6 +22,10 @@
 //!   or above GOAWAY's last stream) are retried, at most three attempts, when their request can
 //!   be sent again.
 
+// The pinned connections and the deferred wakes serve the blocking client's facade
+// (`client-h2`); with `rt` and `client-h2-engine` only `RtClient` uses this module.
+#![cfg_attr(not(feature = "client-h2"), allow(dead_code))]
+
 use super::{deliver, Job, RtConfig, RtInner, RtRequest, RtResponse, CURRENT, OUTBOX};
 use crate::error::{Error, ErrorKind, Result, TimeoutKind};
 use crate::types::{Headers, Version};

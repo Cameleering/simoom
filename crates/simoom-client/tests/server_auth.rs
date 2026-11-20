@@ -153,7 +153,7 @@ fn interceptors_on_websocket_handshakes() {
     assert_eq!(ws.recv().unwrap(), simoom_client::Message::Text("echo:hi".into()));
 }
 
-#[cfg(all(feature = "client-h2", feature = "cookies"))]
+#[cfg(all(feature = "h2", feature = "cookies"))]
 #[test]
 fn interceptors_on_calls() {
     let h = server(&[(DigestAlgorithm::Sha256, false)], Duration::from_secs(300));

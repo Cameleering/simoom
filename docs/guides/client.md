@@ -146,6 +146,7 @@ WebSocket over HTTP/2 or HTTP/3.
 | feature | adds |
 |---|---|
 | `client-h3` | HTTP/3 over QUIC |
+| `client-h2-engine` | HTTP/2 for small builds, with `default-features = false`: the connections are driven by the calling threads instead of event loops, so simoom-rt is left out (about 320 KB smaller, about 50% more CPU per HTTP/2 request) |
 | `tls-extra` | P-384 and Ed25519 certificates, ChaCha20-Poly1305 |
 | `cookies` | a cookie jar |
 | `auth`, `auth-digest`, `auth-ntlm` | Basic and Bearer challenges, Digest, NTLMv2 |

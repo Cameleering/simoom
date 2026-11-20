@@ -48,9 +48,9 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "tls")]
 use simoom_tls::{ClientConfig, ClientConnection};
 
-#[cfg(feature = "client-h2")]
+#[cfg(feature = "h2")]
 pub(crate) mod h2;
-#[cfg(feature = "client-h2")]
+#[cfg(feature = "h2")]
 pub use h2::{CallHandler, CallOptions, RtCall};
 
 /// Settings of an [`RtClient`].
@@ -87,11 +87,11 @@ pub struct RtConfig {
     /// Worker threads for HTTP/3, streamed HTTP/1.1 request bodies and streamed responses.
     pub workers: usize,
     /// HTTP/2 settings and limits (stream windows, keepalive PINGs, header list size).
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     pub h2: simoom_h2::Config,
     /// Multiplexed HTTP/2 connections each loop keeps per origin. Requests beyond what they
     /// can carry (the peer's concurrent-stream limit) wait in a queue on the loop.
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     pub h2_connections: usize,
 }
 
@@ -126,9 +126,9 @@ impl RtConfig {
             proxy: None,
             version: crate::types::HttpVersion::Auto,
             workers: 4,
-            #[cfg(feature = "client-h2")]
+            #[cfg(feature = "h2")]
             h2: simoom_h2::Config::default(),
-            #[cfg(feature = "client-h2")]
+            #[cfg(feature = "h2")]
             h2_connections: 1,
         }
     }
@@ -198,17 +198,17 @@ struct Job {
     retried: bool,
     redirects: usize,
     /// Run as an HTTP/2 stream on the loop.
-    #[cfg_attr(not(feature = "client-h2"), allow(dead_code))]
+    #[cfg_attr(not(feature = "h2"), allow(dead_code))]
     h2: bool,
     /// HTTP/2: attempts after refused streams and lost connections.
-    #[cfg_attr(not(feature = "client-h2"), allow(dead_code))]
+    #[cfg_attr(not(feature = "h2"), allow(dead_code))]
     attempts: u8,
 }
 
 /// What the connector thread opens.
 enum ConnectReq {
     H1(Job, LoopHandle),
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     H2(h2::Connect),
 }
 
@@ -221,7 +221,7 @@ struct RtInner {
     #[cfg(feature = "tls")]
     tls: Arc<ClientConfig>,
     connector: Mutex<Option<Sender<ConnectReq>>>,
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     h2: Arc<h2::Settings>,
     /// The blocking engine for what does not run on the loops, and its workers.
     engine: crate::client::Client,
@@ -283,12 +283,12 @@ impl RtClient {
         let engine = b.build();
         static IDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let decoder = crate::decode::builtin();
-        #[cfg(feature = "client-h2")]
+        #[cfg(feature = "h2")]
         let h2 = Arc::new(h2::Settings::new(&cfg, decoder.clone()));
         RtClient {
             inner: Arc::new(RtInner {
                 id: IDS.fetch_add(1, Ordering::Relaxed),
-                #[cfg(feature = "client-h2")]
+                #[cfg(feature = "h2")]
                 h2,
                 loops,
                 next: AtomicUsize::new(0),
@@ -328,7 +328,7 @@ impl RtClient {
     /// other threads the client's loops take turns.
     pub fn send(&self, req: RtRequest, cb: impl FnOnce(Result<RtResponse>) + Send + 'static) {
         let v = self.inner.cfg.version;
-        if v == crate::types::HttpVersion::Http3 || (v == crate::types::HttpVersion::Http2 && !cfg!(feature = "client-h2")) {
+        if v == crate::types::HttpVersion::Http3 || (v == crate::types::HttpVersion::Http2 && !cfg!(feature = "h2")) {
             let mut r = crate::types::Request::new(&req.method, req.url);
             r.headers = req.headers;
             if !req.body.is_empty() {
@@ -361,7 +361,7 @@ impl RtClient {
     /// routes it when its callback returns, so its frames leave in the same write as the rest
     /// of the turn's output).
     fn run_here(&self, job: Job, lh: LoopHandle) {
-        #[cfg(feature = "client-h2")]
+        #[cfg(feature = "h2")]
         if job.h2 && CURRENT.with(|c| c.get()).is_some_and(|(id, _)| id == self.inner.id) {
             OUTBOX.with(|o| o.borrow_mut().push(job));
             return;
@@ -371,7 +371,7 @@ impl RtClient {
 
     /// Whether requests of this version run as HTTP/2 streams on the loops.
     fn h2_mode(&self, v: Option<crate::types::HttpVersion>) -> bool {
-        cfg!(feature = "client-h2") && v.unwrap_or(self.inner.cfg.version) == crate::types::HttpVersion::Http2
+        cfg!(feature = "h2") && v.unwrap_or(self.inner.cfg.version) == crate::types::HttpVersion::Http2
     }
 
     /// Sends a request on loop `index`.
@@ -460,7 +460,7 @@ impl RtClient {
     /// request body goes through the returned [`RtCall`] until [`RtCall::finish`], and the
     /// response reaches `handler` on the loop thread as it arrives. This is the streamed
     /// request body, the streamed response and the full-duplex call (gRPC streaming) in one.
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     pub fn call(&self, req: RtRequest, opts: CallOptions, handler: impl CallHandler) -> RtCall {
         let lh = LoopHandle::current().unwrap_or_else(|| self.inner.loops[self.pick()].clone());
         h2::start_call(&self.inner, lh, req, opts, Box::new(handler))
@@ -477,7 +477,7 @@ impl RtClient {
         mut on_data: impl FnMut(&[u8]) + Send + 'static,
         on_end: impl FnOnce(Result<Headers>) + Send + 'static,
     ) {
-        #[cfg(feature = "client-h2")]
+        #[cfg(feature = "h2")]
         if self.h2_mode(req.version) && matches!(req.body, crate::types::Body::Empty | crate::types::Body::Bytes(_)) {
             struct Adapter<H, D, E>(Option<H>, D, Option<E>);
             impl<H, D, E> CallHandler for Adapter<H, D, E>
@@ -527,7 +527,7 @@ impl RtClient {
     }
 
     /// HTTP/2 connections (open or opening) kept on loop `index` (for tests).
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     pub fn h2_connections_on(&self, index: usize) -> usize {
         let (tx, rx) = channel();
         let id = self.inner.id;
@@ -591,7 +591,7 @@ thread_local! {
     static CURRENT: std::cell::Cell<Option<(u64, usize)>> = const { std::cell::Cell::new(None) };
     /// HTTP/2 requests sent from such callbacks, routed by the connection when its callback
     /// returns ([`h2`]).
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     static OUTBOX: RefCell<Vec<Job>> = const { RefCell::new(Vec::new()) };
     /// Idle connections of this loop, by origin.
     static IDLE: RefCell<HashMap<String, Vec<(Rc<RefCell<Shared>>, ConnHandle)>>> = RefCell::new(HashMap::new());
@@ -603,7 +603,7 @@ fn key_of(inner: &RtInner, u: &Url) -> String {
 
 /// On a loop thread: an HTTP/2 stream or an HTTP/1.1 exchange.
 fn route(inner: &Arc<RtInner>, job: Job, lh: LoopHandle) {
-    #[cfg(feature = "client-h2")]
+    #[cfg(feature = "h2")]
     if job.h2 {
         let pos = inner.loops.iter().position(|l| l == &lh).unwrap_or(0);
         h2::dispatch(inner, h2::Work::Unary(job), &lh, pos);
@@ -643,7 +643,7 @@ fn connect(inner: &Arc<RtInner>, job: Job, lh: LoopHandle) {
 fn connect_failed(req: ConnectReq, e: Error) {
     match req {
         ConnectReq::H1(job, _) => (job.cb)(Err(e)),
-        #[cfg(feature = "client-h2")]
+        #[cfg(feature = "h2")]
         ConnectReq::H2(c) => c.failed(e),
     }
 }
@@ -662,7 +662,7 @@ fn connect_req(inner: &Arc<RtInner>, req: ConnectReq) {
                 };
                 match req {
                     ConnectReq::H1(job, lh) => open(&inner, job, lh),
-                    #[cfg(feature = "client-h2")]
+                    #[cfg(feature = "h2")]
                     ConnectReq::H2(c) => h2::open(&inner, c),
                 }
             }
