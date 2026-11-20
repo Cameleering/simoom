@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "simoom"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-compress",
  "simoom-h2",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "simoom-bench"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom",
  "simoom-h2",
@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "simoom-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom",
  "simoom-compress",
@@ -46,21 +46,21 @@ dependencies = [
 
 [[package]]
 name = "simoom-compress"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-sys",
 ]
 
 [[package]]
 name = "simoom-h2"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-hpack",
 ]
 
 [[package]]
 name = "simoom-h3"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-qpack",
  "simoom-quic",
@@ -69,11 +69,11 @@ dependencies = [
 
 [[package]]
 name = "simoom-hpack"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "simoom-http1"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-compress",
  "simoom-sys",
@@ -81,32 +81,32 @@ dependencies = [
 
 [[package]]
 name = "simoom-qpack"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-hpack",
 ]
 
 [[package]]
 name = "simoom-quic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-tls",
 ]
 
 [[package]]
 name = "simoom-rt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-sys",
 ]
 
 [[package]]
 name = "simoom-sys"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "simoom-tls"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "simoom-sys",
 ]

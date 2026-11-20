@@ -19,7 +19,7 @@
     "crates/simoom/examples/empty.rs"
   ],
   "rules": [
-    "Add simoom with `cargo add simoom` (Rust 1.89 or later). The defaults are HTTP/1.1, HTTP/2 and WebSocket; for HTTP/1.1 only use `simoom = { version = \"0.1\", default-features = false, features = [\"http1\"] }`.",
+    "Add simoom with `cargo add simoom` (Rust 1.89 or later). The defaults are HTTP/1.1, HTTP/2 and WebSocket; for HTTP/1.1 only use `simoom = { version = \"0.2\", default-features = false, features = [\"http1\"] }`.",
     "TLS needs the `tls` feature and HTTP/3 the `http3` feature; `full` turns on every protocol including both. compression, cors, auth, cookies, multipart, conditional, websocket-h2 and websocket-h3 are not in `full`; add them by name.",
     "There is no async, no `.await` and no tokio: simoom needs no async runtime and depends on nothing outside the Rust standard library. A service is a plain `Fn(&mut Request<'_>, Reply<'_>) -> Outcome + Send + Sync + 'static`.",
     "Start a server with `Server::builder().listen(\"0.0.0.0:8080\").service(svc).start()?`, which returns a `ServerHandle`; then `server.join()`, or `server.stop(grace)` followed by `join()`.",

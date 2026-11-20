@@ -134,7 +134,7 @@ the TLS listener, since TCP and UDP ports are separate.</p>
 HTTP/2 responses carry <code>alt-svc: h3=&quot;:&lt;port&gt;&quot;; ma=86400</code>, and the browser switches on a later
 request. If a load balancer forwards UDP on another public port, set the value yourself with
 <code>Builder::alt_svc</code>.</p>
-<p>What simoom&#x27;s QUIC does not do in 0.1.0:</p>
+<p>What simoom&#x27;s QUIC does not do in 0.2.0:</p>
 <ul>
 <li><strong>No 0-RTT</strong>, by design (early data can be replayed).</li>
 <li><strong>No ECN</strong> and <strong>no migration to a preferred address</strong>.</li>

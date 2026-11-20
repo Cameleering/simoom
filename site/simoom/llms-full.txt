@@ -91,14 +91,14 @@ or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-simoom = "0.1"
+simoom = "0.2"
 ```
 
 The default features give you HTTP/1.1, HTTP/2 without TLS (h2c), WebSocket and the io_uring back
 end. For TLS and HTTP/3 turn on `full`:
 
 ```toml
-simoom = { version = "0.1", features = ["full"] }
+simoom = { version = "0.2", features = ["full"] }
 ```
 
 There is nothing else to install: no C compiler, no OpenSSL headers, no async runtime.
@@ -573,7 +573,7 @@ this router (`0` never moves a route).
 
 ### Can I nest routers or mount one under a prefix?
 
-Not in 0.1.0. A `Router` matches the whole path, so put every route in one router, or write a
+Not in 0.2.0. A `Router` matches the whole path, so put every route in one router, or write a
 small service that looks at the first path segment and calls one of several routers. Since a
 `Router` is a `Service`, `router.call(req, reply)` works from inside your own service.
 
@@ -1234,7 +1234,7 @@ one server, rotation without restart, and client certificates.
 ## Turn it on
 
 ```toml
-simoom = { version = "0.1", features = ["tls"] }   # or "full" for TLS and HTTP/3
+simoom = { version = "0.2", features = ["tls"] }   # or "full" for TLS and HTTP/3
 ```
 
 `tls` supports X25519 and P-256 key exchange, ECDSA P-256 and RSA certificates, and AES-GCM.
@@ -1332,7 +1332,7 @@ the new configuration shares the old one's `ticketer`.
 ## Client certificates (mutual TLS)
 
 Require or request client certificates with `ServerConfig::client_auth`. The `ClientAuth` and
-`RootStore` types live in `simoom-tls`, which `simoom` doesn't re-export in 0.1.0, so add it
+`RootStore` types live in `simoom-tls`, which `simoom` doesn't re-export in 0.2.0, so add it
 next to simoom (`cargo add simoom-tls`, same version):
 
 ```rust
@@ -1475,7 +1475,7 @@ HTTP/2 responses carry `alt-svc: h3=":<port>"; ma=86400`, and the browser switch
 request. If a load balancer forwards UDP on another public port, set the value yourself with
 `Builder::alt_svc`.
 
-What simoom's QUIC does not do in 0.1.0:
+What simoom's QUIC does not do in 0.2.0:
 
 - **No 0-RTT**, by design (early data can be replayed).
 - **No ECN** and **no migration to a preferred address**.
@@ -1675,7 +1675,7 @@ fn report(server: &ServerHandle) {
 
 ## Honest limits
 
-- simoom 0.1.0 has **not had an independent security audit**. The testing listed in
+- simoom 0.2.0 has **not had an independent security audit**. The testing listed in
   [SECURITY.md](https://cameleer.ing/simoom/docs/SECURITY.html) (h2spec, the QUIC Interop Runner, HTTP Garden, testssl.sh,
   fuzzing) was done by the project.
 - simoom is an origin server. It is not a reverse proxy, a forward proxy or a static-file server,
@@ -1812,6 +1812,19 @@ fn run() -> std::io::Result<()> {
 }
 ```
 
+## Running other work on the server's loops
+
+`ServerHandle::loops()` returns the server's event loops (`simoom::LoopHandle`). Pass them to a
+loop-driven client, `simoom_client::rt::RtClient::new(server.loops(), cfg)`, and a request a
+handler sends upstream runs on the handler's own loop: `RtClient::send` called on a loop thread
+dispatches there (any simoom-rt loop, one of the client's or not), and its callback, which sends
+the deferred reply, runs there too. `LoopHandle::current()` names the loop the calling thread
+runs (`None` elsewhere); handles compare equal when they name the same loop.
+
+A message or task a loop queues for itself from one of its callbacks (`Responder::send` from a
+handler or callback on the connection's own loop, `LoopHandle::run` on the current loop) is
+delivered in the same loop turn, after the running callback: no wake-up and no extra turn.
+
 ## Low-level runtime settings
 
 `Builder::runtime` gives access to the runtime configuration: CPU pinning, buffer sizes, thread
@@ -1871,7 +1884,9 @@ Source: https://cameleer.ing/simoom/docs/guides/client.html
 
 The client is a separate crate, so a server that never makes requests doesn't compile it. Like
 the server, it uses only the standard library and needs no async runtime: requests run on the
-calling thread, and HTTP/2 and HTTP/3 connections are shared between threads.
+calling thread, and HTTP/2 and HTTP/3 connections are shared between threads. An HTTP/2
+connection is opened on the calling thread and then run by an event loop of the client (threads
+`simoom-client-h2-N`, `ClientBuilder::h2_loops`), which wakes each caller once its response is in.
 
 ```sh
 cargo add simoom-client
@@ -2011,12 +2026,13 @@ WebSocket over HTTP/2 or HTTP/3.
 | feature | adds |
 |---|---|
 | `client-h3` | HTTP/3 over QUIC |
+| `client-h2-engine` | HTTP/2 for small builds, with `default-features = false`: the connections are driven by the calling threads instead of event loops, so simoom-rt is left out (about 320 KB smaller, about 50% more CPU per HTTP/2 request) |
 | `tls-extra` | P-384 and Ed25519 certificates, ChaCha20-Poly1305 |
 | `cookies` | a cookie jar |
 | `auth`, `auth-digest`, `auth-ntlm` | Basic and Bearer challenges, Digest, NTLMv2 |
 | `multipart`, `encode` | `multipart/form-data`, form bodies and compressed request bodies |
 | `retry`, `happy-eyeballs`, `dns-timeout`, `socks` | retries with backoff, address racing, a resolver timeout, SOCKS5 proxies |
-| `rt` | a non-blocking client on simoom's event loops, with completion callbacks |
+| `rt` | a non-blocking client on simoom's event loops, with completion callbacks: HTTP/1.1, and HTTP/2 with streamed bodies and full-duplex calls (`RtClient::call`) |
 | `full` | all of the above |
 
 HTTP proxies (`CONNECT` tunnels, the `*_PROXY` environment variables, `NO_PROXY`) work with the
@@ -2058,16 +2074,16 @@ simoom only compiles what you ask for. Each build has a size budget, and the pro
 
 ```toml
 # the default: HTTP/1.1, HTTP/2 (h2c), WebSocket, io_uring, watchdog, guards
-simoom = "0.1"
+simoom = "0.2"
 
 # everything: adds TLS 1.3, HTTP/3 over QUIC and the TLS client
-simoom = { version = "0.1", features = ["full"] }
+simoom = { version = "0.2", features = ["full"] }
 
 # the smallest: HTTP/1.1 only, for a device or a serverless function
-simoom = { version = "0.1", default-features = false, features = ["http1"] }
+simoom = { version = "0.2", default-features = false, features = ["http1"] }
 
 # HTTPS without HTTP/3
-simoom = { version = "0.1", features = ["tls"] }
+simoom = { version = "0.2", features = ["tls"] }
 ```
 
 ## Every feature
@@ -2186,7 +2202,7 @@ embedded runtime can be another.
 | `simoom-h3` | HTTP/3 (RFC 9114) on top of `simoom-quic` streams |
 | `simoom-compress` | DEFLATE, zlib, gzip, Brotli and zstd, streaming and bounded |
 
-Each is published on crates.io at 0.1.0 and has no dependencies outside simoom's own crates.
+Each is published on crates.io at 0.2.0 and has no dependencies outside simoom's own crates.
 The only `unsafe` code is in `simoom-sys`, which some of them use for SIMD scanning and hardware
 crypto.
 
@@ -2535,7 +2551,7 @@ a handler yourself ([Streaming](https://cameleer.ing/simoom/docs/guides/streamin
 
 ### Is simoom production ready?
 
-It is version 0.1.0, the first release, and the API can still change. It has been tested hard:
+It is version 0.2.0, and the API can still change. It has been tested hard:
 h2spec 146/146, the QUIC Interop Runner, HTTP Garden with no desyncs, testssl.sh, fuzzing of every
 parser, and a test suite of several hundred tests on Windows and Linux. It has not had an
 independent security audit, macOS and ARM are compile-checked only, and the benchmarks ran on

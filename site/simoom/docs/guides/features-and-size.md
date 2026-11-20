@@ -9,16 +9,16 @@ simoom only compiles what you ask for. Each build has a size budget, and the pro
 
 ```toml
 # the default: HTTP/1.1, HTTP/2 (h2c), WebSocket, io_uring, watchdog, guards
-simoom = "0.1"
+simoom = "0.2"
 
 # everything: adds TLS 1.3, HTTP/3 over QUIC and the TLS client
-simoom = { version = "0.1", features = ["full"] }
+simoom = { version = "0.2", features = ["full"] }
 
 # the smallest: HTTP/1.1 only, for a device or a serverless function
-simoom = { version = "0.1", default-features = false, features = ["http1"] }
+simoom = { version = "0.2", default-features = false, features = ["http1"] }
 
 # HTTPS without HTTP/3
-simoom = { version = "0.1", features = ["tls"] }
+simoom = { version = "0.2", features = ["tls"] }
 ```
 
 ## Every feature

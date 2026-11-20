@@ -85,16 +85,16 @@
 (<code>scripts/size.sh</code>) fails when a build goes over it.</p>
 <h2 id="common-choices">Common choices<a class="anchor" href="#common-choices" aria-hidden="true" tabindex="-1"></a></h2>
 <div class="codeblock"><div class="code-head"><span>toml</span><button class="copy" type="button">Copy</button></div><pre><code class="language-toml"># the default: HTTP/1.1, HTTP/2 (h2c), WebSocket, io_uring, watchdog, guards
-simoom = &quot;0.1&quot;
+simoom = &quot;0.2&quot;
 
 # everything: adds TLS 1.3, HTTP/3 over QUIC and the TLS client
-simoom = { version = &quot;0.1&quot;, features = [&quot;full&quot;] }
+simoom = { version = &quot;0.2&quot;, features = [&quot;full&quot;] }
 
 # the smallest: HTTP/1.1 only, for a device or a serverless function
-simoom = { version = &quot;0.1&quot;, default-features = false, features = [&quot;http1&quot;] }
+simoom = { version = &quot;0.2&quot;, default-features = false, features = [&quot;http1&quot;] }
 
 # HTTPS without HTTP/3
-simoom = { version = &quot;0.1&quot;, features = [&quot;tls&quot;] }</code></pre></div>
+simoom = { version = &quot;0.2&quot;, features = [&quot;tls&quot;] }</code></pre></div>
 <h2 id="every-feature">Every feature<a class="anchor" href="#every-feature" aria-hidden="true" tabindex="-1"></a></h2>
 <div class="table"><table>
 <thead><tr><th>feature</th><th>adds</th></tr></thead>

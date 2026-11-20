@@ -9,7 +9,7 @@ one server, rotation without restart, and client certificates.
 ## Turn it on
 
 ```toml
-simoom = { version = "0.1", features = ["tls"] }   # or "full" for TLS and HTTP/3
+simoom = { version = "0.2", features = ["tls"] }   # or "full" for TLS and HTTP/3
 ```
 
 `tls` supports X25519 and P-256 key exchange, ECDSA P-256 and RSA certificates, and AES-GCM.
@@ -107,7 +107,7 @@ the new configuration shares the old one's `ticketer`.
 ## Client certificates (mutual TLS)
 
 Require or request client certificates with `ServerConfig::client_auth`. The `ClientAuth` and
-`RootStore` types live in `simoom-tls`, which `simoom` doesn't re-export in 0.1.0, so add it
+`RootStore` types live in `simoom-tls`, which `simoom` doesn't re-export in 0.2.0, so add it
 next to simoom (`cargo add simoom-tls`, same version):
 
 ```rust

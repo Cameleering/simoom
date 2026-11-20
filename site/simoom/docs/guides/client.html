@@ -23,7 +23,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../../../assets/site.css">
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I make HTTP requests with simoom-client?", "description": "simoom-client is a blocking HTTP/1.1, HTTP/2 and HTTP/3 client with pooling, TLS, redirects and WebSocket; add it with cargo add simoom-client.", "url": "https://cameleer.ing/simoom/docs/guides/client.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@id": "https://cameleer.ing/#org"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-12"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I make HTTP requests with simoom-client?", "description": "simoom-client is a blocking HTTP/1.1, HTTP/2 and HTTP/3 client with pooling, TLS, redirects and WebSocket; add it with cargo add simoom-client.", "url": "https://cameleer.ing/simoom/docs/guides/client.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@id": "https://cameleer.ing/#org"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-20"}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Cameleering", "item": "https://cameleer.ing/"}, {"@type": "ListItem", "position": 2, "name": "simoom", "item": "https://cameleer.ing/simoom/"}, {"@type": "ListItem", "position": 3, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 4, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 5, "name": "How do I make HTTP requests with simoom-client?", "item": "https://cameleer.ing/simoom/docs/guides/client.html"}]}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Is it async?", "acceptedAnswer": {"@type": "Answer", "text": "No. send() blocks the calling thread until the response head arrives; the body is read as you ask for it. Inside a simoom service, call the client from the offload pool or your own thread, never on the loop thread (Slow work)."}}, {"@type": "Question", "name": "Can I turn off certificate verification?", "acceptedAnswer": {"@type": "Answer", "text": "No. Add the server's certificate or its CA to a RootStore instead."}}, {"@type": "Question", "name": "Does it follow redirects?", "acceptedAnswer": {"@type": "Answer", "text": "Only when you turn it on with follow_redirects(true), on the builder or per request."}}, {"@type": "Question", "name": "How does it compare with reqwest or ureq?", "acceptedAnswer": {"@type": "Answer", "text": "It is closest to ureq in shape (blocking, no runtime) and adds HTTP/2, HTTP/3 and WebSocket with no dependencies outside the standard library. reqwest has a much larger ecosystem and an async API."}}]}</script>
 </head>
@@ -83,7 +83,9 @@
 </blockquote>
 <p>The client is a separate crate, so a server that never makes requests doesn&#x27;t compile it. Like
 the server, it uses only the standard library and needs no async runtime: requests run on the
-calling thread, and HTTP/2 and HTTP/3 connections are shared between threads.</p>
+calling thread, and HTTP/2 and HTTP/3 connections are shared between threads. An HTTP/2
+connection is opened on the calling thread and then run by an event loop of the client (threads
+<code>simoom-client-h2-N</code>, <code>ClientBuilder::h2_loops</code>), which wakes each caller once its response is in.</p>
 <div class="codeblock"><div class="code-head"><span>sh</span><button class="copy" type="button">Copy</button></div><pre><code class="language-sh">cargo add simoom-client</code></pre></div>
 <p>The default features give HTTP/1.1, HTTP/2, WebSocket, TLS and gzip/deflate decoding. HTTP/3 needs
 <code>client-h3</code>; <code>full</code> turns on everything (cookies, auth, multipart, retries, proxies over SOCKS...).</p>
@@ -194,12 +196,13 @@ WebSocket over HTTP/2 or HTTP/3.</p>
 <thead><tr><th>feature</th><th>adds</th></tr></thead>
 <tbody>
 <tr><td><code>client-h3</code></td><td>HTTP/3 over QUIC</td></tr>
+<tr><td><code>client-h2-engine</code></td><td>HTTP/2 for small builds, with <code>default-features = false</code>: the connections are driven by the calling threads instead of event loops, so simoom-rt is left out (about 320 KB smaller, about 50% more CPU per HTTP/2 request)</td></tr>
 <tr><td><code>tls-extra</code></td><td>P-384 and Ed25519 certificates, ChaCha20-Poly1305</td></tr>
 <tr><td><code>cookies</code></td><td>a cookie jar</td></tr>
 <tr><td><code>auth</code>, <code>auth-digest</code>, <code>auth-ntlm</code></td><td>Basic and Bearer challenges, Digest, NTLMv2</td></tr>
 <tr><td><code>multipart</code>, <code>encode</code></td><td><code>multipart/form-data</code>, form bodies and compressed request bodies</td></tr>
 <tr><td><code>retry</code>, <code>happy-eyeballs</code>, <code>dns-timeout</code>, <code>socks</code></td><td>retries with backoff, address racing, a resolver timeout, SOCKS5 proxies</td></tr>
-<tr><td><code>rt</code></td><td>a non-blocking client on simoom&#x27;s event loops, with completion callbacks</td></tr>
+<tr><td><code>rt</code></td><td>a non-blocking client on simoom&#x27;s event loops, with completion callbacks: HTTP/1.1, and HTTP/2 with streamed bodies and full-duplex calls (<code>RtClient::call</code>)</td></tr>
 <tr><td><code>full</code></td><td>all of the above</td></tr>
 </tbody></table></div>
 <p>HTTP proxies (<code>CONNECT</code> tunnels, the <code>*_PROXY</code> environment variables, <code>NO_PROXY</code>) work with the

@@ -16,7 +16,7 @@ documentation = "https://docs.rs/simoom-tls"
 workspace = true
 
 [dependencies]
-simoom-sys = { path = "../simoom-sys", version = "0.1.0" }
+simoom-sys = { path = "../simoom-sys", version = "0.2.0" }
 
 [features]
 default = ["client", "rsa", "p384", "ed25519", "chacha20"]

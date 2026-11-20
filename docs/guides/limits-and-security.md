@@ -126,7 +126,7 @@ fn report(server: &ServerHandle) {
 
 ## Honest limits
 
-- simoom 0.1.0 has **not had an independent security audit**. The testing listed in
+- simoom 0.2.0 has **not had an independent security audit**. The testing listed in
   [SECURITY.md](../SECURITY.md) (h2spec, the QUIC Interop Runner, HTTP Garden, testssl.sh,
   fuzzing) was done by the project.
 - simoom is an origin server. It is not a reverse proxy, a forward proxy or a static-file server,

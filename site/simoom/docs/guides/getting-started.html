@@ -89,10 +89,10 @@ need before writing more: what a service is and where it runs.</p>
 <div class="codeblock"><div class="code-head"><span>sh</span><button class="copy" type="button">Copy</button></div><pre><code class="language-sh">cargo add simoom</code></pre></div>
 <p>or in <code>Cargo.toml</code>:</p>
 <div class="codeblock"><div class="code-head"><span>toml</span><button class="copy" type="button">Copy</button></div><pre><code class="language-toml">[dependencies]
-simoom = &quot;0.1&quot;</code></pre></div>
+simoom = &quot;0.2&quot;</code></pre></div>
 <p>The default features give you HTTP/1.1, HTTP/2 without TLS (h2c), WebSocket and the io_uring back
 end. For TLS and HTTP/3 turn on <code>full</code>:</p>
-<div class="codeblock"><div class="code-head"><span>toml</span><button class="copy" type="button">Copy</button></div><pre><code class="language-toml">simoom = { version = &quot;0.1&quot;, features = [&quot;full&quot;] }</code></pre></div>
+<div class="codeblock"><div class="code-head"><span>toml</span><button class="copy" type="button">Copy</button></div><pre><code class="language-toml">simoom = { version = &quot;0.2&quot;, features = [&quot;full&quot;] }</code></pre></div>
 <p>There is nothing else to install: no C compiler, no OpenSSL headers, no async runtime.
 <a href="features-and-size.html">Features and size</a> lists every feature.</p>
 <h2 id="a-first-server">A first server<a class="anchor" href="#a-first-server" aria-hidden="true" tabindex="-1"></a></h2>

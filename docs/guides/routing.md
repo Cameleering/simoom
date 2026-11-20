@@ -98,7 +98,7 @@ this router (`0` never moves a route).
 
 ### Can I nest routers or mount one under a prefix?
 
-Not in 0.1.0. A `Router` matches the whole path, so put every route in one router, or write a
+Not in 0.2.0. A `Router` matches the whole path, so put every route in one router, or write a
 small service that looks at the first path segment and calls one of several routers. Since a
 `Router` is a `Service`, `router.call(req, reply)` works from inside your own service.
 

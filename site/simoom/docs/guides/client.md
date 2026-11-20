@@ -4,7 +4,9 @@
 
 The client is a separate crate, so a server that never makes requests doesn't compile it. Like
 the server, it uses only the standard library and needs no async runtime: requests run on the
-calling thread, and HTTP/2 and HTTP/3 connections are shared between threads.
+calling thread, and HTTP/2 and HTTP/3 connections are shared between threads. An HTTP/2
+connection is opened on the calling thread and then run by an event loop of the client (threads
+`simoom-client-h2-N`, `ClientBuilder::h2_loops`), which wakes each caller once its response is in.
 
 ```sh
 cargo add simoom-client
@@ -144,12 +146,13 @@ WebSocket over HTTP/2 or HTTP/3.
 | feature | adds |
 |---|---|
 | `client-h3` | HTTP/3 over QUIC |
+| `client-h2-engine` | HTTP/2 for small builds, with `default-features = false`: the connections are driven by the calling threads instead of event loops, so simoom-rt is left out (about 320 KB smaller, about 50% more CPU per HTTP/2 request) |
 | `tls-extra` | P-384 and Ed25519 certificates, ChaCha20-Poly1305 |
 | `cookies` | a cookie jar |
 | `auth`, `auth-digest`, `auth-ntlm` | Basic and Bearer challenges, Digest, NTLMv2 |
 | `multipart`, `encode` | `multipart/form-data`, form bodies and compressed request bodies |
 | `retry`, `happy-eyeballs`, `dns-timeout`, `socks` | retries with backoff, address racing, a resolver timeout, SOCKS5 proxies |
-| `rt` | a non-blocking client on simoom's event loops, with completion callbacks |
+| `rt` | a non-blocking client on simoom's event loops, with completion callbacks: HTTP/1.1, and HTTP/2 with streamed bodies and full-duplex calls (`RtClient::call`) |
 | `full` | all of the above |
 
 HTTP proxies (`CONNECT` tunnels, the `*_PROXY` environment variables, `NO_PROXY`) work with the

@@ -23,7 +23,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../../../assets/site.css">
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I set simoom's threads, I/O back end and shutdown?", "description": "simoom runs one event loop per CPU core by default; set threads, pick a Backend, and stop with stop(grace) followed by join().", "url": "https://cameleer.ing/simoom/docs/guides/runtime.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@id": "https://cameleer.ing/#org"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-13"}</script>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "TechArticle", "headline": "How do I set simoom's threads, I/O back end and shutdown?", "description": "simoom runs one event loop per CPU core by default; set threads, pick a Backend, and stop with stop(grace) followed by join().", "url": "https://cameleer.ing/simoom/docs/guides/runtime.html", "inLanguage": "en", "author": {"@type": "Person", "name": "Sudheesh PM"}, "publisher": {"@id": "https://cameleer.ing/#org"}, "isPartOf": {"@type": "WebSite", "name": "simoom documentation", "url": "https://cameleer.ing/simoom/docs/"}, "about": {"@type": "SoftwareSourceCode", "name": "simoom", "codeRepository": "https://github.com/Cameleering/simoom", "programmingLanguage": "Rust"}, "image": "https://cameleer.ing/simoom/og.jpg", "dateModified": "2026-11-19"}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Cameleering", "item": "https://cameleer.ing/"}, {"@type": "ListItem", "position": 2, "name": "simoom", "item": "https://cameleer.ing/simoom/"}, {"@type": "ListItem", "position": 3, "name": "Docs", "item": "https://cameleer.ing/simoom/docs/"}, {"@type": "ListItem", "position": 4, "name": "Guides", "item": "https://cameleer.ing/simoom/docs/guides/"}, {"@type": "ListItem", "position": 5, "name": "How do I set simoom's threads, I/O back end and shutdown?", "item": "https://cameleer.ing/simoom/docs/guides/runtime.html"}]}</script>
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Should I use io_uring?", "acceptedAnswer": {"@type": "Answer", "text": "Try both on your workload. Auto uses epoll on Linux; in the committed runs epoll led at 64 and 256 connections and io_uring at 1,024. Setting SIMOOM_BACKEND=io_uring lets you compare without a rebuild."}}, {"@type": "Question", "name": "How many threads should I use?", "acceptedAnswer": {"@type": "Answer", "text": "The default, one per CPU, suits a server. On a shared machine, or inside an app that does other work, set fewer. A serverless function serving one request at a time effectively uses one loop, since the others start only under load."}}, {"@type": "Question", "name": "Does simoom run on macOS and ARM?", "acceptedAnswer": {"@type": "Answer", "text": "macOS (kqueue) and the ARM code paths compile and are checked in the build, but the test suite runs on Windows and Linux and the benchmarks ran on x86-64. Reports from macOS and ARM are welcome."}}, {"@type": "Question", "name": "Can I run two servers in one process?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Each Server::builder().start() creates its own loops, listeners and connections."}}]}</script>
 </head>
@@ -161,6 +161,16 @@ fn run() -&gt; std::io::Result&lt;()&gt; {
     server.join();
     Ok(())
 }</code></pre></div>
+<h2 id="running-other-work-on-the-servers-loops">Running other work on the server&#x27;s loops<a class="anchor" href="#running-other-work-on-the-servers-loops" aria-hidden="true" tabindex="-1"></a></h2>
+<p><code>ServerHandle::loops()</code> returns the server&#x27;s event loops (<code>simoom::LoopHandle</code>). Pass them to a
+loop-driven client, <code>simoom_client::rt::RtClient::new(server.loops(), cfg)</code>, and a request a
+handler sends upstream runs on the handler&#x27;s own loop: <code>RtClient::send</code> called on a loop thread
+dispatches there (any simoom-rt loop, one of the client&#x27;s or not), and its callback, which sends
+the deferred reply, runs there too. <code>LoopHandle::current()</code> names the loop the calling thread
+runs (<code>None</code> elsewhere); handles compare equal when they name the same loop.</p>
+<p>A message or task a loop queues for itself from one of its callbacks (<code>Responder::send</code> from a
+handler or callback on the connection&#x27;s own loop, <code>LoopHandle::run</code> on the current loop) is
+delivered in the same loop turn, after the running callback: no wake-up and no extra turn.</p>
 <h2 id="low-level-runtime-settings">Low-level runtime settings<a class="anchor" href="#low-level-runtime-settings" aria-hidden="true" tabindex="-1"></a></h2>
 <p><code>Builder::runtime</code> gives access to the runtime configuration: CPU pinning, buffer sizes, thread
 names, stack size, lingering close and more. Most programs never need it:</p>
@@ -196,7 +206,7 @@ runs on Windows and Linux and the benchmarks ran on x86-64. Reports from macOS a
     </article>
     <p class="edit"><a href="https://github.com/Cameleering/simoom/blob/main/docs/guides/runtime.md">Edit this page on GitHub</a></p>
   </main>
-  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#threads-and-back-ends">Threads and back ends</a></li><li><a href="#graceful-stop">Graceful stop</a></li><li><a href="#existing-listeners">Existing listeners</a></li><li><a href="#low-level-runtime-settings">Low-level runtime settings</a></li><li><a href="#counters">Counters</a></li><li><a href="#common-questions">Common questions</a></li></ul></nav>
+  <nav class="toc" aria-label="On this page"><p>On this page</p><ul><li><a href="#threads-and-back-ends">Threads and back ends</a></li><li><a href="#graceful-stop">Graceful stop</a></li><li><a href="#existing-listeners">Existing listeners</a></li><li><a href="#running-other-work-on-the-servers-loops">Running other work on the server&#x27;s loops</a></li><li><a href="#low-level-runtime-settings">Low-level runtime settings</a></li><li><a href="#counters">Counters</a></li><li><a href="#common-questions">Common questions</a></li></ul></nav>
 </div>
 <footer>
   <div class="wrap">

@@ -69,7 +69,7 @@ HTTP/2 responses carry `alt-svc: h3=":<port>"; ma=86400`, and the browser switch
 request. If a load balancer forwards UDP on another public port, set the value yourself with
 `Builder::alt_svc`.
 
-What simoom's QUIC does not do in 0.1.0:
+What simoom's QUIC does not do in 0.2.0:
 
 - **No 0-RTT**, by design (early data can be replayed).
 - **No ECN** and **no migration to a preferred address**.
