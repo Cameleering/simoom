@@ -45,6 +45,12 @@ fn url(h: &ServerHandle, p: &str) -> String {
     format!("http://127.0.0.1:{}{p}", h.local_addrs()[0].port())
 }
 
+/// Sleeps until just after the system clock starts a new second.
+fn at_second_start() {
+    let sub = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_millis() as u64;
+    std::thread::sleep(Duration::from_millis(1000 - sub + 10));
+}
+
 fn digest_client() -> Client {
     Client::builder().auth(Arc::new(Auth::new().digest("Mufasa", "Circle of Life").digest_auth_int(false))).build()
 }
@@ -73,6 +79,9 @@ fn digest_every_algorithm_with_rspauth() {
 fn digest_stale_nextnonce_auth_int_and_refusals() {
     let h = server(&[(DigestAlgorithm::Sha256, false)], Duration::from_secs(2));
     let c = digest_client();
+    // nonces carry their issue time in whole seconds: started late in a second, the 1.1 s
+    // below would count as 2 s (stale, no nextnonce). Start just after a second begins.
+    at_second_start();
     assert_eq!(c.get(&url(&h, "/1")).send().unwrap().text().unwrap(), "hello Mufasa 0");
     // past half the nonce's life the server offers nextnonce; the client switches to it
     std::thread::sleep(Duration::from_millis(1100));
